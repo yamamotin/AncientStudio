@@ -1,3 +1,77 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%; /* Absolute black */
+    --foreground: 210 40% 98%;
+
+    --card: 216 12% 8%; /* Slightly off-black for cards */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 0 0% 0%; /* Absolute black */
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 198, 100%, 50%; /* Electric Blue */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 270, 100%, 50%; /* Neon Purple */
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 198, 100%, 50%; /* Electric Blue for focus rings */
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Keeping the same variables for dark mode as it's the default */
+    --background: 0 0% 0%; /* Absolute black */
+    --foreground: 210 40% 98%;
+
+    --card: 216 12% 8%; /* Slightly off-black for cards */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 0 0% 0%; /* Absolute black */
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 198, 100%, 50%; /* Electric Blue */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 270, 100%, 50%; /* Neon Purple */
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 198, 100%, 50%; /* Electric Blue for focus rings */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

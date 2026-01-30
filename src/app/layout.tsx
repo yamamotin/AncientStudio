@@ -1,22 +1,24 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import './globals.css';
-
-const inter = Inter({ subsets: ['latin'] });
+import type { Metadata } from "next";
+import { GeistSans } from "geist/font/sans";
+import "./globals.css";
+import { cn } from "@/lib/utils"; // We will create this utility file next
 
 export const metadata: Metadata = {
-  title: 'Portfolio | Senior Developer',
-  description: 'Portfolio de um desenvolvedor senior com foco em engenharia e tecnologia.',
+  title: "AncientStudio | Portfolio",
+  description: "Portfolio de um desenvolvedor senior com foco em engenharia e tecnologia.",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="pt-BR">
-      <body className={`${inter.className} bg-gray-900 text-gray-100`}>
+    <html lang="pt-BR" className="dark">
+      <body className={cn(
+        "min-h-screen bg-background font-sans antialiased",
+        GeistSans.className
+      )}>
         {children}
       </body>
     </html>
