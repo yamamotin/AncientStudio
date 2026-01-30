@@ -40,7 +40,6 @@ export function Header() {
           <span className="text-white text-xl font-bold">AncientStudio</span>
         </Link>
 
-        {/* Hamburger Menu Button (visible only on small screens) */}
         <button
           className="sm:hidden text-white focus:outline-none"
           onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -55,7 +54,6 @@ export function Header() {
           </svg>
         </button>
 
-        {/* Navigation */}
         <nav className="hidden sm:flex space-x-8">
           <Link href="#servicos-e-expertise" className="text-gray-400 hover:text-white transition-colors duration-200 text-lg">
             Serviços
@@ -71,7 +69,6 @@ export function Header() {
           </Link>
         </nav>
 
-        {/* Action Button */}
         <Link href="#contato" className="px-6 py-2 rounded-full text-white font-semibold text-lg
           bg-gradient-to-r from-cyan-400 to-purple-500
           shadow-lg hover:shadow-cyan-400/30 transition-all duration-300 hidden sm:block">
@@ -80,14 +77,13 @@ export function Header() {
       </div>
     </motion.header>
 
-    {/* Mobile Menu (visible only on small screens when open) */}
     <motion.div
       initial={{ opacity: 0, y: -20 }}
       animate={isMenuOpen ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }}
       transition={{ type: 'spring', stiffness: 120, damping: 20 }}
       className={cn(
         'fixed top-16 left-0 right-0 z-40 bg-black/80 backdrop-blur-md border-b border-neutral-800 sm:hidden',
-        isMenuOpen ? 'block' : 'hidden' // Ensure it's hidden when not open
+        isMenuOpen ? 'block' : 'hidden'
       )}
     >
       <nav className="flex flex-col items-center py-4 space-y-4">
@@ -110,5 +106,5 @@ export function Header() {
         </Link>
       </nav>
     </motion.div>
-  );
+  )
 }

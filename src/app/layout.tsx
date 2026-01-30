@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
-import "./globals.css";
+import "../public/globals.css";
 import { cn } from "@/lib/utils"; // We will create this utility file next
 
 export const metadata: Metadata = {
