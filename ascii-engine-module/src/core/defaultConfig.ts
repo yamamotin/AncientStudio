@@ -9,19 +9,30 @@ export const DEFAULT_PALETTE: ThemePalette = {
   cursorLight: '#7AD7F0',
 };
 
+/**
+ * Calibrated high-contrast ASCII luminance ramp inspired by classic dense Tux art
+ * (` .,:;i1tfLCG08@` / ` .,:;+itIYVRBM#@`), transitioning cleanly from sparse dots/colons
+ * on bright surfaces to dense structural stems (`M`, `W`, `#`, `@`) on dark contours.
+ */
+export const DEFAULT_ASCII_RAMP = ' .,:;+itIYVRBM#@';
+
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
+  mode: 'playground',
+  mapId: 'sanctuary-isle',
+  enableKeyboard: false,
+  pauseOffscreen: true,
   palette: { ...DEFAULT_PALETTE },
   cellSize: 10,
   autoResponsiveDensity: true,
-  characterRamp: ' .,:;-=+*#%@',
+  characterRamp: DEFAULT_ASCII_RAMP,
   structuralChars: '/\\|_[]',
-  edgeStrength: 0.85,
+  edgeStrength: 0.88,
   bloomIntensity: 1.2,
   bloomThreshold: 0.38,
   dofFocusDistance: 14.3,
-  dofStrength: 0.68,
+  dofStrength: 0.65,
   parallaxIntensity: 1.45,
-  parallaxSmoothing: 4.8,
+  parallaxSmoothing: 5.2,
   cursorLightIntensity: 1.35,
   enableShadows: true,
   maxFps: 60,

@@ -72,5 +72,6 @@
   "console.enter": "[ enter ]",
   "console.githubTodo": "[ TODO ] GitHub username not provided by Eron yet.",
   "console.githubDetail": "Send the username to add the real link here.",
-  "footer.note": "// no trackers · no analytics · self-hosted fonts"
+  "footer.note": "// no trackers · no analytics · self-hosted fonts",
+  "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections"
 }

@@ -72,5 +72,6 @@
   "console.enter": "[ enter ]",
   "console.githubTodo": "[ TODO ] GitHub ainda não informado pelo Eron.",
   "console.githubDetail": "Envie o username para adicionar o link real aqui.",
-  "footer.note": "// no trackers · no analytics · self-hosted fonts"
+  "footer.note": "// no trackers · no analytics · self-hosted fonts",
+  "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água"
 }

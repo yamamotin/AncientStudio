@@ -1,5 +1,5 @@
 /**
- * Strict TypeScript definitions for the decoupled 3D ASCII Scene Engine.
+ * Strict TypeScript definitions for the modular 3D ASCII Playground & Mascot Engine.
  * Framework-agnostic contract designed for seamless integration into any DOM host.
  */
 
@@ -12,8 +12,15 @@ export type DeepPartial<T> = {
 };
 
 /**
- * Art-directed color palette inspired by modern 3D ASCII RPGs (ASCII Realms / Asciify).
- * Hex strings (e.g. '#050508') or CSS color strings supported by THREE.Color.
+ * Engine scene mode:
+ * - 'playground': Small interactive ASCII Realms island playground (terrain, reflective lake, bridge, shrine, beacons, avatar)
+ * - 'mascot': Dedicated high-contrast 3D Linux Tux stage for [ STACK // NEOFETCH ]
+ */
+export type SceneMode = 'playground' | 'mascot';
+
+/**
+ * Art-directed color palette inspired by modern 3D ASCII RPGs (ASCII Realms / Asciify)
+ * and classic high-contrast terminal Tux silhouettes.
  */
 export interface ThemePalette {
   /** Deep night backdrop & shadow floor (default: '#050508') */
@@ -31,7 +38,7 @@ export interface ThemePalette {
 }
 
 /**
- * Runtime performance & telemetry snapshot emitted via `onFrame` / `onFpsUpdate`.
+ * Runtime performance & telemetry snapshot emitted via `onFpsUpdate`.
  */
 export interface EngineStats {
   /** Smoothed frames per second */
@@ -47,23 +54,19 @@ export interface EngineStats {
   drawCalls: number;
   /** Active triangles rendered in the 3D scene pass */
   triangles: number;
+  /** Active ECS entity count */
+  entityCount?: number;
 }
 
 /**
  * Optional lifecycle & telemetry hooks for external host applications.
  */
 export interface LifecycleCallbacks {
-  /** Fired once WebGL context, shaders, and ResizeObserver are mounted */
   onMount?: () => void;
-  /** Fired when rendering loop is paused */
   onPause?: () => void;
-  /** Fired when rendering loop resumes */
   onResume?: () => void;
-  /** Fired after all GPU buffers, listeners, and DOM elements are disposed */
   onDestroy?: () => void;
-  /** Fired periodically (~2x/sec) with smoothed FPS & grid metrics */
   onFpsUpdate?: (stats: EngineStats) => void;
-  /** Fired if WebGL initialization or context loss occurs */
   onError?: (error: Error) => void;
 }
 
@@ -71,6 +74,14 @@ export interface LifecycleCallbacks {
  * Complete engine configuration contract.
  */
 export interface EngineConfig {
+  /** Scene mode ('playground' for ASCII Realms island, 'mascot' for Neofetch 3D Tux) */
+  mode: SceneMode;
+  /** Map identifier loaded by MapLoader when mode === 'playground' (default: 'sanctuary-isle') */
+  mapId: string;
+  /** Enable keyboard input capture ONLY when explicitly opted-in / focused (default: false) */
+  enableKeyboard: boolean;
+  /** Automatically pause when container leaves viewport via IntersectionObserver (default: true) */
+  pauseOffscreen: boolean;
   /** Color theme palette */
   palette: ThemePalette;
   /** Base ASCII glyph cell size in CSS pixels on desktop (default: 10, range: 6..24) */
@@ -93,9 +104,9 @@ export interface EngineConfig {
   dofStrength: number;
   /** Camera parallax amplitude in world units in response to container-relative pointer (default: 1.35) */
   parallaxIntensity: number;
-  /** Smooth damping factor for camera & cursor light lerp (default: 4.5) */
+  /** Smooth damping factor for camera & rotation lerp (default: 4.8) */
   parallaxSmoothing: number;
-  /** Intensity of the secondary interactive cursor-following light (default: 1.4) */
+  /** Intensity of the secondary interactive cursor-following light (default: 1.35) */
   cursorLightIntensity: number;
   /** Enable real-time shadow mapping from focal torch/moon lights (default: true) */
   enableShadows: boolean;

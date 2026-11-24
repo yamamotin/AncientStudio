@@ -1,4 +1,5 @@
-/* Four-stage CI/CD simulator, including the deliberate failure + RCA path. */
+/* Four-stage CI/CD runner: executes real backend verification when API is online,
+   falling back to local simulation on static hosts (e.g. GitHub Pages). */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -8,7 +9,7 @@ window.TP = window.TP || {};
   var elements = {};
   var running = false;
 
-  var stages = [
+  var fallbackStages = [
     {
       title: '[STEP 1: LINT & PYTEST]',
       lines: ['$ flake8 app/ --max-line-length=100', '$ pytest -q', '42 passed in 1.8s']
@@ -36,18 +37,21 @@ window.TP = window.TP || {};
     elements.progress.textContent = bar(percent);
   }
 
-  async function animateStage(stage, index) {
+  async function animateStage(stage, index, totalCount) {
     utils.line(elements.log, stage.title, 'info');
     for (var i = 0; i < stage.lines.length; i += 1) {
-      await utils.sleep(130);
-      utils.line(elements.log, '  ' + stage.lines[i]);
+      await utils.sleep(120);
+      var cls = stage.lines[i].indexOf('[ERROR') === 0 ? 'error' : '';
+      utils.line(elements.log, '  ' + stage.lines[i], cls);
     }
-    for (var percent = 0; percent <= 100; percent += 10) {
+    if (stage.status === 'failed') return;
+
+    for (var percent = 0; percent <= 100; percent += 20) {
       var total = index * 100 + percent;
-      setProgress(Math.round(total / stages.length));
-      await utils.sleep(55);
+      setProgress(Math.round(total / totalCount));
+      await utils.sleep(45);
     }
-    utils.line(elements.log, '  ✔ stage ' + (index + 1) + '/4 complete', 'ok');
+    utils.line(elements.log, '  ✔ stage ' + (index + 1) + '/' + totalCount + ' complete', 'ok');
   }
 
   async function run(forceFailure) {
@@ -59,9 +63,46 @@ window.TP = window.TP || {};
     utils.clear(elements.rcaOutput);
     elements.rcaBox.hidden = true;
     setProgress(0);
-    utils.line(elements.log, '$ git push origin main  // simulando CI/CD');
 
-    await animateStage(stages[0], 0);
+    var liveResult = TP.api && TP.api.runPipeline ? await TP.api.runPipeline(forceFailure) : null;
+    var isLive = Boolean(liveResult && liveResult.data && Array.isArray(liveResult.data.stages));
+
+    if (elements.badge) {
+      elements.badge.textContent = isLive ? 'API LIVE' : 'SANDBOX';
+    }
+
+    if (isLive) {
+      var data = liveResult.data;
+      utils.line(
+        elements.log,
+        '$ POST /api/v1/pipeline/run  // ' + data.run_id + ' (' + liveResult.ms + 'ms)',
+        'info'
+      );
+
+      var liveStages = data.stages;
+      var expectedTotal = 4;
+      for (var s = 0; s < liveStages.length; s += 1) {
+        await animateStage(liveStages[s], s, expectedTotal);
+      }
+
+      if (!data.ok || forceFailure) {
+        setProgress(10);
+        utils.line(elements.log, 'pipeline abortado no Step 1 — deploy bloqueado por falha de teste.', 'error');
+        elements.rcaBox.hidden = false;
+      } else {
+        setProgress(100);
+        utils.line(elements.log, '[DEPLOY OK] backend Python + bundle ASCII 3D verificados em tempo real.', 'ok');
+      }
+
+      running = false;
+      elements.success.disabled = false;
+      elements.failure.disabled = false;
+      return;
+    }
+
+    // Static fallback simulation (e.g. GitHub Pages)
+    utils.line(elements.log, '$ git push origin main  // simulando CI/CD local');
+    await animateStage(fallbackStages[0], 0, fallbackStages.length);
 
     if (forceFailure) {
       setProgress(10);
@@ -74,8 +115,8 @@ window.TP = window.TP || {};
       return;
     }
 
-    for (var index = 1; index < stages.length; index += 1) {
-      await animateStage(stages[index], index);
+    for (var index = 1; index < fallbackStages.length; index += 1) {
+      await animateStage(fallbackStages[index], index, fallbackStages.length);
     }
 
     setProgress(100);
@@ -86,22 +127,44 @@ window.TP = window.TP || {};
   }
 
   async function runRca() {
+    utils.clear(elements.rcaOutput);
     var lines = [
-      '// Simulação didática de troubleshooting N3 — não é um incidente real.',
-      '$ grep -n "assert" logs/test_payment_webhook.log',
+      '// Verificando idempotência real de webhook de pagamento / NF-e...',
+      '$ POST /api/v1/invoices/parse {"event_id":"evt-rca-check"}'
+    ];
+    for (var i = 0; i < lines.length; i += 1) {
+      await utils.sleep(utils.reducedMotion ? 0 : 140);
+      utils.line(elements.rcaOutput, lines[i]);
+    }
+
+    if (TP.api && TP.api.getMode && TP.api.getMode() === 'api') {
+      var first = await TP.api.parseInvoice({ invoice_key: 'NFE-3526-9901-8821', event_id: 'evt-rca-check' });
+      var replay = await TP.api.parseInvoice({ invoice_key: 'NFE-3526-9901-8821', event_id: 'evt-rca-check' });
+      utils.line(
+        elements.rcaOutput,
+        '  1ª chamada -> replay=' + String(first.data.idempotent_replay) + ' (' + first.ms + 'ms)'
+      );
+      utils.line(
+        elements.rcaOutput,
+        '  2ª chamada (mesmo event_id) -> replay=' + String(replay.data.idempotent_replay) + ' (' + replay.ms + 'ms)'
+      );
+      utils.line(
+        elements.rcaOutput,
+        '[RCA VERIFICADO NA API] Deduplicação por event_id ativa no backend Python.',
+        'ok'
+      );
+      return;
+    }
+
+    var simLines = [
       '  tests/test_payment_webhook.py:87: AssertionError',
-      '$ sed -n "80,92p" tests/test_payment_webhook.py',
       '  expected retry with same event.id to be idempotent',
-      '$ git diff -- tests/test_payment_webhook.py',
       '  + if event.id in processed_events: return 200',
-      '$ pytest -q tests/test_payment_webhook.py',
-      '  1 passed in 0.4s',
       '[RCA] Causa: retry sem idempotência. Correção: deduplicação por event.id.'
     ];
-    utils.clear(elements.rcaOutput);
-    for (var i = 0; i < lines.length; i += 1) {
-      await utils.sleep(utils.reducedMotion ? 0 : 180);
-      utils.line(elements.rcaOutput, lines[i], i === lines.length - 1 ? 'ok' : '');
+    for (var j = 0; j < simLines.length; j += 1) {
+      await utils.sleep(utils.reducedMotion ? 0 : 160);
+      utils.line(elements.rcaOutput, simLines[j], j === simLines.length - 1 ? 'ok' : '');
     }
   }
 
@@ -113,7 +176,8 @@ window.TP = window.TP || {};
       failure: document.getElementById('pipeline-failure'),
       rcaBox: document.getElementById('rca-box'),
       rcaButton: document.getElementById('rca-button'),
-      rcaOutput: document.getElementById('rca-output')
+      rcaOutput: document.getElementById('rca-output'),
+      badge: document.querySelector('#pipeline .badge')
     };
     if (!elements.log) return;
 

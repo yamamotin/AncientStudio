@@ -227,7 +227,12 @@ window.TP = window.TP || {};
 
     var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'sanctuary' });
     var penguin = penguinStage
-      ? TP.scene.create(penguinStage, { preset: 'sanctuary', weather: false, config: { maxFps: 30, cellSize: 12 } })
+      ? TP.scene.create(penguinStage, {
+          preset: 'sanctuary',
+          weather: false,
+          mascotFocus: true,
+          config: { mode: 'mascot', maxFps: 36, cellSize: 8, dofStrength: 0.0, edgeStrength: 0.96 }
+        })
       : null;
 
     stage.addEventListener('tp:scene-mode', function (event) {
@@ -237,7 +242,7 @@ window.TP = window.TP || {};
         if (control) control.disabled = !engineReady;
       });
       if (help) {
-        help.textContent = engineReady ? t('scene.presetHelp') : t('scene.fallbackHelp');
+        help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
       }
     });
 
@@ -299,6 +304,7 @@ window.TP = window.TP || {};
 
     TP.pipeline.init();
     TP.console.init();
+    if (TP.neofetch) TP.neofetch.init();
     initTypewriter();
     initTabs();
     initScene();

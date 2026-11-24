@@ -17,19 +17,38 @@ Inspirado na direção de arte de *ASCII Realms* e *Asciify Engine*, o motor ren
 /ascii-engine-module
 ├── /src
 │   ├── /core/
-│   │   ├── AsciiEngineCore.ts     # Loop rAF + deltaTime seguro, ResizeObserver, FPS cap e dispose GPU
-│   │   └── defaultConfig.ts       # Paleta padrão e merge imutável de configuração
+│   │   ├── AsciiEngineCore.ts        # Orquestrador modular (modes: 'playground' | 'mascot')
+│   │   ├── EngineLoop.ts             # Agendador rAF determinístico com deltaTime clamp e telemetria FPS
+│   │   ├── LifecycleManager.ts       # ResizeObserver, IntersectionObserver, Visibility e .dispose() GPU
+│   │   └── defaultConfig.ts          # Paleta padrão, rampa de alto contraste e merge imutável
+│   ├── /ecs/
+│   │   ├── World.ts                  # Registro enxuto de entidades e componentes puros de dados
+│   │   └── SystemRunner.ts           # Pipeline ECS (Input, MovementRotation, Animation, RenderSync)
+│   ├── /world/
+│   │   ├── MapLoader.ts              # Definição declarativa leve do mapa ('sanctuary-isle')
+│   │   └── PlaygroundSceneBuilder.ts # Terreno 3D, lago com reflexos, ponte de pedras, ruínas e vegetação
+│   ├── /entities/
+│   │   ├── TuxEntityFactory.ts       # Pinguim Linux Tux 3D articulado de alto contraste ([ STACK // NEOFETCH ])
+│   │   └── PlaygroundEntityFactory.ts# Cristal rúnico, braseiros oscilantes e explorador Wayfarer
+│   ├── /animation/
+│   │   └── AnimationSystem.ts        # Respiração orgânica, flutuação e articulação de asas/membros
+│   ├── /vfx/
+│   │   └── VfxController.ts          # Parallax suave da câmera, lanterna do cursor e partículas
+│   ├── /input/
+│   │   ├── PointerInput.ts           # Rastreamento passivo ({ passive: true }) de mouse e toque
+│   │   └── KeyboardInput.ts          # Teclado opt-in isolado por foco para exploração futura sem roubar scroll
 │   ├── /scene/
-│   │   ├── AsciiWorldScene.ts     # Câmera com parallax (lerp), terreno low-poly, ruínas, tochas e partículas
-│   │   └── noise.ts               # Value Noise / fBm determinístico para relevo procedural
+│   │   └── noise.ts                  # Value Noise / fBm / Ridged fBm determinístico
 │   ├── /shaders/
-│   │   ├── AsciiPostProcessor.ts  # Pipeline multi-pass (Scene + Depth -> Bloom -> ASCII Composite)
-│   │   ├── asciiShader.ts         # Vertex & Fragment Shaders GLSL customizados
-│   │   └── glyphAtlas.ts          # Gerador de atlas tipográfico monoespaçado em Canvas 2D
+│   │   ├── AsciiPostProcessor.ts     # Pipeline multi-pass (Scene + Depth -> Bloom -> ASCII Composite)
+│   │   ├── asciiShader.ts            # Vertex & Fragment Shaders GLSL customizados
+│   │   ├── waterShader.ts            # Shader GLSL de água reflexiva com ondulações e trilhas de luz
+│   │   └── glyphAtlas.ts             # Gerador de atlas tipográfico monoespaçado em Canvas 2D
 │   ├── /types/
-│   │   └── index.ts               # Interfaces estritas (EngineConfig, ThemePalette, LifecycleCallbacks)
-│   └── index.ts                   # Facade pública exportando `AsciiSceneEngine`
-├── /demo                          # Sandbox HTML/CSS/TS isolado com HUD sobreposta e controles de ciclo de vida
+│   │   └── index.ts                  # Interfaces estritas (EngineConfig, SceneMode, ThemePalette)
+│   └── index.ts                      # Facade pública exportando `AsciiSceneEngine` e módulos
+├── integration-entry.ts              # Entrypoint IIFE para o bundle `assets/js/ascii-engine.bundle.js`
+├── /demo                             # Sandbox HTML/CSS/TS isolado com HUD sobreposta e controles
 ├── package.json
 ├── tsconfig.json
 └── vite.config.ts

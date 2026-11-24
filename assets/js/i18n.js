@@ -80,7 +80,8 @@ window.TP = window.TP || {};
     "console.enter": "[ enter ]",
     "console.githubTodo": "[ TODO ] GitHub ainda não informado pelo Eron.",
     "console.githubDetail": "Envie o username para adicionar o link real aqui.",
-    "footer.note": "// no trackers · no analytics · self-hosted fonts"
+    "footer.note": "// no trackers · no analytics · self-hosted fonts",
+    "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água"
   },
   "en": {
     "skip": "Skip to content",
@@ -156,7 +157,8 @@ window.TP = window.TP || {};
     "console.enter": "[ enter ]",
     "console.githubTodo": "[ TODO ] GitHub username not provided by Eron yet.",
     "console.githubDetail": "Send the username to add the real link here.",
-    "footer.note": "// no trackers · no analytics · self-hosted fonts"
+    "footer.note": "// no trackers · no analytics · self-hosted fonts",
+    "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections"
   }
 };
   var STORAGE_KEY = 'ancientstudio.lang';
