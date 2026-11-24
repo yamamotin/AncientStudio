@@ -23,6 +23,8 @@ window.TP = window.TP || {};
         '| skills     | stack técnica               |',
         '| experience | histórico profissional      |',
         '| projects   | projetos selecionados       |',
+        '| status     | healthcheck da API Python   |',
+        '| logs       | últimos eventos do backend  |',
         '| contact    | e-mail e LinkedIn           |',
         '| cv         | currículos disponíveis      |',
         '| clear      | limpar o console            |',
@@ -80,6 +82,39 @@ window.TP = window.TP || {};
         'PT (Dados/IA)   assets/cv/Currículo - Eron Yamamoto D. Justina Dados_IA_Pleno.pdf',
         'PT (geral)      assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf'
       ]);
+    },
+
+    status: function () {
+      if (!TP.api || !TP.api.health) {
+        print(['modo: simulação estática']);
+        return;
+      }
+      TP.api.health().then(function (res) {
+        var d = res.data || {};
+        print([
+          'source: ' + res.source.toUpperCase() + ' (' + res.ms + 'ms)',
+          'service: ' + (d.service || 'unknown') + ' · mode: ' + (d.mode || 'sim'),
+          'ascii_engine_bundle: ' + String(Boolean(d.ascii_engine_bundle)),
+          'requests_total: ' + (d.counters ? d.counters.total : 0)
+        ]);
+      });
+    },
+
+    logs: function () {
+      if (!TP.api || !TP.api.logs) {
+        print(['logs indisponíveis em modo estático']);
+        return;
+      }
+      TP.api.logs().then(function (res) {
+        var events = (res.data && res.data.events) || [];
+        if (!events.length) {
+          print(['nenhum evento registrado ainda']);
+          return;
+        }
+        events.slice(0, 6).forEach(function (ev) {
+          print([ev.ts + '  ' + ev.method + ' ' + ev.path + ' -> ' + ev.status + (ev.detail ? ' (' + ev.detail + ')' : '')]);
+        });
+      });
     }
   };
 

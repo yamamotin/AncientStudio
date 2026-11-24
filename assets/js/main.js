@@ -118,7 +118,12 @@ window.TP = window.TP || {};
 
     var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'sanctuary' });
     var penguin = penguinStage
-      ? TP.scene.create(penguinStage, { preset: 'sanctuary', weather: false, config: { maxFps: 30, cellSize: 12 } })
+      ? TP.scene.create(penguinStage, {
+          preset: 'sanctuary',
+          weather: false,
+          mascotFocus: true,
+          config: { maxFps: 30, cellSize: 9, dofStrength: 0.25 }
+        })
       : null;
 
     stage.addEventListener('tp:scene-mode', function (event) {
@@ -129,7 +134,7 @@ window.TP = window.TP || {};
       });
       if (help) {
         help.textContent = engineReady
-          ? '// mouse/toque rotacionam a câmera; scroll continua livre'
+          ? '// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água'
           : '// controles ativam quando o motor estiver disponível';
       }
     });
@@ -181,6 +186,7 @@ window.TP = window.TP || {};
 
     TP.pipeline.init();
     TP.console.init();
+    if (TP.neofetch) TP.neofetch.init();
     initTypewriter();
     initTabs();
     initScene();

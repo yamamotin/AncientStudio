@@ -149,9 +149,15 @@ window.TP = window.TP || {};
       }
     }
 
+    function getThreeScene() {
+      if (!state.instance) return null;
+      if (typeof state.instance.getScene === 'function') return state.instance.getScene();
+      return state.instance.core && state.instance.core.world && state.instance.core.world.scene;
+    }
+
     function createPenguin() {
       var THREE = state.engine && state.engine.THREE;
-      var scene = state.instance && state.instance.core && state.instance.core.world && state.instance.core.world.scene;
+      var scene = getThreeScene();
       if (!THREE || !scene || state.penguin) return;
 
       var group = new THREE.Group();
@@ -180,15 +186,33 @@ window.TP = window.TP || {};
       add(new THREE.BoxGeometry(0.3, 0.09, 0.42), beak, [-0.22, 0.08, 0.2]);
       add(new THREE.BoxGeometry(0.3, 0.09, 0.42), beak, [0.22, 0.08, 0.2]);
 
-      group.position.set(0, state.penguinBaseY, 3.2);
-      group.scale.setScalar(0.85);
+      if (options && options.mascotFocus) {
+        // Position close to camera (z=8.4 vs camera z=11.8) with dedicated spotlight so Tux fills #penguin-stage crisply
+        group.position.set(0, state.penguinBaseY, 8.4);
+        group.scale.setScalar(1.22);
+        var keyLight = new THREE.PointLight(0xffffff, 18, 9, 1.4);
+        keyLight.position.set(1.2, 2.6, 2.8);
+        group.add(keyLight);
+      } else {
+        group.position.set(0, state.penguinBaseY, 3.2);
+        group.scale.setScalar(0.85);
+      }
+
       scene.add(group);
       state.penguin = group;
     }
 
     function spinPenguin(now) {
       if (!state.penguin || state.paused) return;
-      state.penguin.rotation.y += 0.012;
+      var userRecent = state.penguinPointerActive && (Date.now() - state.lastUserPointer < 5000);
+      if (userRecent) {
+        // Smoothly rotate 3D penguin toward mouse cursor yaw & pitch!
+        state.penguin.rotation.y += (state.penguinTargetYaw - state.penguin.rotation.y) * 0.16;
+        state.penguin.rotation.x += (state.penguinTargetPitch - state.penguin.rotation.x) * 0.16;
+      } else {
+        state.penguin.rotation.y += 0.012;
+        state.penguin.rotation.x += (0 - state.penguin.rotation.x) * 0.1;
+      }
       state.penguin.position.y = state.penguinBaseY + Math.sin(now / 700) * 0.05;
       state.penguinRaf = window.requestAnimationFrame(spinPenguin);
     }
@@ -221,7 +245,7 @@ window.TP = window.TP || {};
       state.weatherMode = mode;
 
       var THREE = state.engine && state.engine.THREE;
-      var scene = state.instance && state.instance.core && state.instance.core.world && state.instance.core.world.scene;
+      var scene = getThreeScene();
       if (!THREE || !scene || !mode) return;
 
       var storm = mode === 'storm';
@@ -427,16 +451,47 @@ window.TP = window.TP || {};
         container.removeEventListener('pointermove', state.pointerListener);
         state.pointerListener = null;
       }
+      if (state.windowPointerListener) {
+        window.removeEventListener('pointermove', state.windowPointerListener);
+        state.windowPointerListener = null;
+      }
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
       state.instance = null;
       state.engine = null;
       emit('fallback');
     }
 
+    function updatePenguinFromPointer(event) {
+      var rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      var cx = rect.left + rect.width * 0.5;
+      var cy = rect.top + rect.height * 0.5;
+      var spanX = Math.max(rect.width * 0.65, window.innerWidth * 0.35, 160);
+      var spanY = Math.max(rect.height * 0.65, window.innerHeight * 0.35, 140);
+      var nx = Math.max(-1, Math.min(1, (event.clientX - cx) / spanX));
+      var ny = Math.max(-1, Math.min(1, (event.clientY - cy) / spanY));
+      state.penguinTargetYaw = nx * 1.35;
+      state.penguinTargetPitch = ny * 0.42;
+      state.penguinPointerActive = true;
+    }
+
     state.pointerListener = function (event) {
-      if (event.isTrusted) state.lastUserPointer = Date.now();
+      if (event.isTrusted) {
+        state.lastUserPointer = Date.now();
+        updatePenguinFromPointer(event);
+      }
     };
     container.addEventListener('pointermove', state.pointerListener, { passive: true });
+
+    if (options && options.mascotFocus) {
+      state.windowPointerListener = function (event) {
+        if (!event.isTrusted) return;
+        state.lastUserPointer = Date.now();
+        updatePenguinFromPointer(event);
+      };
+      window.addEventListener('pointermove', state.windowPointerListener, { passive: true });
+    }
+
     window.addEventListener('pagehide', destroy);
 
     return {

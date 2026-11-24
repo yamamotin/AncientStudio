@@ -36,3 +36,9 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
 test('playground presets cover day/night and weather lighting', () => {
   includesAll(adapter, ['sanctuary', 'dawn', 'day', 'storm', 'emerald']);
 });
+
+test('neofetch penguin tracks mouse pointer in both WebGL2 and fallback raycaster', () => {
+  const neofetch = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
+  includesAll(adapter, ['updatePenguinFromPointer', 'penguinTargetYaw', 'penguinTargetPitch', 'getScene']);
+  includesAll(neofetch, ['renderPenguinAscii', 'pointermove', 'targetYaw', 'targetPitch']);
+});

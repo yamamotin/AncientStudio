@@ -300,6 +300,14 @@ export class AsciiEngineCore {
     };
   }
 
+  public getScene(): THREE.Scene | null {
+    return this.world ? this.world.scene : null;
+  }
+
+  public getCamera(): THREE.PerspectiveCamera | null {
+    return this.world ? this.world.camera : null;
+  }
+
   private scheduleNextFrame(): void {
     if (this.rafId === null && this.state === 'running') {
       this.rafId = window.requestAnimationFrame(this.tickBound);

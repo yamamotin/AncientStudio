@@ -95,6 +95,21 @@ export class AsciiSceneEngine {
   public getStats(): EngineStats {
     return this.core.getStats();
   }
+
+  /**
+   * Exposes the underlying Three.js Scene so host adapters can attach custom 3D entities
+   * (e.g., interactive mascots or weather systems) without coupling to internal private fields.
+   */
+  public getScene(): import('three').Scene | null {
+    return this.core.getScene();
+  }
+
+  /**
+   * Exposes the underlying Three.js PerspectiveCamera for custom stage framing if needed.
+   */
+  public getCamera(): import('three').PerspectiveCamera | null {
+    return this.core.getCamera();
+  }
 }
 
 export default AsciiSceneEngine;
