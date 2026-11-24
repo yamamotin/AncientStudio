@@ -37,11 +37,20 @@ jobs:
         run: |
           test -f _site/index.html
           test -f _site/build.txt
+          test -f _site/assets/css/style.css
           test -f _site/assets/i18n/pt-br.json
           test -f _site/assets/i18n/en.json
           test -f _site/assets/js/api-client.js
+          test -f _site/assets/js/engine-adapter.js
+          test -f _site/assets/js/ascii-engine.bundle.js
+          test -f _site/assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf
+          test -f _site/assets/cv/Eron_Yamamoto_Resume_EN.pdf
+          test -f _site/assets/fonts/jetbrains-mono-latin-400-normal.woff2
           echo "Pages artifact root OK ($(find _site -type f | wc -l) files)"
 
+      # GITHUB_TOKEN cannot enable Pages by API: configure-pages `enablement`
+      # requires a PAT/app token. Settings → Pages → Source must already be
+      # "GitHub Actions". See docs/pages-recovery.md.
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
