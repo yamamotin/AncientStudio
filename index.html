@@ -153,6 +153,7 @@
       <div class="scene-controls">
         <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
         <button id="scene-cycle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ cycle: off ]</button>
+        <button id="scene-fullscreen" class="cmd-button cmd-button--small" type="button" aria-pressed="false" aria-label="Ampliar a seção ASCII REALMS" data-i18n="scene.fullscreen" data-i18n-attr="aria-label:scene.fullscreenAria">[ tela cheia ]</button>
         <label class="sr-only" for="scene-preset" data-i18n="scene.presetLabel">Preset da cena</label>
         <select id="scene-preset" class="select-control">
           <option value="sanctuary">sanctuary</option>
@@ -173,7 +174,7 @@
       </div>
       <div class="neofetch">
         <div>
-          <p class="sr-only" data-i18n="stack.penguinAria">Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.</p>
+          <p class="sr-only" data-i18n="stack.penguinAria">Pinguim ASCII 3D girando automaticamente, sem controle por mouse ou toque.</p>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback">
             <pre class="penguin-fallback" aria-hidden="true">     .--.
     |o_o |
@@ -183,7 +184,7 @@
  /'\_   _/`\
  \___)=(___/</pre>
           </div>
-          <p class="engine-hint muted" data-i18n="stack.penguinHint">// mouse ou toque para girar</p>
+          <p class="engine-hint muted" data-i18n="stack.penguinHint">// giro automático · mouse e toque não alteram a cena</p>
         </div>
         <dl class="specs">
           <div><dt data-i18n="specs.user">User</dt><dd>eron@production</dd></div>

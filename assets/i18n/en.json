@@ -52,8 +52,8 @@
   "scene.resume": "[ resume ]",
   "scene.cycleOff": "[ cycle: off ]",
   "scene.cycleOn": "[ cycle: on ]",
-  "stack.penguinAria": "Interactive 3D ASCII penguin. Drag with mouse or touch to rotate.",
-  "stack.penguinHint": "// mouse or touch to rotate",
+  "stack.penguinAria": "3D ASCII penguin rotating automatically, with no mouse or touch control.",
+  "stack.penguinHint": "// auto-rotate · mouse and touch do not affect the scene",
   "specs.user": "User",
   "specs.os": "OS",
   "specs.languages": "Languages",
@@ -73,5 +73,9 @@
   "console.githubTodo": "[ TODO ] GitHub username not provided by Eron yet.",
   "console.githubDetail": "Send the username to add the real link here.",
   "footer.note": "// no trackers · no analytics · self-hosted fonts",
-  "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections"
+  "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections",
+  "scene.fullscreen": "[ fullscreen ]",
+  "scene.exitFullscreen": "[ exit fullscreen ]",
+  "scene.fullscreenAria": "Expand the ASCII REALMS section",
+  "scene.exitFullscreenAria": "Restore the ASCII REALMS section"
 }

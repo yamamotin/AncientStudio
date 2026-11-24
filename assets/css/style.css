@@ -442,6 +442,37 @@ h2 {
 
 .scene-help { font-size: var(--fs-tiny); }
 
+/* Fullscreen view for ASCII REALMS. Native :fullscreen and the CSS fallback
+   share the same layout; only classes change, so engine instances are never
+   recreated and the rest of the portfolio stays untouched. */
+#scene.is-scene-fullscreen,
+#scene:fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  margin: 0;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  overflow: auto;
+  background: var(--terminal-bg);
+  border-radius: 0;
+}
+
+body.scene-fullscreen-active { overflow: hidden; }
+
+#scene.is-scene-fullscreen .scene-stage,
+#scene:fullscreen .scene-stage {
+  min-height: calc(100vh - 11rem);
+  min-height: calc(100dvh - 11rem);
+}
+
+#scene.is-scene-fullscreen .panel-head,
+#scene:fullscreen .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--terminal-bg);
+}
+
 /* Neofetch */
 .neofetch {
   display: grid;

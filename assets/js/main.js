@@ -6,6 +6,7 @@ window.TP = window.TP || {};
 
   var utils = TP.utils;
   var t = function (key, vars) { return TP.i18n ? TP.i18n.t(key, vars) : key; };
+  var sceneFullscreenState = { active: false, syncLabels: null };
 
   /* The full line is present in the HTML for a fast, stable LCP; the terminal
      caret animation in CSS keeps the typewriter feel without delaying paint. */
@@ -287,6 +288,65 @@ window.TP = window.TP || {};
     });
   }
 
+  /* Fullscreen is a viewport/layout change only: no scene instance is created,
+     destroyed or remounted. The existing adapter ResizeObserver handles the new
+     container size, so the rest of the portfolio keeps running. */
+  function initSceneFullscreen() {
+    var section = document.getElementById('scene');
+    var button = document.getElementById('scene-fullscreen');
+    if (!section || !button) return;
+
+    var nativeFullscreen = typeof section.requestFullscreen === 'function' &&
+      typeof document.exitFullscreen === 'function';
+
+    function syncLabels() {
+      var active = sceneFullscreenState.active;
+      button.textContent = t(active ? 'scene.exitFullscreen' : 'scene.fullscreen');
+      button.setAttribute('aria-label', t(active ? 'scene.exitFullscreenAria' : 'scene.fullscreenAria'));
+      button.setAttribute('aria-pressed', String(active));
+    }
+    sceneFullscreenState.syncLabels = syncLabels;
+
+    function setActive(active) {
+      var next = Boolean(active);
+      if (sceneFullscreenState.active === next && section.classList.contains('is-scene-fullscreen') === next) return;
+
+      sceneFullscreenState.active = next;
+      section.classList.toggle('is-scene-fullscreen', next);
+      section.setAttribute('data-fullscreen-view', next ? 'true' : 'false');
+      document.body.classList.toggle('scene-fullscreen-active', next);
+      syncLabels();
+
+      if (!next && document.fullscreenElement === section && typeof document.exitFullscreen === 'function') {
+        var exit = document.exitFullscreen();
+        if (exit && typeof exit.catch === 'function') exit.catch(function () {});
+      }
+    }
+
+    button.addEventListener('click', function () {
+      if (sceneFullscreenState.active) {
+        setActive(false);
+        return;
+      }
+      setActive(true);
+      if (nativeFullscreen) {
+        var request = section.requestFullscreen();
+        if (request && typeof request.catch === 'function') request.catch(function () {});
+      }
+    });
+
+    document.addEventListener('fullscreenchange', function () {
+      setActive(document.fullscreenElement === section);
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && sceneFullscreenState.active) setActive(false);
+    });
+
+    window.addEventListener('pagehide', function () { setActive(false); });
+    syncLabels();
+  }
+
   function applyDynamicLabels() {
     var toggle = document.getElementById('scene-toggle');
     var cycle = document.getElementById('scene-cycle');
@@ -296,6 +356,7 @@ window.TP = window.TP || {};
     if (cycle && cycle.getAttribute('aria-pressed') === 'true') cycle.textContent = t('scene.cycleOn');
     if (audio && audio.getAttribute('aria-pressed') === 'true') audio.textContent = t('console.audioOn');
     if (status && status.textContent === t('console.statusSim')) status.textContent = t('console.statusSim');
+    if (sceneFullscreenState.syncLabels) sceneFullscreenState.syncLabels();
   }
 
   function init() {
@@ -308,6 +369,7 @@ window.TP = window.TP || {};
     initTypewriter();
     initTabs();
     initScene();
+    initSceneFullscreen();
     initAudio();
     scheduleUiIntegrations();
     scheduleEngineAdapterLoad();
