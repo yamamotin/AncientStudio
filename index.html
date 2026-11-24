@@ -19,6 +19,7 @@
   <script src="assets/js/api.js" defer></script>
   <script src="assets/js/pipeline.js" defer></script>
   <script src="assets/js/console.js" defer></script>
+  <script src="assets/js/engine-adapter.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
@@ -28,11 +29,12 @@
   <header class="topbar">
     <div class="wrap topbar-inner">
       <a class="brand" href="#top">ERON@PRODUCTION:~$</a>
-      <div class="topbar-actions">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span id="connection-status" class="status-label">SIM MODE</span>
-        <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ audio: off ]</button>
-      </div>
+      <nav class="topnav" aria-label="Seções">
+        <a href="#pipeline">01 pipeline</a>
+        <a href="#playground">02 APIs</a>
+        <a href="#scene">03 scene</a>
+        <a href="#console">04 console</a>
+      </nav>
     </div>
   </header>
 
@@ -60,11 +62,10 @@
         <a class="cmd-button" href="https://linkedin.com/in/eron-yamamoto-della-justina-bb3384156" target="_blank" rel="noopener noreferrer">[ --linkedin ]</a>
         <a class="cmd-button" href="mailto:yamah1337@gmail.com">[ --contact ]</a>
       </div>
-      <p class="hero-note">// Tudo nesta página é uma simulação local. Nenhum deploy real é executado.</p>
     </section>
 
     <!-- 2. CI/CD PIPELINE SIMULATOR -->
-    <section class="panel" aria-labelledby="pipeline-title">
+    <section id="pipeline" class="panel" aria-labelledby="pipeline-title">
       <div class="panel-head">
         <h2 id="pipeline-title">[ LIVE CI/CD &amp; DOCKER PIPELINE SIMULATOR ]</h2>
         <span class="badge">SANDBOX</span>
@@ -86,7 +87,7 @@
     </section>
 
     <!-- 3. API PLAYGROUND / TABS -->
-    <section class="section" aria-labelledby="playground-title">
+    <section id="playground" class="section" aria-labelledby="playground-title">
       <h2 id="playground-title">[ API PLAYGROUND // PROJECTS ]</h2>
       <div class="ascii-tab-frame">
         <div class="ascii-rule" aria-hidden="true">+------------------+------------------+-------------------+</div>
@@ -124,7 +125,35 @@
       </div>
     </section>
 
-    <!-- 4. NEOFETCH STACK -->
+    <!-- 4. CENA ASCII 3D (adapter + fallback) -->
+    <section id="scene" class="section" aria-labelledby="scene-title">
+      <div class="panel-head">
+        <h2 id="scene-title">[ ASCII REALMS // SCENE ]</h2>
+        <span id="scene-mode" class="badge">FALLBACK</span>
+      </div>
+      <p class="muted">Palco reservado para o motor 3D. Enquanto ele não é carregado, um quadro estático substitui a cena.</p>
+      <p class="sr-only">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
+      <div id="ascii-scene" class="scene-stage" data-mode="fallback">
+        <pre class="scene-fallback" aria-hidden="true">   /\
+  /  \      [ SYS ]
+ /____\  _________
+|  ||  |/       \|
+|__||__|  DATA   |
+   ||   ---------</pre>
+      </div>
+      <div class="scene-controls">
+        <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
+        <label class="sr-only" for="scene-preset">Preset da cena</label>
+        <select id="scene-preset" class="select-control">
+          <option value="outpost">outpost</option>
+          <option value="terminal">terminal</option>
+          <option value="cargo">cargo</option>
+        </select>
+        <span class="scene-help muted">// controles ativam quando o motor estiver disponível</span>
+      </div>
+    </section>
+
+    <!-- 5. NEOFETCH STACK -->
     <section class="section" aria-labelledby="stack-title">
       <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
       <div class="neofetch">
@@ -149,9 +178,15 @@
       </div>
     </section>
 
-    <!-- 5. INTERACTIVE CONSOLE -->
-    <section class="section" aria-labelledby="console-title">
-      <h2 id="console-title">[ INTERACTIVE CONSOLE ]</h2>
+    <!-- 6. INTERACTIVE CONSOLE -->
+    <section id="console" class="section" aria-labelledby="console-title">
+      <div class="panel-head">
+        <h2 id="console-title">[ INTERACTIVE CONSOLE ]</h2>
+        <div class="console-meta">
+          <span id="connection-status" class="badge">SIM MODE</span>
+          <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ audio: off ]</button>
+        </div>
+      </div>
       <p id="console-hint" class="muted">Comandos: help, skills, experience, projects, contact, cv, clear.</p>
       <div id="console-output" class="terminal-log console-output" role="log" aria-live="polite" aria-relevant="additions">
         <p><span class="accent">ERON/OS</span> terminal ready. Digite <span class="accent">help</span> para começar.</p>
