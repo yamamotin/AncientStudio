@@ -1,9 +1,68 @@
-/* Integration-only entry: bundles the public engine facade plus THREE so the
-   portfolio can create custom entities (the 3D penguin) without touching core. */
-export {
+import * as THREE from 'three';
+import {
+  AnimationSystem,
   AsciiSceneEngine,
+  DEFAULT_ASCII_RAMP,
   DEFAULT_ENGINE_CONFIG,
   DEFAULT_PALETTE,
+  EngineLoop,
+  InputSystem,
+  KeyboardInput,
+  LifecycleManager,
+  MapLoader,
+  MovementRotationSystem,
+  PlaygroundEntityFactory,
+  PlaygroundSceneBuilder,
+  PointerInput,
+  RenderSyncSystem,
+  SystemRunner,
+  TuxEntityFactory,
+  VfxController,
+  World,
 } from './src/index';
 
-export * as THREE from 'three';
+export {
+  AnimationSystem,
+  AsciiSceneEngine,
+  DEFAULT_ASCII_RAMP,
+  DEFAULT_ENGINE_CONFIG,
+  DEFAULT_PALETTE,
+  EngineLoop,
+  InputSystem,
+  KeyboardInput,
+  LifecycleManager,
+  MapLoader,
+  MovementRotationSystem,
+  PlaygroundEntityFactory,
+  PlaygroundSceneBuilder,
+  PointerInput,
+  RenderSyncSystem,
+  SystemRunner,
+  TuxEntityFactory,
+  VfxController,
+  World,
+  THREE,
+};
+
+export default {
+  AnimationSystem,
+  AsciiSceneEngine,
+  DEFAULT_ASCII_RAMP,
+  DEFAULT_ENGINE_CONFIG,
+  DEFAULT_PALETTE,
+  EngineLoop,
+  InputSystem,
+  KeyboardInput,
+  LifecycleManager,
+  MapLoader,
+  MovementRotationSystem,
+  PlaygroundEntityFactory,
+  PlaygroundSceneBuilder,
+  PointerInput,
+  RenderSyncSystem,
+  SystemRunner,
+  TuxEntityFactory,
+  VfxController,
+  World,
+  THREE,
+};
