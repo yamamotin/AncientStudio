@@ -1,0 +1,10 @@
+.git
+.gitignore
+screenshots
+__pycache__
+*.pyc
+**/node_modules
+**/dist
+**/dist-demo
+**/.vite
+_site

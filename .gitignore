@@ -1,4 +1,4 @@
-# OS and editor noise
+# OS/editor noise
 .DS_Store
 *.swp
 *~
@@ -12,3 +12,9 @@ dist-demo/
 # Local test artifacts
 screenshots/
 
+# Python cache
+__pycache__/
+*.pyc
+
+# Pages staging directory (created by .github/workflows/pages.yml)
+_site/

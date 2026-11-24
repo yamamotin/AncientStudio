@@ -1,7 +1,11 @@
-# Eron Yamamoto D. Justina — portfolio
+# Eron Terminal — portfólio técnico interativo
 
-A single-page, dependency-free personal portfolio built with plain HTML and CSS. The only JavaScript is a small EN/PT language switch in `assets/js/main.js`. All colours, spacing and type sizes are CSS custom properties at the top of `assets/css/style.css`.
+Single-page, sem frameworks e sem build: HTML, CSS e um pouco de JavaScript puro com estética de terminal Linux. Inclui banner ASCII, simulador de CI/CD com um caminho de falha e RCA, playground de APIs em abas, bloco de stack estilo `neofetch` e console de comandos (`help`, `skills`, `experience`, `projects`, `contact`, `cv`, `clear`). Tudo o que aparece nos simuladores é fictício e sinalizado como tal.
 
-To edit the content, change the English and Portuguese blocks in `index.html` (both are kept in sync manually); to change the look, edit the variables at the top of `assets/css/style.css`. Paths are relative, so the page works when opened directly as `index.html` or from a web server.
+Para editar, altere `index.html` (textos e ordem das seções), `assets/css/style.css` (variáveis no topo) e os módulos em `assets/js/`. Os currículos enviados pelo Eron estão em `assets/cv/`, e o JetBrains Mono usado localmente está em `assets/fonts/` com sua licença OFL — nada é carregado de CDNs.
 
-To preview locally, run `python -m http.server 8000` in this folder and open `http://localhost:8000`, or simply open `index.html` in a browser. The live site is `https://yamamotin.github.io/AncientStudio/` (GitHub Pages, `main` branch, root directory).
+Abra `index.html` diretamente para ver a versão em modo sim. Para usar a API Python real (endpoints `/api/v1/health`, `/api/v1/extract` e `/api/v1/invoices/parse`), rode `python3 api/server.py` e abra `http://localhost:8000`; o status no topo muda para `API ONLINE`. Com Docker: `docker build -t eron-terminal . && docker run -p 8000:8000 eron-terminal`.
+
+Publicação: `.github/workflows/pages.yml` publica em `https://yamamotin.github.io/AncientStudio/` o mesmo commit de `main` que a Vercel usa. Para o workflow funcionar, em GitHub → Settings → Pages → Build and deployment → Source escolha **GitHub Actions**. A Vercel usa o `Dockerfile` (projeto `ancientstudio`, `https://ancientstudio.vercel.app/`); em modo sim as duas hospedagens entregam exatamente os mesmos arquivos relativos.
+
+O palco `[ ASCII REALMS // SCENE ]` usa `assets/js/engine-adapter.js` como wrapper. Ele expõe `mount`, `setPaused`, `setPreset`, `destroy`, observa redimensionamento com `ResizeObserver` e mantém um fallback estático até o motor 3D da branch paralela ser carregado. O contrato esperado está em `docs/engine-integration.md`; nenhum arquivo do núcleo do motor é alterado aqui.
