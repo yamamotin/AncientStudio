@@ -3,5 +3,12 @@
 *.swp
 *~
 
+# Node / Build artifacts
+node_modules/
+dist/
+dist-demo/
+.vite/
+
 # Local test artifacts
 screenshots/
+

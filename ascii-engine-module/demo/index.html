@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AsciiSceneEngine — Sandbox de Validação &amp; Acoplamento</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="demo-layout">
+    <!-- Hero Container Host (Simulating Portfolio Hero Section with ResizeObserver support) -->
+    <section id="engine-stage" class="engine-stage" aria-label="3D ASCII Sanctuary Hero Stage">
+      <!-- HTML HUD Overlay (z-index: 10) proving click-through & pointer coexistence -->
+      <div class="hud-overlay">
+        <header class="hud-top">
+          <div class="brand-badge">
+            <span class="status-dot" id="status-dot"></span>
+            <span class="brand-title">ASCII_SCENE_ENGINE // v1.0</span>
+            <span class="state-pill" id="engine-state-pill">IDLE</span>
+          </div>
+
+          <div class="telemetry-bar" id="telemetry-bar">
+            <span>FPS: <strong id="stat-fps">--</strong></span>
+            <span>CELL: <strong id="stat-cell">--</strong>px</span>
+            <span>GRID: <strong id="stat-grid">--</strong></span>
+          </div>
+        </header>
+
+        <div class="hud-hero-card">
+          <p class="eyebrow">DECOUPLED WEBGL2 + GLSL POST-PROCESSING MODULE</p>
+          <h1>Ancient Sanctuary in Real-Time 3D ASCII</h1>
+          <p class="lead">
+            Mova o cursor para testar o parallax suave com <em>lerp</em> e a lanterna interativa.
+            Clique nos botões sobrepostos desta camada HUD HTML para validar <code>z-index</code>,
+            propagação de eventos e ciclo de vida sem vazamentos de GPU.
+          </p>
+          <div class="hud-cta-row">
+            <button type="button" id="btn-hud-ping" class="btn btn-amber">
+              Interagir com HUD (<span id="hud-click-count">0</span> cliques)
+            </button>
+            <button type="button" id="btn-toggle-resize" class="btn btn-ghost">
+              Testar ResizeObserver (Container)
+            </button>
+          </div>
+        </div>
+
+        <footer class="hud-bottom-hint">
+          <span>Luz Quente <code>#FF8C24</code> · Ambiente <code>#2E6F95</code> · Vegetação <code>#3A7D5C</code> · Fundo <code>#050508</code></span>
+        </footer>
+      </div>
+    </section>
+
+    <!-- External Control Panel simulating Host Portfolio API Calls -->
+    <aside class="control-panel" aria-label="Engine Lifecycle and Config Controls">
+      <div class="panel-section">
+        <h2>1. Ciclo de Vida (API Pública)</h2>
+        <p class="panel-hint">Valide <code>mount()</code>, <code>pause()</code>, <code>resume()</code> e <code>destroy()</code>.</p>
+        <div class="btn-grid">
+          <button type="button" id="btn-pause" class="btn btn-secondary">Pause()</button>
+          <button type="button" id="btn-resume" class="btn btn-secondary" disabled>Resume()</button>
+          <button type="button" id="btn-destroy" class="btn btn-danger">Destroy()</button>
+          <button type="button" id="btn-remount" class="btn btn-primary" disabled>New + Mount()</button>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h2>2. <code>updateConfig()</code> em Tempo Real</h2>
+        <label class="control-field">
+          <span>Densidade (Cell Size): <strong id="val-cell">10px</strong></span>
+          <input type="range" id="input-cell" min="6" max="20" step="1" value="10" />
+        </label>
+
+        <label class="control-field">
+          <span>Intensidade de Bloom (Tochas): <strong id="val-bloom">1.20</strong></span>
+          <input type="range" id="input-bloom" min="0" max="2.5" step="0.05" value="1.2" />
+        </label>
+
+        <label class="control-field">
+          <span>Arestas Estruturais (<code>/ \ | _ [ ]</code>): <strong id="val-edge">0.85</strong></span>
+          <input type="range" id="input-edge" min="0" max="1.4" step="0.05" value="0.85" />
+        </label>
+
+        <label class="control-field">
+          <span>Profundidade de Campo (DoF): <strong id="val-dof">0.68</strong></span>
+          <input type="range" id="input-dof" min="0" max="1.2" step="0.05" value="0.68" />
+        </label>
+      </div>
+
+      <div class="panel-section">
+        <h2>3. Paletas de Tema</h2>
+        <div class="preset-row">
+          <button type="button" class="btn btn-chip active" data-preset="sanctuary">
+            RPG Noturno (Padrão)
+          </button>
+          <button type="button" class="btn btn-chip" data-preset="bloodmoon">
+            Lua Carmesim
+          </button>
+          <button type="button" class="btn btn-chip" data-preset="emerald">
+            Ruína Abissal
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-section log-section">
+        <h2>Log de Eventos</h2>
+        <ul id="lifecycle-log" class="lifecycle-log"></ul>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
