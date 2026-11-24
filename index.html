@@ -19,7 +19,6 @@
   <script src="assets/js/api.js" defer></script>
   <script src="assets/js/pipeline.js" defer></script>
   <script src="assets/js/console.js" defer></script>
-  <script src="assets/js/engine-adapter.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
@@ -43,11 +42,11 @@
     <section id="top" class="hero" aria-labelledby="hero-heading">
       <h1 id="hero-heading" class="sr-only">ERON // DEV — Eron Yamamoto D. Justina</h1>
       <div class="banner-frame">
-        <pre class="ascii-banner" aria-hidden="true"> __   __    _    __  __  ___  _____  _____  _____
- \ \ / /   / \  |  \/  ||_ _||_   _||_   _|| ____|
-  \ V /   / _ \ | |\/| | | |  | |    | |  |  _|
-   | |   / ___ \| |  | | | |  | |    | |  | |___
-   |_|  /_/   \_\_|  |_||___|  |_|    |_|  |_____|</pre>
+        <pre class="ascii-banner" aria-hidden="true"> _____ ____   ___  _   _  __   __ _    __  __    _    __  __  ___ _____ ___
+| ____|  _ \ / _ \| \ | | \ \ / // \  |  \/  |  / \  |  \/  |/ _ \_   _/ _ \
+|  _| | |_) | | | |  \| |  \ V // _ \ | |\/| | / _ \ | |\/| | | | || || | |
+| |___|  _ &lt;| |_| | |\  |   | |/ ___ \| |  | |/ ___ \| |  | | |_| || || |_| |
+|_____|_| \_\\___/|_| \_|   |_/_/   \_\_|  |_/_/   \_\_|  |_|\___/ |_| \___/</pre>
       </div>
       <p class="prompt-line">eron@production:~$ <span>whoami</span></p>
       <p class="typewriter-frame" data-text="Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente"><span id="typewriter" class="typewriter" aria-hidden="true">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</span></p>
@@ -143,13 +142,16 @@
       </div>
       <div class="scene-controls">
         <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
+        <button id="scene-cycle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ cycle: off ]</button>
         <label class="sr-only" for="scene-preset">Preset da cena</label>
         <select id="scene-preset" class="select-control">
-          <option value="outpost">outpost</option>
-          <option value="terminal">terminal</option>
-          <option value="cargo">cargo</option>
+          <option value="sanctuary">sanctuary</option>
+          <option value="dawn">dawn</option>
+          <option value="day">day</option>
+          <option value="storm">storm</option>
+          <option value="emerald">emerald</option>
         </select>
-        <span class="scene-help muted">// controles ativam quando o motor estiver disponível</span>
+        <span class="scene-help muted">// mouse/toque rotacionam a câmera; scroll continua livre</span>
       </div>
     </section>
 
@@ -157,14 +159,18 @@
     <section class="section" aria-labelledby="stack-title">
       <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
       <div class="neofetch">
-        <div class="logo-frame">
-          <pre class="ascii-logo" aria-hidden="true">     .--.
+        <div>
+          <p class="sr-only">Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.</p>
+          <div id="penguin-stage" class="engine-stage" data-mode="fallback">
+            <pre class="penguin-fallback" aria-hidden="true">     .--.
     |o_o |
     |:_: |
    //   \ \
   (|     |_)
  /'\_   _/`\
  \___)=(___/</pre>
+          </div>
+          <p class="engine-hint muted">// mouse ou toque para girar</p>
         </div>
         <dl class="specs">
           <div><dt>User</dt><dd>eron@production</dd></div>

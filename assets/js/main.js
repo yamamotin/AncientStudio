@@ -6,20 +6,14 @@ window.TP = window.TP || {};
 
   var utils = TP.utils;
 
+  /* The full line is present in the HTML for a fast, stable LCP; the terminal
+     caret animation in CSS keeps the typewriter feel without delaying paint. */
   function initTypewriter() {
     var element = document.getElementById('typewriter');
-    if (!element || utils.reducedMotion) return;
-
-    var text = element.textContent;
-    element.textContent = '';
-    var index = 0;
-
-    function tick() {
-      element.textContent = text.slice(0, index);
-      index += 1;
-      if (index <= text.length) window.setTimeout(tick, 24);
-    }
-    tick();
+    if (!element) return;
+    var frame = element.closest('.typewriter-frame');
+    var text = frame && frame.getAttribute('data-text');
+    if (text && element.textContent !== text) element.textContent = text;
   }
 
   function initTabs() {
@@ -109,21 +103,33 @@ window.TP = window.TP || {};
 
   function initScene() {
     var stage = document.getElementById('ascii-scene');
-    if (!stage || !TP.scene) return;
+    var penguinStage = document.getElementById('penguin-stage');
+    if (!stage) return;
+    if (!TP.scene) {
+      window.addEventListener('engine-adapter:ready', initScene, { once: true });
+      return;
+    }
 
     var badge = document.getElementById('scene-mode');
     var toggle = document.getElementById('scene-toggle');
+    var cycle = document.getElementById('scene-cycle');
     var preset = document.getElementById('scene-preset');
     var help = document.querySelector('.scene-help');
+
+    var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'sanctuary' });
+    var penguin = penguinStage
+      ? TP.scene.create(penguinStage, { preset: 'sanctuary', weather: false, config: { maxFps: 30, cellSize: 12 } })
+      : null;
 
     stage.addEventListener('tp:scene-mode', function (event) {
       var engineReady = event.detail.mode === 'engine';
       if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
-      if (toggle) toggle.disabled = !engineReady;
-      if (preset) preset.disabled = !engineReady;
+      [toggle, cycle, preset].forEach(function (control) {
+        if (control) control.disabled = !engineReady;
+      });
       if (help) {
         help.textContent = engineReady
-          ? '// motor conectado'
+          ? '// mouse/toque rotacionam a câmera; scroll continua livre'
           : '// controles ativam quando o motor estiver disponível';
       }
     });
@@ -131,19 +137,29 @@ window.TP = window.TP || {};
     if (toggle) {
       toggle.addEventListener('click', function () {
         var paused = toggle.getAttribute('aria-pressed') !== 'true';
-        TP.scene.setPaused(paused);
+        scene.setPaused(paused);
         toggle.setAttribute('aria-pressed', String(paused));
         toggle.textContent = paused ? '[ resume ]' : '[ pause ]';
       });
     }
 
-    if (preset) {
-      preset.addEventListener('change', function () {
-        TP.scene.setPreset(preset.value);
+    if (cycle) {
+      cycle.addEventListener('click', function () {
+        var enabled = cycle.getAttribute('aria-pressed') !== 'true';
+        scene.setCycle(enabled);
+        cycle.setAttribute('aria-pressed', String(enabled));
+        cycle.textContent = enabled ? '[ cycle: on ]' : '[ cycle: off ]';
       });
     }
 
-    TP.scene.mount(stage, { preset: preset ? preset.value : 'outpost', paused: false });
+    if (preset) {
+      preset.addEventListener('change', function () {
+        scene.setPreset(preset.value);
+      });
+    }
+
+    scene.mount();
+    if (penguin) penguin.mount();
   }
 
   function initGithubButton() {
@@ -171,6 +187,37 @@ window.TP = window.TP || {};
     initApiButtons();
     initAudio();
     initGithubButton();
+    scheduleEngineAdapterLoad();
+  }
+
+  /* The adapter and its large WebGL bundle load after first paint, so neither
+     can delay the terminal's LCP. The scene wires itself when the adapter lands. */
+  function scheduleEngineAdapterLoad() {
+    if (TP.scene || document.querySelector('script[data-engine-adapter]')) return;
+
+    function inject() {
+      if (document.querySelector('script[data-engine-adapter]')) return;
+      var script = document.createElement('script');
+      script.src = 'assets/js/engine-adapter.js';
+      script.defer = true;
+      script.setAttribute('data-engine-adapter', '');
+      document.head.appendChild(script);
+    }
+
+    var stages = [document.getElementById('penguin-stage'), document.getElementById('ascii-scene')].filter(Boolean);
+    if (window.IntersectionObserver && stages.length) {
+      var observer = new IntersectionObserver(function (entries) {
+        if (entries.some(function (entry) { return entry.isIntersecting; })) {
+          observer.disconnect();
+          inject();
+        }
+      }, { rootMargin: '300px' });
+      stages.forEach(function (stage) { observer.observe(stage); });
+    }
+
+    ['pointerdown', 'keydown', 'wheel'].forEach(function (type) {
+      window.addEventListener(type, inject, { once: true, passive: true });
+    });
   }
 
   if (document.readyState === 'loading') {
