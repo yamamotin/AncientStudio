@@ -393,15 +393,20 @@ h2 {
 
 /* ASCII 3D scene stage */
 .scene-stage {
+  position: relative;
   display: grid;
   place-items: center;
-  min-height: clamp(15rem, 34vw, 21rem);
+  min-height: clamp(19rem, 42vw, 27rem);
   margin-top: var(--space-5);
   padding: var(--space-5);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--terminal-bg);
+}
+
+.scene-stage[data-mode="engine"] {
+  padding: 0;
 }
 
 .scene-fallback {
@@ -453,6 +458,14 @@ h2 {
   overflow: hidden;
 }
 
+.logo-frame[data-penguin-ready="true"] {
+  height: auto;
+  min-height: calc(17 * 1.05 * 10px * var(--logo-scale));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ascii-logo {
   width: max-content;
   color: var(--green);
@@ -461,6 +474,14 @@ h2 {
   white-space: pre;
   transform: scale(var(--logo-scale));
   transform-origin: top left;
+}
+
+.logo-frame[data-penguin-ready="true"] .ascii-logo {
+  font-size: 10px;
+  line-height: 1.05;
+  transform-origin: center center;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.22);
+  user-select: none;
 }
 
 .specs { display: grid; gap: var(--space-2); align-content: center; }

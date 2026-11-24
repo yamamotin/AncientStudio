@@ -123,7 +123,7 @@ window.TP = window.TP || {};
       if (preset) preset.disabled = !engineReady;
       if (help) {
         help.textContent = engineReady
-          ? '// motor conectado'
+          ? '// motor WebGL2 3D conectado · mova o mouse para parallax + reflexo na água'
           : '// controles ativam quando o motor estiver disponível';
       }
     });
@@ -144,6 +144,18 @@ window.TP = window.TP || {};
     }
 
     TP.scene.mount(stage, { preset: preset ? preset.value : 'outpost', paused: false });
+
+    // Auto-hibernate GPU when [ ASCII REALMS // SCENE ] scrolls completely out of viewport
+    if (window.IntersectionObserver) {
+      var sceneObserver = new IntersectionObserver(function (entries) {
+        var entry = entries[0];
+        if (!entry || TP.scene.getMode() !== 'engine') return;
+        var manuallyPaused = toggle && toggle.getAttribute('aria-pressed') === 'true';
+        if (manuallyPaused) return;
+        TP.scene.setPaused(!entry.isIntersecting);
+      }, { threshold: 0.02 });
+      sceneObserver.observe(stage);
+    }
   }
 
   function initGithubButton() {
@@ -165,6 +177,7 @@ window.TP = window.TP || {};
 
     TP.pipeline.init();
     TP.console.init();
+    if (TP.neofetch) TP.neofetch.init();
     initTypewriter();
     initTabs();
     initScene();

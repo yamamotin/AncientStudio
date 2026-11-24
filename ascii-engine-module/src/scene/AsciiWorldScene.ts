@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { evaluateTerrainHeight, fbm2D, hash2D } from './noise';
+import { evaluateTerrainHeight, fbm2D, hash2D, WATER_SURFACE_Y } from './noise';
+import { WATER_FRAGMENT_SHADER, WATER_VERTEX_SHADER } from '../shaders/waterShader';
 import type { EngineConfig, ThemePalette } from '../types';
 
 interface TorchEmitter {
@@ -54,6 +55,9 @@ export class AsciiWorldScene {
   private terrainMesh!: THREE.Mesh;
   private terrainGeometry!: THREE.BufferGeometry;
   private terrainMaterial!: THREE.MeshStandardMaterial;
+  private waterMesh!: THREE.Mesh;
+  private waterGeometry!: THREE.BufferGeometry;
+  private waterMaterial!: THREE.ShaderMaterial;
 
   private stoneMaterial!: THREE.MeshStandardMaterial;
   private darkForegroundRockMaterial!: THREE.MeshStandardMaterial;
@@ -141,6 +145,7 @@ export class AsciiWorldScene {
 
     // 2. Build 3D World Layers
     this.buildTerrain(config.palette);
+    this.buildReflectiveWater(config.palette);
     this.buildSanctuaryRuins(config.palette);
     this.buildTorchesAndBraziers(config.palette);
     this.buildForegroundSilhouettes();
@@ -267,6 +272,52 @@ export class AsciiWorldScene {
     this.terrainMesh = new THREE.Mesh(geo, this.terrainMaterial);
     this.terrainMesh.receiveShadow = true;
     this.scene.add(this.terrainMesh);
+  }
+
+  /**
+   * Reflective sanctuary lake moat surrounding the island shrine:
+   * reflects nocturnal sky, moon glints, flickering torch columns, rune crystal & cursor wisp.
+   */
+  private buildReflectiveWater(palette: ThemePalette): void {
+    this.waterGeometry = new THREE.PlaneGeometry(54, 48, 48, 48);
+    this.waterGeometry.rotateX(-Math.PI / 2);
+
+    const deepWater = new THREE.Color(palette.background).lerp(
+      new THREE.Color(palette.coolAmbient),
+      0.26
+    );
+    const shallowWater = new THREE.Color(palette.coolAmbient).lerp(
+      new THREE.Color('#8be4ff'),
+      0.32
+    );
+
+    this.waterMaterial = new THREE.ShaderMaterial({
+      vertexShader: WATER_VERTEX_SHADER,
+      fragmentShader: WATER_FRAGMENT_SHADER,
+      transparent: true,
+      depthWrite: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uCamPos: { value: this.camera.position.clone() },
+        uDeepColor: { value: deepWater },
+        uShallowColor: { value: shallowWater },
+        uWarmColor: { value: new THREE.Color(palette.warmLight) },
+        uWarmCoreColor: { value: new THREE.Color(palette.warmCore) },
+        uCursorColor: { value: new THREE.Color(palette.cursorLight) },
+        uCursorPos: { value: this.cursorLight.position.clone() },
+        uCursorIntensity: { value: 14 },
+        uMoonDir: { value: new THREE.Vector3(-10.5, 14.2, -38).normalize() },
+        uTorch0: { value: new THREE.Vector4(-2.45, 0.5, -0.95, 24) },
+        uTorch1: { value: new THREE.Vector4(2.45, 0.5, -0.95, 24) },
+        uTorch2: { value: new THREE.Vector4(-1.85, 0.3, 3.65, 16) },
+        uTorch3: { value: new THREE.Vector4(2.25, 0.2, 5.35, 14) },
+        uShrineLight: { value: new THREE.Vector4(0, 2.85, -2.35, 32) },
+      },
+    });
+
+    this.waterMesh = new THREE.Mesh(this.waterGeometry, this.waterMaterial);
+    this.waterMesh.position.set(0, WATER_SURFACE_Y, -6.5);
+    this.scene.add(this.waterMesh);
   }
 
   /**
@@ -744,6 +795,18 @@ export class AsciiWorldScene {
     for (const torch of this.torches) {
       torch.light.color.set(palette.warmLight);
     }
+
+    if (this.waterMaterial) {
+      this.waterMaterial.uniforms.uDeepColor.value
+        .set(palette.background)
+        .lerp(new THREE.Color(palette.coolAmbient), 0.26);
+      this.waterMaterial.uniforms.uShallowColor.value
+        .set(palette.coolAmbient)
+        .lerp(new THREE.Color('#8be4ff'), 0.32);
+      this.waterMaterial.uniforms.uWarmColor.value.set(palette.warmLight);
+      this.waterMaterial.uniforms.uWarmCoreColor.value.set(palette.warmCore);
+      this.waterMaterial.uniforms.uCursorColor.value.set(palette.cursorLight);
+    }
   }
 
   /**
@@ -830,6 +893,35 @@ export class AsciiWorldScene {
       torch.flameHalo.scale.setScalar(0.92 + flicker * 0.18);
     }
 
+    // 5b. Sync real-time water shader uniforms (planar light reflections + camera view vector)
+    if (this.waterMaterial) {
+      const u = this.waterMaterial.uniforms;
+      u.uTime.value = elapsed;
+      u.uCamPos.value.copy(this.camera.position);
+      u.uCursorPos.value.copy(this.cursorLight.position);
+      u.uCursorIntensity.value = this.cursorLight.intensity;
+      u.uShrineLight.value.set(
+        this.shrineMainLight.position.x,
+        this.shrineMainLight.position.y,
+        this.shrineMainLight.position.z,
+        this.shrineMainLight.intensity
+      );
+
+      const torchUniformKeys = ['uTorch0', 'uTorch1', 'uTorch2', 'uTorch3'] as const;
+      for (let idx = 0; idx < torchUniformKeys.length; idx++) {
+        const torch = this.torches[idx];
+        const key = torchUniformKeys[idx]!;
+        if (torch && u[key]) {
+          u[key].value.set(
+            torch.light.position.x,
+            torch.light.position.y,
+            torch.light.position.z,
+            torch.light.intensity
+          );
+        }
+      }
+    }
+
     // 6. Animate rising ember particles
     const emberPosAttr = this.emberPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < this.emberData.length; i++) {
@@ -883,6 +975,7 @@ export class AsciiWorldScene {
     }
 
     this.terrainGeometry.dispose();
+    if (this.waterGeometry) this.waterGeometry.dispose();
     this.torches.length = 0;
     this.emberData.length = 0;
     this.scene.clear();
