@@ -44,3 +44,15 @@ test('backend CI workflow keeps the root Dockerfile and Vercel flow intact', () 
   const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
   assert.match(dockerfile, /api\/server\.py/);
 });
+
+test('Pages parity helper is versioned and non-blocking by design', () => {
+  const { readFileSync } = require('node:fs');
+  const helper = readFileSync(path.join(root, 'scripts/verify-pages-parity.sh'), 'utf8');
+  includesAll(helper, [
+    'PAGES_URL',
+    'VERCEL_URL',
+    '/build.txt',
+    '/api/v1/build',
+    'PARITY OK'
+  ]);
+});
