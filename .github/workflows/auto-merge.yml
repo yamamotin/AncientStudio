@@ -1,0 +1,50 @@
+name: Auto-merge verified PRs
+
+# No human PR approval is needed. The GITHUB_TOKEN cannot approve its own
+# author's PR, so this workflow merges directly after the required checks pass
+# for the exact head SHA. Required reviews on main would still block it; see
+# docs/cicd-auto-merge.md.
+on:
+  workflow_run:
+    workflows:
+      - "CI — Backend, ASCII 3D Engine & Portfolio Integrity"
+      - "CI/CD — backend, Docker and deploy"
+      - "PR tests"
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Optional PR number to evaluate manually"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: read
+
+concurrency:
+  group: auto-merge-${{ github.event.workflow_run.head_sha || github.event.inputs.pr || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Merge only when required checks are green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          PR_NUMBER: ${{ github.event.inputs.pr || '' }}
+        run: bash scripts/auto-merge-verified.sh

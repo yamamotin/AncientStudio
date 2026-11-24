@@ -1,0 +1,115 @@
+# CI/CD sem revisão manual de PR
+
+## Como funciona
+
+Os workflows continuam disparando automaticamente:
+
+| Workflow | Gatilhos |
+|---|---|
+| `pages.yml` | `push` em `main`, `workflow_dispatch` |
+| `ci-cd.yml` | `pull_request`, `push` em `main`, `workflow_dispatch` |
+| `ci.yml` | `pull_request` para `main`, `push` em `main`/`arena/**`, `workflow_dispatch` |
+| `pr-tests.yml` | `pull_request`, `push` em `main`, `workflow_dispatch` |
+| `auto-merge.yml` | `workflow_run` completando nos três workflows de teste + `workflow_dispatch` |
+
+`auto-merge.yml` chama `scripts/auto-merge-verified.sh`, que:
+
+1. encontra o PR aberto contra `main` pelo SHA exato do commit;
+2. ignora PRs de fork, drafts e commits que mudaram depois do check;
+3. espera que **todos** os checks exigidos estejam `SUCCESS`: `verify`, `test`, `Ruff + pytest`, `Docker build`;
+4. recusa `FAILURE`, `SKIPPED`, `CANCELLED`, `TIMED_OUT` e `ACTION_REQUIRED`;
+5. confirma `MERGEABLE` / `CLEAN` e só então executa `gh pr merge <n> --merge`.
+
+Não há aprovação automática: o GitHub impede aprovar o próprio PR (`Review Can not approve your own pull request`) e uma branch protection com required reviews continuaria bloqueando o merge. O merge é feito pelo `GITHUB_TOKEN`, que tem `pull-requests: write` concedido explicitamente no workflow.
+
+## Configurações exatas no GitHub
+
+### Settings → Pages → Build and deployment
+
+- **Source:** `GitHub Actions` (não `Deploy from a branch`).
+- Branch do site: `main`; path: `/`.
+- Verificação atual:
+
+```bash
+gh api repos/yamamotin/AncientStudio/pages \
+  --jq '{status,build_type,html_url,public,source}'
+# {"status":"built","build_type":"workflow","html_url":"https://yamamotin.github.io/AncientStudio/","public":true,"source":{"branch":"main","path":"/"}}
+```
+
+`actions/configure-pages@v5` falha com `HttpError: Not Found` quando o Pages não está habilitado. O parâmetro `enablement: true` **não** resolve com `GITHUB_TOKEN` — a documentação da action exige PAT ou GitHub App com `administration:write` + `pages:write`. Por isso a seleção do Source no painel é o único passo de configuração do Pages.
+
+### Settings → Environments → github-pages
+
+- **Deployment branches:** `main` apenas (verificado pela API).
+- **Required reviewers:** nenhum; **Wait timer:** `0`. Se houver revisores obrigatórios, o job `deploy` fica parado e o deploy deixa de ser automático.
+- Nenhum secret é necessário: o workflow já declara `pages: write` e `id-token: write`.
+
+```bash
+gh api repos/yamamotin/AncientStudio/environments/github-pages \
+  --jq '{protection_rules,wait_timer,deployment_branch_policy}'
+gh api repos/yamamotin/AncientStudio/environments/github-pages/deployment-branch-policies \
+  --jq '.branch_policies[].name'
+# main
+```
+
+### Settings → Actions → General → Workflow permissions
+
+- Marque **Read and write permissions**.
+- Deixe **Allow GitHub Actions to create and approve pull requests** desmarcado — este fluxo não cria nem aprova PRs.
+- Os workflows também declaram `permissions:` explícitas; isso mantém o pipeline funcional mesmo que a organização altere o padrão.
+
+### Settings → Branches → main
+
+- Não configure **Required reviews**: isso reintroduziria aprovação humana e o auto-merge não conseguiria avançar.
+- Se quiser exigir checks no branch protection, use exatamente: `verify`, `test`, `Ruff + pytest`, `Docker build`. O helper já espera por eles antes de mesclar.
+
+### Settings → General → Pull Requests
+
+- Opcional: marque **Allow auto-merge**. O workflow usa `gh pr merge --merge` diretamente e não depende dessa opção.
+
+## Confirmando um run verde na main
+
+```bash
+git fetch origin main --prune
+git rev-parse origin/main
+
+gh run list --workflow=pages.yml --limit 1 \
+  --json databaseId,headSha,status,conclusion \
+  --jq '.[] | [.databaseId, .headSha, .status, .conclusion] | @tsv'
+
+run_id=$(gh run list --workflow=pages.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run view "$run_id" --json jobs \
+  --jq '.jobs[] | [.name, .conclusion] | @tsv'
+```
+
+Saída esperada:
+
+```text
+build       success
+deploy      success
+verify-parity   success
+```
+
+## Confirmando publicação e paridade
+
+```bash
+PAGES_URL=https://yamamotin.github.io/AncientStudio
+VERCEL_URL=https://ancientstudio.vercel.app
+
+curl -fsSL "$PAGES_URL/build.txt"
+curl -fsSL "$VERCEL_URL/api/v1/build"
+
+./scripts/verify-pages-parity.sh
+```
+
+Os três SHAs precisam ser iguais a `git rev-parse origin/main`. O helper imprime:
+
+```text
+pages=<sha>
+vercel=<sha>
+PARITY OK
+main=<sha>
+PAGES MATCHES MAIN
+```
+
+Evidência real após a habilitação do Pages: run `45499594209` terminou com `build`, `deploy` e `verify-parity` em `success`, e ambos os hosts serviram `0baeee6305df9463dd1e2af22abf31c6ace2bc60`.
