@@ -92,6 +92,9 @@ class PortfolioHandler(BaseHTTPRequestHandler):
         if path == "/api-status.json":
             # Same file name exists for static hosting; here it reports the live API.
             self._send_json({"ok": True, "service": "python-api"})
+        elif path == "/api/v1/build":
+            # Exposed so CI can compare the deployed SHA with Pages build.txt.
+            self._send_json({"sha": os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GITHUB_SHA") or "local"})
         elif path == "/api/v1/health":
             self._send_json({"ok": True, "service": "eron-terminal-portfolio"})
         elif path == "/api/v1/extract":
