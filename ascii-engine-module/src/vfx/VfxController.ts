@@ -190,4 +190,8 @@ export class VfxController {
     this.cursorLight.intensity =
       config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 8.5);
   }
+
+  public getCursorLight(): THREE.PointLight {
+    return this.cursorLight;
+  }
 }

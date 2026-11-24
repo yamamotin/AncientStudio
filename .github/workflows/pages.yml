@@ -40,6 +40,7 @@ jobs:
           test -f _site/assets/i18n/pt-br.json
           test -f _site/assets/i18n/en.json
           test -f _site/assets/js/api-client.js
+          test -s _site/assets/js/ascii-engine.bundle.js
           echo "Pages artifact root OK ($(find _site -type f | wc -l) files)"
 
       - uses: actions/configure-pages@v5

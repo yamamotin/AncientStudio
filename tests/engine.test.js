@@ -52,6 +52,7 @@ test('modular engine architecture exposes ECS, Lifecycle, World, Entities, VFX, 
   const expectedFiles = [
     'ascii-engine-module/src/core/EngineLoop.ts',
     'ascii-engine-module/src/core/LifecycleManager.ts',
+    'ascii-engine-module/src/core/ResolutionController.ts',
     'ascii-engine-module/src/ecs/World.ts',
     'ascii-engine-module/src/ecs/SystemRunner.ts',
     'ascii-engine-module/src/world/MapLoader.ts',
@@ -140,4 +141,110 @@ test('built portfolio IIFE bundle executes cleanly and runs ECS, TuxEntityFactor
   // Verify centralized LifecycleManager.disposeObject3D cleans scene cleanly
   enginePkg.LifecycleManager.disposeObject3D(scene);
   assert.equal(scene.children.length, 0);
+});
+
+test('adaptive resolution & shader pipeline enforce DPR caps, subpixel guardrails, and water reflection sync', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const asciiShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const waterShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
+    'utf8'
+  );
+  const sceneBuilder = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/PlaygroundSceneBuilder.ts'),
+    'utf8'
+  );
+  const neofetchSrc = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
+
+  // 1. Shader & mesh audit assertions: subdivided water plane, mirrored point reflections, sub-cell supersampling & cursor sync
+  includesAll(asciiShader, ['uSubCellSpread', 'sampleCellIntegrated', 'smoothstep']);
+  includesAll(waterShader, ['mirroredLight', 'hiFreqFade', 'uCursorPos', 'uTorch0']);
+  assert.match(sceneBuilder, /PlaneGeometry\(mapDef\.waterSize,\s*mapDef\.waterSize,\s*48,\s*48\)/);
+  includesAll(engineCore, ['uCursorPos', 'uCursorIntensity', 'uTorch0', 'computeAdaptiveResolution']);
+
+  // 2. Run ResolutionController across mobile coarse, Retina HD, and 4K UHD profiles via built bundle
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const { computeAdaptiveResolution, DEFAULT_ENGINE_CONFIG } = sandbox.ASCIIRealms;
+  assert.equal(typeof computeAdaptiveResolution, 'function');
+
+  // Mobile 360x300 @ DPR 3.0 (coarse pointer) -> DPR capped at 1.5, larger legible cells, 1/4 bloom
+  const mobileRes = computeAdaptiveResolution({
+    cssWidth: 360,
+    cssHeight: 300,
+    devicePixelRatio: 3.0,
+    config: DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: true
+  });
+  assert.equal(mobileRes.tier, 'mobile');
+  assert.ok(mobileRes.effectiveDpr <= 1.5, 'Mobile DPR capped at 1.5 for 60 FPS');
+  assert.ok(mobileRes.activeCellSize >= 11, 'Mobile enlarges cells for crisp readability');
+  assert.equal(mobileRes.bloomDownsample, 4);
+
+  // Desktop Retina 1440x680 @ DPR 2.5 -> DPR capped at maxPixelRatio (2.0), 96px HiDPI atlas, crisp dense grid
+  const uhdRes = computeAdaptiveResolution({
+    cssWidth: 1440,
+    cssHeight: 680,
+    devicePixelRatio: 2.5,
+    config: DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.equal(uhdRes.tier, 'uhd');
+  assert.equal(uhdRes.effectiveDpr, 2);
+  assert.equal(uhdRes.atlasTileSize, 96);
+  assert.ok(uhdRes.columns <= 190 && uhdRes.columns > mobileRes.columns, 'Desktop scales up density within anti-noise cap');
+  assert.ok(uhdRes.cellPhysW >= 6 && uhdRes.cellPhysH >= 8, 'Integer physical cells never collapse to subpixel dust');
+
+  // Extreme 4K 3840x1600 @ DPR 2.0 -> column cap guardrail prevents subpixel noise
+  const extreme4k = computeAdaptiveResolution({
+    cssWidth: 3840,
+    cssHeight: 1600,
+    devicePixelRatio: 2.0,
+    config: DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.ok(extreme4k.columns <= 190, '4K viewport respects max column cap to preserve ASCII aesthetic');
+
+  // Mascot mode (Neofetch Tux) -> tight 24..78 column guardrail matching Tux reference art
+  const mascotRes = computeAdaptiveResolution({
+    cssWidth: 420,
+    cssHeight: 240,
+    devicePixelRatio: 2.0,
+    config: Object.assign({}, DEFAULT_ENGINE_CONFIG, { mode: 'mascot', cellSize: 8 }),
+    isCoarsePointer: false
+  });
+  assert.ok(mascotRes.columns >= 24 && mascotRes.columns <= 78);
+
+  // 3. Fallback neofetch adaptive grid parity
+  const nfSandbox = {
+    window: {
+      innerWidth: 1280,
+      innerHeight: 800,
+      matchMedia: () => ({ matches: false }),
+      addEventListener: () => {}
+    },
+    document: { querySelector: () => null, getElementById: () => null, addEventListener: () => {} }
+  };
+  nfSandbox.window.TP = {};
+  nfSandbox.TP = nfSandbox.window.TP;
+  vm.createContext(nfSandbox);
+  vm.runInContext(neofetchSrc, nfSandbox);
+
+  const desktopFallback = nfSandbox.TP.neofetch.computeFallbackGrid(440, 240);
+  const compactFallback = nfSandbox.TP.neofetch.computeFallbackGrid(220, 180);
+  assert.ok(desktopFallback.cols > compactFallback.cols, 'Fallback raycaster scales Tux grid density with stage width');
 });

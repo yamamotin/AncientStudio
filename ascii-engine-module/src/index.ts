@@ -3,6 +3,7 @@ import { AsciiEngineCore } from './core/AsciiEngineCore';
 import { DEFAULT_ASCII_RAMP, DEFAULT_ENGINE_CONFIG, DEFAULT_PALETTE } from './core/defaultConfig';
 import { EngineLoop } from './core/EngineLoop';
 import { LifecycleManager } from './core/LifecycleManager';
+import { computeAdaptiveResolution, detectResolutionTier } from './core/ResolutionController';
 import { AnimationSystem } from './animation/AnimationSystem';
 import {
   InputSystem,
@@ -25,6 +26,8 @@ import type {
   EngineStats,
   LifecycleCallbacks,
   PartialEngineConfig,
+  ResolutionProfile,
+  ResolutionTier,
   SceneMode,
   ThemePalette,
 } from './types';
@@ -36,6 +39,8 @@ export type {
   EngineStats,
   LifecycleCallbacks,
   PartialEngineConfig,
+  ResolutionProfile,
+  ResolutionTier,
   SceneMode,
   ThemePalette,
 };
@@ -46,6 +51,8 @@ export {
   DEFAULT_PALETTE,
   EngineLoop,
   LifecycleManager,
+  computeAdaptiveResolution,
+  detectResolutionTier,
   World,
   SystemRunner,
   InputSystem,
