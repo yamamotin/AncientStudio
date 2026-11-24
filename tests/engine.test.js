@@ -69,13 +69,27 @@ test('modular engine architecture exposes ECS, Lifecycle, World, Entities, VFX, 
   }
 });
 
-test('ECS World, SystemRunner, MapLoader, and TuxEntityFactory run deterministically in Node', async () => {
-  const distPath = path.join(root, 'ascii-engine-module/dist/index.cjs');
-  assert.ok(existsSync(distPath), 'Compiled CommonJS bundle dist/index.cjs must exist');
+test('built portfolio IIFE bundle executes cleanly and runs ECS, TuxEntityFactory, and MapLoader', async () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(existsSync(bundlePath), 'Built portfolio bundle assets/js/ascii-engine.bundle.js must exist');
 
-  const THREE = require(path.join(root, 'ascii-engine-module/node_modules/three'));
-  const enginePkg = require(distPath);
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
 
+  const enginePkg = sandbox.ASCIIRealms;
+  assert.ok(enginePkg && typeof enginePkg.AsciiSceneEngine === 'function', 'ASCIIRealms.AsciiSceneEngine exported');
+
+  const THREE = enginePkg.THREE;
   const ecs = new enginePkg.World();
   const scene = new THREE.Scene();
 
@@ -118,7 +132,10 @@ test('ECS World, SystemRunner, MapLoader, and TuxEntityFactory run deterministic
   // Verify KeyboardInput stays disabled by default so page shortcuts/scroll are never hijacked
   const kb = new enginePkg.KeyboardInput();
   assert.equal(kb.isEnabled(), false);
-  assert.deepEqual(kb.sampleAxes(), { moveX: 0, moveZ: 0, interactPressed: false });
+  const axes = kb.sampleAxes();
+  assert.equal(axes.moveX, 0);
+  assert.equal(axes.moveZ, 0);
+  assert.equal(axes.interactPressed, false);
 
   // Verify centralized LifecycleManager.disposeObject3D cleans scene cleanly
   enginePkg.LifecycleManager.disposeObject3D(scene);
