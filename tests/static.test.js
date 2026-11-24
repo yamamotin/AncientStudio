@@ -33,7 +33,10 @@ test('required sections and real identity are present', () => {
     'ASCII REALMS // SCENE',
     'STACK // NEOFETCH',
     'id="penguin-stage"',
-    'id="ascii-scene"'
+    'id="ascii-scene"',
+    '>[github]</button>',
+    '>[ curriculo-pt-br ]</a>',
+    '>[ curriculo-en ]</a>'
   ]);
 });
 

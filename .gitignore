@@ -12,9 +12,17 @@ dist-demo/
 # Local test artifacts
 screenshots/
 
-# Python cache
+# Python cache and local environments
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local secrets (commit .env.example only)
+.env
 
 # Pages staging directory (created by .github/workflows/pages.yml)
 _site/

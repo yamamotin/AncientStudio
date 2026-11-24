@@ -1,0 +1,53 @@
+{
+  "name": "invoice-enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-enrichment",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-invoice",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "invoice-enrichment"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json;\nreturn [{ json: { executionId: $execution.id, status: 'queued', invoice: item.invoice_key ?? item.invoice ?? null } }];"
+      },
+      "id": "normalize-payload",
+      "name": "Normalize payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "respond-202",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Normalize payload", "type": "main", "index": 0 }]]
+    },
+    "Normalize payload": {
+      "main": [[{ "node": "Respond 202", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

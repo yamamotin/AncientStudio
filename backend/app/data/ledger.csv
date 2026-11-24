@@ -1,0 +1,6 @@
+id,description,raw_amount,currency,category,occurred_at
+TX-001,Consultoria de dados,"1.250,00",BRL,receita,2026-11-01
+TX-002,Hospedagem,"89,90",BRL,infra,2026-11-02
+TX-003,Ajuste de fatura,"(45,50)",BRL,infra,2026-11-03
+TX-004,Mentoria,"320,00",BRL,receita,2026-11-04
+TX-005,Assinatura internacional,"1.000,00",USD,receita,2026-11-05
