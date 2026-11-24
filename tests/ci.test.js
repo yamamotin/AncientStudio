@@ -53,6 +53,7 @@ test('Pages parity helper is versioned and non-blocking by design', () => {
     'VERCEL_URL',
     '/build.txt',
     '/api/v1/build',
+    '?v=$cache_key',
     'PARITY OK'
   ]);
 });

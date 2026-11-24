@@ -95,9 +95,11 @@ verify-parity   success
 ```bash
 PAGES_URL=https://yamamotin.github.io/AncientStudio
 VERCEL_URL=https://ancientstudio.vercel.app
+main_sha=$(git rev-parse origin/main)
 
-curl -fsSL "$PAGES_URL/build.txt"
-curl -fsSL "$VERCEL_URL/api/v1/build"
+# O "?v=$main_sha" evita que as CDNs devolvam um SHA antigo em cache.
+curl -fsSL "$PAGES_URL/build.txt?v=$main_sha"
+curl -fsSL "$VERCEL_URL/api/v1/build?v=$main_sha"
 
 ./scripts/verify-pages-parity.sh
 ```

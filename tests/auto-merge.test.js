@@ -60,6 +60,7 @@ test('Pages workflow uses official actions with explicit permissions and environ
     'actions/configure-pages@v5',
     'actions/upload-pages-artifact@v3',
     'actions/deploy-pages@v4',
+    '?v=$GITHUB_SHA',
     'workflow_dispatch:'
   ]);
 });
