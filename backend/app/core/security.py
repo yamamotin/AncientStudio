@@ -19,6 +19,15 @@ def fingerprint(*parts: str) -> str:
     return sha256_hex(payload)
 
 
+def sign_body(body: bytes, timestamp: str, secret: str) -> str:
+    """Create the signature expected by :func:`verify_hmac_signature`."""
+    return "sha256=" + hmac.new(
+        secret.encode("utf-8"),
+        f"{timestamp}.{sha256_hex(body)}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def verify_hmac_signature(
     *,
     body: bytes,

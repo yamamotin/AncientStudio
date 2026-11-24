@@ -31,6 +31,17 @@ jobs:
           cp -R index.html robots.txt sitemap.xml api-status.json assets _site/
           printf '%s\n' "$GITHUB_SHA" > _site/build.txt
 
+      # Fail early if the artifact root is wrong; project Pages needs index.html
+      # at the artifact root (URL /AncientStudio/), not inside an extra folder.
+      - name: Verify static artifact root
+        run: |
+          test -f _site/index.html
+          test -f _site/build.txt
+          test -f _site/assets/i18n/pt-br.json
+          test -f _site/assets/i18n/en.json
+          test -f _site/assets/js/api-client.js
+          echo "Pages artifact root OK ($(find _site -type f | wc -l) files)"
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

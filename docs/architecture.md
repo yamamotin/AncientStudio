@@ -94,7 +94,7 @@ AncientStudio/
 - **Gateway**: `POST /api/v1/gateway/invoices/parse` exige `X-Signature`, `X-Timestamp` e
   `Idempotency-Key`. A assinatura é HMAC-SHA256 sobre `timestamp.sha256(body)`, comparada
   em tempo constante; a idempotência devolve `201` na criação, `200` no replay e `409` se a
-  mesma chave vier com outro payload. Erros reais: `401`, `409`, `422`, `502`.
+  mesma chave vier com outro payload. Erros reais: `401`, `409`, `422`, `502`. `POST /api/v1/gateway/invoices/submit` assina no servidor para o browser nunca expor o segredo HMAC e usa o mesmo serviço.
 - **n8n**: `POST /api/v1/workflows/{workflow_id}/run` (header `X-API-Key`) dispara o
   webhook autenticado; `GET /api/v1/workflows/runs/{execution_id}` consulta a execução pela
   REST API do n8n. Falhas upstream viram `502`, ausência vira `404`.
@@ -115,5 +115,6 @@ AncientStudio/
   limpo.
 - `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflow de CI/CD e um
   export de workflow n8n versionado.
-- UX/UI: rótulos de ações e currículos ajustados; i18n completo é o próximo passo de
-  integração frontend.
+- UX/UI: i18n `pt-br`/`en` implementado com toggle no topbar, dicionários versionados e
+  fallback embutido para `file://`; `api-client.js` usa somente `/api/v1` real.
+- Pages: diagnóstico e passos de recuperação em `docs/pages-recovery.md`.

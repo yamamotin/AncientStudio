@@ -1,5 +1,6 @@
 """Gateway signature, validation and idempotency tests."""
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -88,3 +89,18 @@ def test_totals_mismatch_returns_422(
 
     assert response.status_code == 422
     assert response.json()["title"] == "Invoice validation failed"
+
+
+def test_browser_submit_signs_on_server_and_replays(
+    client: TestClient, invoice_payload: dict
+) -> None:
+    raw = json.dumps(invoice_payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+
+    first = client.post("/api/v1/gateway/invoices/submit", content=raw, headers=headers)
+    second = client.post("/api/v1/gateway/invoices/submit", content=raw, headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.headers["Idempotent-Replay"] == "true"
+    assert first.json()["invoice_id"] == second.json()["invoice_id"]

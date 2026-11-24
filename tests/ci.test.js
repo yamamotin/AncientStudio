@@ -28,3 +28,19 @@ test('post-deploy parity check is present and explicitly non-blocking', () => {
 test('PR workflow runs the modular test base', () => {
   includesAll(pr, ['pull_request:', 'node --test tests/*.test.js', 'node --check']);
 });
+
+test('Pages artifact root is verified before deploy', () => {
+  includesAll(pages, [
+    'Verify static artifact root',
+    'test -f _site/index.html',
+    'assets/i18n/pt-br.json',
+    'assets/js/api-client.js'
+  ]);
+});
+
+test('backend CI workflow keeps the root Dockerfile and Vercel flow intact', () => {
+  const ci = readFileSync(path.join(root, '.github/workflows/ci-cd.yml'), 'utf8');
+  includesAll(ci, ['ruff check .', 'pytest', 'infra/docker/Dockerfile', 'VERCEL_TOKEN']);
+  const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /api\/server\.py/);
+});

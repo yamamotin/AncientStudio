@@ -8,6 +8,8 @@ Abra `index.html` diretamente para ver a versão em modo sim. Para usar a API Py
 
 Publicação: `.github/workflows/pages.yml` publica em `https://yamamotin.github.io/AncientStudio/` o mesmo commit de `main` que a Vercel usa. Para o workflow funcionar, em GitHub → Settings → Pages → Build and deployment → Source escolha **GitHub Actions**. A Vercel usa o `Dockerfile` (projeto `ancientstudio`, `https://ancientstudio.vercel.app/`); as duas hospedagens entregam exatamente os mesmos arquivos relativos. O job `verify-parity` roda **depois** do deploy, compara `build.txt` do Pages com `/api/v1/build` da Vercel e usa `continue-on-error: true`: divergência ou atraso de CDN gera aviso, nunca falha o deploy.
 
+Idiomas: `pt-br` é o padrão; o botão `[ en ]` no topbar troca rótulos e mensagens sem reload. Dicionários em `assets/i18n/`, com fallback embutido para `file://`. `assets/js/api-client.js` é a camada real de integração com `/api/v1` (ETL, gateway e n8n), sem respostas simuladas.
+
 Testes: `.github/workflows/pr-tests.yml` roda `node --test tests/*.test.js` em PRs e em `main`. A base é modular (`tests/helpers/`, testes estáticos e de contrato do motor), sem dependências ou build; basta rodar `node --test tests/*.test.js` localmente (o script usa o runner nativo do Node).
 
 Backend real (em migração): `backend/` contém a aplicação FastAPI modular com endpoints de ETL, gateway fiscal com HMAC/idempotência e integração autenticada com n8n. A estrutura-alvo, contratos e plano de integração frontend estão em `docs/architecture.md`; `docker-compose.yml` sobe API + n8n com segredos obrigatórios em `.env`. O `Dockerfile` da raiz ainda publica a versão atual na Vercel enquanto a integração não é concluída.

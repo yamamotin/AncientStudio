@@ -22,17 +22,18 @@
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#main-console">Pular para o conteúdo</a>
+  <a class="skip-link" href="#main-console" data-i18n="skip">Pular para o conteúdo</a>
   <div class="crt-overlay" aria-hidden="true"></div>
 
   <header class="topbar">
     <div class="wrap topbar-inner">
       <a class="brand" href="#top">ERON@PRODUCTION:~$</a>
-      <nav class="topnav" aria-label="Seções">
-        <a href="#pipeline">01 pipeline</a>
-        <a href="#playground">02 APIs</a>
-        <a href="#scene">03 scene</a>
-        <a href="#console">04 console</a>
+      <nav class="topnav" aria-label="Seções" data-i18n-attr="aria-label:nav.sections">
+        <a href="#pipeline" data-i18n="nav.pipeline">01 pipeline</a>
+        <a href="#playground" data-i18n="nav.apis">02 APIs</a>
+        <a href="#scene" data-i18n="nav.scene">03 scene</a>
+        <a href="#console" data-i18n="nav.console">04 console</a>
+        <button id="lang-toggle" class="cmd-button cmd-button--small" type="button" data-i18n="lang.switchToEn">[ en ]</button>
       </nav>
     </div>
   </header>
@@ -40,7 +41,7 @@
   <main id="main-console" class="wrap">
     <!-- 1. HERO / ASCII BANNER -->
     <section id="top" class="hero" aria-labelledby="hero-heading">
-      <h1 id="hero-heading" class="sr-only">ERON // DEV — Eron Yamamoto D. Justina</h1>
+      <h1 id="hero-heading" class="sr-only" data-i18n="hero.heading">ERON // DEV — Eron Yamamoto D. Justina</h1>
       <div class="banner-frame">
         <pre class="ascii-banner" aria-hidden="true"> _____ ____   ___  _   _  __   __ _    __  __    _    __  __  ___ _____ ___
 | ____|  _ \ / _ \| \ | | \ \ / // \  |  \/  |  / \  |  \/  |/ _ \_   _/ _ \
@@ -49,38 +50,38 @@
 |_____|_| \_\\___/|_| \_|   |_/_/   \_\_|  |_/_/   \_\_|  |_|\___/ |_| \___/</pre>
       </div>
       <p class="prompt-line">eron@production:~$ <span>whoami</span></p>
-      <p class="typewriter-frame" data-text="Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente"><span id="typewriter" class="typewriter" aria-hidden="true">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</span></p>
-      <p class="sr-only">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</p>
-      <p class="hero-location">Paranavaí, Brazil · Remote / LATAM · yamah1337@gmail.com</p>
+      <p class="typewriter-frame" data-i18n-attr="data-text:hero.role" data-text="Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente"><span id="typewriter" class="typewriter" aria-hidden="true">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</span></p>
+      <p class="sr-only" data-i18n="hero.role">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</p>
+      <p class="hero-location" data-i18n="hero.location">Paranavaí, Brazil · Remote / LATAM · yamah1337@gmail.com</p>
 
-      <div class="hero-actions" role="group" aria-label="Ações">
+      <div class="hero-actions" role="group" aria-label="Ações" data-i18n-attr="aria-label:actions.aria">
         <!-- PDFs originais enviados pelo próprio Eron (autorizado em 2026-11-24). -->
-        <a class="cmd-button cmd-button--primary" href="assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf">[ curriculo-pt-br ]</a>
-        <a class="cmd-button cmd-button--quiet" href="assets/cv/Eron_Yamamoto_Resume_EN.pdf">[ curriculo-en ]</a>
-        <button id="github-button" class="cmd-button" type="button">[github]</button>
-        <a class="cmd-button" href="https://linkedin.com/in/eron-yamamoto-della-justina-bb3384156" target="_blank" rel="noopener noreferrer">[ --linkedin ]</a>
-        <a class="cmd-button" href="mailto:yamah1337@gmail.com">[ --contact ]</a>
+        <a class="cmd-button cmd-button--primary" href="assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf" data-i18n="actions.cvPt">[ curriculo-pt-br ]</a>
+        <a class="cmd-button cmd-button--quiet" href="assets/cv/Eron_Yamamoto_Resume_EN.pdf" data-i18n="actions.cvEn">[ curriculo-en ]</a>
+        <button id="github-button" class="cmd-button" type="button" data-i18n="actions.github">[github]</button>
+        <a class="cmd-button" href="https://linkedin.com/in/eron-yamamoto-della-justina-bb3384156" target="_blank" rel="noopener noreferrer" data-i18n="actions.linkedin">[ --linkedin ]</a>
+        <a class="cmd-button" href="mailto:yamah1337@gmail.com" data-i18n="actions.contact">[ --contact ]</a>
       </div>
     </section>
 
     <!-- 2. CI/CD PIPELINE SIMULATOR -->
     <section id="pipeline" class="panel" aria-labelledby="pipeline-title">
       <div class="panel-head">
-        <h2 id="pipeline-title">[ LIVE CI/CD &amp; DOCKER PIPELINE SIMULATOR ]</h2>
-        <span class="badge">SANDBOX</span>
+        <h2 id="pipeline-title" data-i18n="pipeline.title">[ LIVE CI/CD &amp; DOCKER PIPELINE SIMULATOR ]</h2>
+        <span class="badge" data-i18n="pipeline.badge">SANDBOX</span>
       </div>
-      <p class="muted">Clique para ver os quatro estágios. O modo "--force" falha de propósito no Step 1 e abre a análise de causa raiz.</p>
+      <p class="muted" data-i18n="pipeline.hint">Clique para ver os quatro estágios. O modo "--force" falha de propósito no Step 1 e abre a análise de causa raiz.</p>
       <div class="pipeline-actions">
-        <button id="pipeline-success" class="cmd-button cmd-button--primary" type="button">&gt; git push origin main</button>
-        <button id="pipeline-failure" class="cmd-button cmd-button--danger" type="button">&gt; git push --force (simulate bug)</button>
+        <button id="pipeline-success" class="cmd-button cmd-button--primary" type="button" data-i18n="pipeline.success">&gt; git push origin main</button>
+        <button id="pipeline-failure" class="cmd-button cmd-button--danger" type="button" data-i18n="pipeline.failure">&gt; git push --force (simulate bug)</button>
       </div>
       <div id="pipeline-progress" class="progress-line" aria-hidden="true">[..........]   0%</div>
       <div id="pipeline-log" class="terminal-log" role="log" aria-live="polite" aria-relevant="additions">
-        <p><span class="muted">$</span> waiting for git push...</p>
+        <p><span class="muted">$</span> <span data-i18n="pipeline.waiting">waiting for git push...</span></p>
       </div>
       <div id="rca-box" class="rca-box" hidden>
         <p class="error">[ERROR: AssertionError in test_payment_webhook.py]</p>
-        <button id="rca-button" class="cmd-button cmd-button--danger" type="button">[ &gt; run N3 Root Cause Analysis (RCA) ]</button>
+        <button id="rca-button" class="cmd-button cmd-button--danger" type="button" data-i18n="pipeline.rca">[ &gt; run N3 Root Cause Analysis (RCA) ]</button>
         <div id="rca-output" class="terminal-log" role="log" aria-live="polite"></div>
       </div>
     </section>
@@ -90,37 +91,45 @@
       <h2 id="playground-title">[ API PLAYGROUND // PROJECTS ]</h2>
       <div class="ascii-tab-frame">
         <div class="ascii-rule" aria-hidden="true">+------------------+------------------+-------------------+</div>
-        <div class="tablist" role="tablist" aria-label="Projetos">
-          <button id="tab-etl" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-etl" tabindex="0">ETL &amp; Web Scraping</button>
-          <button id="tab-fintech" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-fintech" tabindex="-1">Fintech &amp; Tax API</button>
-          <button id="tab-workflow" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-workflow" tabindex="-1">n8n &amp; AI Workflows</button>
+        <div class="tablist" role="tablist" aria-label="Projetos" data-i18n-attr="aria-label:tabs.aria">
+          <button id="tab-etl" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-etl" tabindex="0" data-i18n="tabs.etl">ETL &amp; Web Scraping</button>
+          <button id="tab-fintech" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-fintech" tabindex="-1" data-i18n="tabs.fintech">Fintech &amp; Tax API</button>
+          <button id="tab-workflow" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-workflow" tabindex="-1" data-i18n="tabs.workflow">n8n &amp; AI Workflows</button>
         </div>
         <div class="ascii-rule" aria-hidden="true">+------------------+------------------+-------------------+</div>
       </div>
 
       <div id="panel-etl" class="tabpanel" role="tabpanel" aria-labelledby="tab-etl" tabindex="0">
-        <p class="muted">Simulador de extração, limpeza e validação. Tenta a API Python local quando ela está no ar; caso contrário usa o modo sim.</p>
-        <button id="extract-button" class="cmd-button" type="button">GET /api/v1/extract</button>
-        <p id="extract-meta" class="response-meta">// aguardando requisição</p>
-        <pre id="extract-output" class="code-block" aria-live="polite">// response will appear here</pre>
+        <p class="muted" data-i18n="etl.hint">Simulador de extração, limpeza e validação. Tenta a API Python local quando ela está no ar; caso contrário usa o modo sim.</p>
+        <button id="extract-button" class="cmd-button" type="button" data-i18n="etl.button">GET /api/v1/extract</button>
+        <p id="extract-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+        <pre id="extract-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
       </div>
 
       <div id="panel-fintech" class="tabpanel" role="tabpanel" aria-labelledby="tab-fintech" tabindex="0" hidden>
-        <p class="muted">Integração de pagamentos e notas fiscais com status HTTP, latência e payload — dados fictícios de demonstração.</p>
-        <button id="invoice-button" class="cmd-button" type="button">POST /api/v1/invoices/parse</button>
-        <p id="invoice-meta" class="response-meta">// aguardando requisição</p>
-        <pre id="invoice-output" class="code-block" aria-live="polite">// response will appear here</pre>
+        <p class="muted" data-i18n="gateway.hint">Integração de pagamentos e notas fiscais com status HTTP, latência e payload — dados fictícios de demonstração.</p>
+        <button id="invoice-button" class="cmd-button" type="button" data-i18n="gateway.button">POST /api/v1/invoices/parse</button>
+        <p id="invoice-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+        <pre id="invoice-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
       </div>
 
       <div id="panel-workflow" class="tabpanel" role="tabpanel" aria-labelledby="tab-workflow" tabindex="0" hidden>
-        <p class="muted">Orquestração de fluxos com n8n, worker Python, LLM e persistência em SQL.</p>
-        <p class="sr-only">Diagrama: Webhook para Python Worker, LLM/IA e SQL Database.</p>
+        <p class="muted" data-i18n="workflow.hint">Orquestração de fluxos com n8n, worker Python, LLM e persistência em SQL.</p>
+        <p class="sr-only" data-i18n="workflow.diagramAria">Diagrama: Webhook para Python Worker, LLM/IA e SQL Database.</p>
         <pre class="ascii-diagram">+---------+     +---------------+     +--------+     +--------------+
 | Webhook | --&gt; | Python Worker | --&gt; | LLM/IA | --&gt; | SQL Database |
 +---------+     +---------------+     +--------+     +--------------+
      ^                   |                   |
      +-------------------+-------------------+   n8n orchestration</pre>
-        <p class="muted">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
+        <label class="sr-only" for="workflow-token" data-i18n="workflow.token">X-API-Key (token do backend)</label>
+        <input id="workflow-token" class="select-control" type="password" autocomplete="off" placeholder="X-API-Key" aria-describedby="workflow-meta">
+        <div class="pipeline-actions">
+          <button id="workflow-run" class="cmd-button" type="button" data-i18n="workflow.run">POST /run</button>
+          <button id="workflow-status" class="cmd-button" type="button" data-i18n="workflow.status">GET /status</button>
+        </div>
+        <p id="workflow-meta" class="response-meta" data-i18n="workflow.needToken">// informe o X-API-Key para chamar o n8n</p>
+        <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
+        <p class="muted" data-i18n="workflow.note">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
       </div>
     </section>
 
@@ -130,8 +139,8 @@
         <h2 id="scene-title">[ ASCII REALMS // SCENE ]</h2>
         <span id="scene-mode" class="badge">FALLBACK</span>
       </div>
-      <p class="muted">Palco reservado para o motor 3D. Enquanto ele não é carregado, um quadro estático substitui a cena.</p>
-      <p class="sr-only">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
+      <p class="muted" data-i18n="scene.hint">Palco reservado para o motor 3D. Enquanto ele não é carregado, um quadro estático substitui a cena.</p>
+      <p class="sr-only" data-i18n="scene.aria">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
       <div id="ascii-scene" class="scene-stage" data-mode="fallback">
         <pre class="scene-fallback" aria-hidden="true">   /\
   /  \      [ SYS ]
@@ -143,7 +152,7 @@
       <div class="scene-controls">
         <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
         <button id="scene-cycle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ cycle: off ]</button>
-        <label class="sr-only" for="scene-preset">Preset da cena</label>
+        <label class="sr-only" for="scene-preset" data-i18n="scene.presetLabel">Preset da cena</label>
         <select id="scene-preset" class="select-control">
           <option value="sanctuary">sanctuary</option>
           <option value="dawn">dawn</option>
@@ -151,7 +160,7 @@
           <option value="storm">storm</option>
           <option value="emerald">emerald</option>
         </select>
-        <span class="scene-help muted">// mouse/toque rotacionam a câmera; scroll continua livre</span>
+        <span class="scene-help muted" data-i18n="scene.presetHelp">// mouse/toque rotacionam a câmera; scroll continua livre</span>
       </div>
     </section>
 
@@ -160,7 +169,7 @@
       <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
       <div class="neofetch">
         <div>
-          <p class="sr-only">Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.</p>
+          <p class="sr-only" data-i18n="stack.penguinAria">Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.</p>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback">
             <pre class="penguin-fallback" aria-hidden="true">     .--.
     |o_o |
@@ -170,16 +179,16 @@
  /'\_   _/`\
  \___)=(___/</pre>
           </div>
-          <p class="engine-hint muted">// mouse ou toque para girar</p>
+          <p class="engine-hint muted" data-i18n="stack.penguinHint">// mouse ou toque para girar</p>
         </div>
         <dl class="specs">
-          <div><dt>User</dt><dd>eron@production</dd></div>
-          <div><dt>OS</dt><dd>Linux Production (Troubleshooting N3 &amp; RCA)</dd></div>
-          <div><dt>Languages</dt><dd>Python, SQL, Bash</dd></div>
-          <div><dt>DevOps</dt><dd>Docker, GitHub Actions (CI/CD), Git</dd></div>
-          <div><dt>Data &amp; AI</dt><dd>ETL Pipelines, Pandas, NumPy, n8n, Web Scraping</dd></div>
-          <div><dt>Certifications</dt><dd>Harvard CS50, Microsoft SC-900, UFPR Machine Learning</dd></div>
-          <div><dt>Education</dt><dd>B.Sc. Electrical Engineering (IFPR) + Erasmus+ International Program</dd></div>
+          <div><dt data-i18n="specs.user">User</dt><dd>eron@production</dd></div>
+          <div><dt data-i18n="specs.os">OS</dt><dd>Linux Production (Troubleshooting N3 &amp; RCA)</dd></div>
+          <div><dt data-i18n="specs.languages">Languages</dt><dd>Python, SQL, Bash</dd></div>
+          <div><dt data-i18n="specs.devops">DevOps</dt><dd>Docker, GitHub Actions (CI/CD), Git</dd></div>
+          <div><dt data-i18n="specs.data">Data &amp; AI</dt><dd>ETL Pipelines, Pandas, NumPy, n8n, Web Scraping</dd></div>
+          <div><dt data-i18n="specs.certifications">Certifications</dt><dd>Harvard CS50, Microsoft SC-900, UFPR Machine Learning</dd></div>
+          <div><dt data-i18n="specs.education">Education</dt><dd>B.Sc. Electrical Engineering (IFPR) + Erasmus+ International Program</dd></div>
         </dl>
       </div>
     </section>
@@ -187,27 +196,27 @@
     <!-- 6. INTERACTIVE CONSOLE -->
     <section id="console" class="section" aria-labelledby="console-title">
       <div class="panel-head">
-        <h2 id="console-title">[ INTERACTIVE CONSOLE ]</h2>
+        <h2 id="console-title" data-i18n="console.title">[ INTERACTIVE CONSOLE ]</h2>
         <div class="console-meta">
-          <span id="connection-status" class="badge">SIM MODE</span>
-          <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ audio: off ]</button>
+          <span id="connection-status" class="badge">API OFFLINE</span>
+          <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false" data-i18n="console.audioOff">[ audio: off ]</button>
         </div>
       </div>
-      <p id="console-hint" class="muted">Comandos: help, skills, experience, projects, contact, cv, clear.</p>
+      <p id="console-hint" class="muted" data-i18n="console.hint">Comandos: help, skills, experience, projects, contact, cv, clear.</p>
       <div id="console-output" class="terminal-log console-output" role="log" aria-live="polite" aria-relevant="additions">
-        <p><span class="accent">ERON/OS</span> terminal ready. Digite <span class="accent">help</span> para começar.</p>
+        <p><span class="accent">ERON/OS</span> <span data-i18n="console.ready">terminal ready. Digite help para começar.</span></p>
       </div>
       <form id="console-form" class="console-form" autocomplete="off">
-        <label class="prompt-label" for="console-input">eron@production:~$</label>
-        <input id="console-input" name="command" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="help" aria-describedby="console-hint">
-        <button class="cmd-button" type="submit">[ enter ]</button>
+        <label class="prompt-label" for="console-input" data-i18n="console.prompt">eron@production:~$</label>
+        <input id="console-input" name="command" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="help" aria-describedby="console-hint" data-i18n-attr="placeholder:console.hint">
+        <button class="cmd-button" type="submit" data-i18n="console.enter">[ enter ]</button>
       </form>
     </section>
   </main>
 
   <footer class="footer wrap">
     <span>© <span id="year">2026</span> Eron Yamamoto D. Justina</span>
-    <span>// no trackers · no analytics · self-hosted fonts</span>
+    <span data-i18n="footer.note">// no trackers · no analytics · self-hosted fonts</span>
   </footer>
 </body>
 </html>
