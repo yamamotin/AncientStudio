@@ -1,7 +1,7 @@
-node_modules/
-.next/
-out/
-build/
-.env*
+# OS and editor noise
 .DS_Store
-agent
+*.swp
+*~
+
+# Local test artifacts
+screenshots/
