@@ -47,6 +47,30 @@ class Settings(BaseSettings):
         self.n8n_webhook_base_url = self.n8n_webhook_base_url.rstrip("/")
         return self
 
+    @model_validator(mode="after")
+    def reject_placeholder_secrets(self) -> "Settings":
+        """Fail fast outside local/test instead of shipping dev-only credentials."""
+        if self.environment.strip().lower() in {"local", "test", "dev", "development"}:
+            return self
+
+        placeholders = {
+            "gateway_hmac_secret": self.gateway_hmac_secret,
+            "workflow_api_token": self.workflow_api_token,
+            "n8n_api_token": self.n8n_api_token,
+            "n8n_webhook_token": self.n8n_webhook_token,
+        }
+        offenders = [
+            name
+            for name, value in placeholders.items()
+            if value.startswith("dev-only-") or "change-me" in value.lower()
+        ]
+        if offenders:
+            joined = ", ".join(sorted(offenders))
+            raise ValueError(
+                f"placeholder secrets are not allowed in {self.environment!r}: {joined}"
+            )
+        return self
+
 
 @lru_cache
 def get_settings() -> Settings:

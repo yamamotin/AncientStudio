@@ -45,3 +45,15 @@ test('no phone number or analytics in browser-facing HTML', () => {
   assert.ok(!/\+?55\s?\(?\d{2}\)?[\s.]*9?\d{4}/.test(html), 'no phone number');
   assert.ok(!/(gtag|googletagmanager|plausible|fathom)/i.test(html), 'no trackers');
 });
+
+test('scene help static fallback matches its pt-br dictionary key', () => {
+  const { assert } = require('./helpers/assert');
+  const pt = JSON.parse(readFileSync(path.join(root, 'assets/i18n/pt-br.json'), 'utf8'));
+  const match = html.match(
+    /<span[^>]*class="[^"]*scene-help[^"]*"[^>]*data-i18n="scene\.presetHelp"[^>]*>([^<]+)<\/span>/
+  );
+
+  assert.ok(match, 'scene help element with data-i18n hook');
+  assert.equal(match[1], pt['scene.presetHelp']);
+  assert.doesNotMatch(html, /scene\.engineHelp/, 'no raw i18n key leaks into static HTML');
+});
