@@ -107,6 +107,45 @@ window.TP = window.TP || {};
     });
   }
 
+  function initScene() {
+    var stage = document.getElementById('ascii-scene');
+    if (!stage || !TP.scene) return;
+
+    var badge = document.getElementById('scene-mode');
+    var toggle = document.getElementById('scene-toggle');
+    var preset = document.getElementById('scene-preset');
+    var help = document.querySelector('.scene-help');
+
+    stage.addEventListener('tp:scene-mode', function (event) {
+      var engineReady = event.detail.mode === 'engine';
+      if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
+      if (toggle) toggle.disabled = !engineReady;
+      if (preset) preset.disabled = !engineReady;
+      if (help) {
+        help.textContent = engineReady
+          ? '// motor conectado'
+          : '// controles ativam quando o motor estiver disponível';
+      }
+    });
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var paused = toggle.getAttribute('aria-pressed') !== 'true';
+        TP.scene.setPaused(paused);
+        toggle.setAttribute('aria-pressed', String(paused));
+        toggle.textContent = paused ? '[ resume ]' : '[ pause ]';
+      });
+    }
+
+    if (preset) {
+      preset.addEventListener('change', function () {
+        TP.scene.setPreset(preset.value);
+      });
+    }
+
+    TP.scene.mount(stage, { preset: preset ? preset.value : 'outpost', paused: false });
+  }
+
   function initGithubButton() {
     var button = document.getElementById('github-button');
     if (!button) return;
@@ -128,6 +167,7 @@ window.TP = window.TP || {};
     TP.console.init();
     initTypewriter();
     initTabs();
+    initScene();
     initApiButtons();
     initAudio();
     initGithubButton();
