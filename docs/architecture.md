@@ -99,6 +99,9 @@ AncientStudio/
   webhook autenticado; `GET /api/v1/workflows/runs/{execution_id}` consulta a execução pela
   REST API do n8n. Falhas upstream viram `502`, ausência vira `404`.
 - `IdempotencyStore` é thread-safe e substituível por Redis quando houver múltiplas réplicas.
+- `Settings` rejeita valores `dev-only-*` / `change-me` quando `ENVIRONMENT` não é
+  `local`, `test`, `dev` ou `development`: a API falha no startup em vez de rodar com
+  credenciais de exemplo em produção.
 
 ### Infra e CI/CD
 
@@ -111,7 +114,7 @@ AncientStudio/
 
 ## 3. Estado atual
 
-- Estrutura acima criada, com backend FastAPI modular, 16 testes `pytest` passando e `ruff`
+- Estrutura acima criada, com backend FastAPI modular, 22 testes `pytest` passando e `ruff`
   limpo.
 - `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflow de CI/CD e um
   export de workflow n8n versionado.
