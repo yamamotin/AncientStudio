@@ -81,8 +81,10 @@ jobs:
 
       - name: Compare deployed SHAs
         run: |
-          pages_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$PAGES_URL/build.txt" | tr -d '[:space:]')
-          vercel_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$VERCEL_URL/api/v1/build" \
+          # Cache-buster: without a unique query both CDNs can return the
+          # previous commit and parity would pass against a stale deployment.
+          pages_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$PAGES_URL/build.txt?v=$GITHUB_SHA" | tr -d '[:space:]')
+          vercel_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$VERCEL_URL/api/v1/build?v=$GITHUB_SHA" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha", ""))')
           echo "pages_sha=$pages_sha"
           echo "vercel_sha=$vercel_sha"

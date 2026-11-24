@@ -77,11 +77,12 @@ Não há problema de `basePath`: os caminhos são relativos e o bundle Vite escr
 ```bash
 PAGES_URL=https://yamamotin.github.io/AncientStudio
 VERCEL_URL=https://ancientstudio.vercel.app
-
-pages_sha=$(curl -fsSL "$PAGES_URL/build.txt" | tr -d '[:space:]')
-vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
 main_sha=$(git rev-parse origin/main)
+
+# Cache-buster obrigatório: sem ele as CDNs podem devolver o SHA anterior.
+pages_sha=$(curl -fsSL "$PAGES_URL/build.txt?v=$main_sha" | tr -d '[:space:]')
+vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build?v=$main_sha" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
 
 printf 'pages=%s\nvercel=%s\nmain=%s\n' "$pages_sha" "$vercel_sha" "$main_sha"
 
