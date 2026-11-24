@@ -7,6 +7,8 @@ import { computeAdaptiveResolution } from './ResolutionController';
 import {
   InputSystem,
   MovementRotationSystem,
+  NeonPulseSystem,
+  PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
 } from '../ecs/SystemRunner';
@@ -29,12 +31,12 @@ import { type BuiltPlaygroundScene, PlaygroundSceneBuilder } from '../world/Play
 /**
  * AsciiEngineCore: Modular WebGL2 runtime orchestrating:
  * - `EngineLoop` (clamped deltaTime, zero-jump pause/resume, FPS cap & telemetry)
- * - `LifecycleManager` (ResizeObserver, IntersectionObserver, Page Visibility, leak-free `.dispose()`)
- * - `World` + `SystemRunner` (lean ECS: InputSystem -> MovementRotationSystem -> AnimationSystem -> RenderSyncSystem)
- * - `MapLoader` + `PlaygroundSceneBuilder` (small interactive ASCII Realms island playground)
+ * - `LifecycleManager` (rAF-coalesced ResizeObserver, Fullscreen observer, IntersectionObserver, Page Visibility, leak-free `.dispose()`)
+ * - `World` + `SystemRunner` (ordered ECS pipeline: InputSystem -> PatrolSystem -> MovementRotationSystem -> AnimationSystem -> NeonPulseSystem -> RenderSyncSystem)
+ * - `MapLoader` + `PlaygroundSceneBuilder` (3D Cyberpunk Neo-Sector cityscape in `[ ASCII REALMS // SCENE ]`)
  * - `TuxEntityFactory` (dedicated high-contrast 3D Linux Tux stage for `[ STACK // NEOFETCH ]`)
  * - `PointerInput` + `KeyboardInput` (scroll-safe passive mouse/touch tracking + opt-in focus-gated keys)
- * - `VfxController` + `AsciiPostProcessor` (camera parallax, cursor lantern, reflections, bloom & structural ASCII shader)
+ * - `VfxController` + `AsciiPostProcessor` (camera parallax, cursor spotlight, neon rain, wet canal reflections, bloom & smooth-transition ASCII shader)
  */
 export class AsciiEngineCore {
   private readonly container: HTMLElement;
@@ -43,6 +45,7 @@ export class AsciiEngineCore {
   private userManuallyPaused = false;
   private autoPausedOffscreen = false;
   private autoPausedHiddenTab = false;
+  private isFullscreenActive = false;
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
@@ -161,7 +164,7 @@ export class AsciiEngineCore {
       this.pointerInput = pointerInput;
       this.keyboardInput = keyboardInput;
 
-      // 3. Build Scene Mode ('playground' vs 'mascot') + ECS Systems
+      // 3. Build Scene Mode ('playground' vs 'mascot') + Ordered ECS Systems
       const ecsWorld = new World();
       const systemRunner = new SystemRunner();
       this.ecsWorld = ecsWorld;
@@ -176,15 +179,18 @@ export class AsciiEngineCore {
       // 4. ASCII Post-Processor
       this.postProcessor = new AsciiPostProcessor(this.config);
 
-      // 5. Initial Resize + Observers
+      // 5. Initial Resize (immediate snap) + Observers (smooth transitions on subsequent resizes/fullscreen)
       const rect = this.container.getBoundingClientRect();
-      this.applyResize(Math.max(1, rect.width), Math.max(1, rect.height));
+      this.applyResize(Math.max(1, rect.width), Math.max(1, rect.height), true);
 
       lifecycle.observeContainer(
         {
-          onResize: (w, h) => this.applyResize(w, h),
+          onResize: (w, h) => this.applyResize(w, h, false),
           onVisibilityChange: (visible) => this.handleIntersectionVisibility(visible),
           onTabHiddenChange: (hidden) => this.handleTabVisibility(hidden),
+          onFullscreenChange: (isFs) => {
+            this.isFullscreenActive = isFs;
+          },
         },
         {
           observeViewportIntersection: this.config.pauseOffscreen,
@@ -232,14 +238,17 @@ export class AsciiEngineCore {
       baseCameraPos: mapDef.cameraAnchor,
       lookAtTarget: mapDef.cameraLookAt,
       particleOrigin: mapDef.shrineCenter,
-      particleCount: 64,
+      particleCount: 168,
     });
 
+    // Deterministic priority-sorted ECS pipeline
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput))
-      .addSystem(new MovementRotationSystem(built.terrainHeightAt))
-      .addSystem(new AnimationSystem())
-      .addSystem(new RenderSyncSystem());
+      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
+      .addSystem(new PatrolSystem(), 15)
+      .addSystem(new MovementRotationSystem(built.terrainHeightAt), 20)
+      .addSystem(new AnimationSystem(), 30)
+      .addSystem(new NeonPulseSystem(), 35)
+      .addSystem(new RenderSyncSystem(), 40);
   }
 
   private initMascotStage(
@@ -289,10 +298,10 @@ export class AsciiEngineCore {
     });
 
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput))
-      .addSystem(new MovementRotationSystem())
-      .addSystem(new AnimationSystem())
-      .addSystem(new RenderSyncSystem());
+      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
+      .addSystem(new MovementRotationSystem(), 20)
+      .addSystem(new AnimationSystem(), 30)
+      .addSystem(new RenderSyncSystem(), 40);
   }
 
   public pause(): void {
@@ -308,6 +317,16 @@ export class AsciiEngineCore {
   public setPlayableKeyboardEnabled(enabled: boolean): void {
     this.config.enableKeyboard = enabled;
     this.keyboardInput?.setEnabled(enabled);
+  }
+
+  /**
+   * Public programmatic resize hook (also invoked automatically by ResizeObserver & fullscreenchange).
+   */
+  public resize(dimensions: { width: number; height: number }, immediate = false): void {
+    if (this.state === 'destroyed') return;
+    if (dimensions.width > 0 && dimensions.height > 0) {
+      this.applyResize(dimensions.width, dimensions.height, immediate);
+    }
   }
 
   public updateConfig(partialConfig: PartialEngineConfig): void {
@@ -330,7 +349,7 @@ export class AsciiEngineCore {
       this.renderer.shadowMap.needsUpdate = true;
     }
 
-    // Apply live palette updates to background, fog, lights & water uniforms
+    // Apply live palette updates to background, fog, neon architecture, lights & water uniforms
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.set(this.config.palette.background);
     }
@@ -343,11 +362,20 @@ export class AsciiEngineCore {
       this.builtPlayground.ambientHemi.color.set(p.coolAmbient);
       this.builtPlayground.moonDirLight.color
         .set(p.coolAmbient)
-        .lerp(new THREE.Color('#CBE8FF'), 0.45);
+        .lerp(new THREE.Color('#D8F6FF'), 0.4);
       this.builtPlayground.torchLight.color.set(p.warmLight);
-      for (const bl of this.builtPlayground.brazierLights) {
-        bl.color.set(p.warmLight);
-      }
+
+      // Update shared cyberpunk architectural neon materials dynamically on preset switch
+      this.builtPlayground.neonMaterials.cyan.color.set(p.coolAmbient);
+      this.builtPlayground.neonMaterials.cyan.emissive.set(p.coolAmbient);
+      this.builtPlayground.neonMaterials.magenta.color.set(p.warmLight);
+      this.builtPlayground.neonMaterials.magenta.emissive.set(p.warmLight);
+      this.builtPlayground.neonMaterials.amber.color.set(p.warmCore);
+      this.builtPlayground.neonMaterials.amber.emissive.set(p.warmCore);
+
+      this.builtPlayground.brazierLights.forEach((bl, idx) => {
+        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
+      });
 
       const u = this.builtPlayground.waterMaterial.uniforms;
       u.uDeepColor?.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
@@ -365,7 +393,7 @@ export class AsciiEngineCore {
       prevFont !== this.config.fontFamily;
 
     if (prevMaxDpr !== this.config.maxPixelRatio) {
-      this.applyResize(this.containerWidth, this.containerHeight);
+      this.applyResize(this.containerWidth, this.containerHeight, false);
     } else {
       const grid = this.postProcessor.applyConfig(
         this.config,
@@ -395,7 +423,9 @@ export class AsciiEngineCore {
 
     this.systemRunner?.clear();
     this.systemRunner = null;
-    this.ecsWorld?.clear();
+
+    // Dispose ECS-owned dynamic entities & lights cleanly before sweeping remaining scene graph
+    this.ecsWorld?.clear(true);
     this.ecsWorld = null;
     this.builtPlayground = null;
     this.vfx = null;
@@ -459,10 +489,6 @@ export class AsciiEngineCore {
     return this.camera;
   }
 
-  /**
-   * Returns current rotation (yaw, pitch in radians) of the primary entity (e.g. Tux in mascot mode)
-   * so host UI telemetry badges can read exact angles without polling duplicate rAF loops.
-   */
   public getPrimaryEntityAngles(): { yaw: number; pitch: number } | null {
     if (!this.ecsWorld || this.primaryEntityId === null) return null;
     const t = this.ecsWorld.getComponent(this.primaryEntityId, 'Transform');
@@ -473,12 +499,12 @@ export class AsciiEngineCore {
   private renderFrame(dt: number, elapsed: number): void {
     if (!this.renderer || !this.scene || !this.camera || !this.postProcessor) return;
 
-    // 1. Run ECS Systems (Input -> Movement/Rotation -> Animation -> RenderSync)
+    // 1. Run Ordered ECS Systems (Input -> Patrol -> Movement/Rotation -> Animation -> NeonPulse -> RenderSync)
     if (this.ecsWorld && this.systemRunner) {
       this.systemRunner.run(this.ecsWorld, { dt, elapsed });
     }
 
-    // 2. Update Camera Parallax, Cursor Light & Particles
+    // 2. Update Camera Parallax, Cursor Spotlight & Cyberpunk Rain/Particles
     const ptr = this.pointerInput
       ? this.pointerInput.sample(0)
       : {
@@ -494,7 +520,7 @@ export class AsciiEngineCore {
 
     this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
 
-    // 3. Sync Playground Reflective Water Shader Uniforms (camera, shrine, cursor lantern & braziers)
+    // 3. Sync Playground Reflective Neon Canal Uniforms
     if (this.builtPlayground) {
       const u = this.builtPlayground.waterMaterial.uniforms;
       if (u.uTime) u.uTime.value = elapsed;
@@ -528,8 +554,14 @@ export class AsciiEngineCore {
       }
     }
 
-    // 4. Multi-Pass ASCII Post-Processing Render
-    const metrics = this.postProcessor.render(this.renderer, this.scene, this.camera, elapsed);
+    // 4. Multi-Pass ASCII Post-Processing Render (with smooth cell-density transition step)
+    const metrics = this.postProcessor.render(
+      this.renderer,
+      this.scene,
+      this.camera,
+      elapsed,
+      dt
+    );
     this.lastDrawCalls = metrics.drawCalls;
     this.lastTriangles = metrics.triangles;
   }
@@ -545,7 +577,7 @@ export class AsciiEngineCore {
     }
   }
 
-  private applyResize(cssWidth: number, cssHeight: number): void {
+  private applyResize(cssWidth: number, cssHeight: number, immediate = false): void {
     if (!this.renderer || !this.camera || !this.postProcessor) return;
 
     const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -557,7 +589,19 @@ export class AsciiEngineCore {
       devicePixelRatio: rawDpr,
       config: this.config,
       isCoarsePointer: coarse,
+      isFullscreen: this.isFullscreenActive,
     });
+
+    // Skip duplicate no-op resize ticks if physical resolution and grid are already identical
+    if (
+      !immediate &&
+      this.containerWidth === profile.cssWidth &&
+      this.containerHeight === profile.cssHeight &&
+      this.effectiveDpr === profile.effectiveDpr &&
+      this.activeCellSize === profile.activeCellSize
+    ) {
+      return;
+    }
 
     this.containerWidth = profile.cssWidth;
     this.containerHeight = profile.cssHeight;
@@ -567,15 +611,20 @@ export class AsciiEngineCore {
     this.gridColumns = profile.columns;
     this.gridRows = profile.rows;
 
-    // Auto-reduce FPS cap slightly on small mobile coarse devices if default 60fps is set & battery conservation applies,
-    // while keeping 60fps smooth target on capable screens
-    this.renderer.setPixelRatio(profile.effectiveDpr);
+    if (this.renderer.getPixelRatio() !== profile.effectiveDpr) {
+      this.renderer.setPixelRatio(profile.effectiveDpr);
+    }
     this.renderer.setSize(profile.cssWidth, profile.cssHeight, false);
 
-    this.camera.aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
+    const aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
+    this.camera.aspect = aspect;
+    // Slightly widen FOV on narrow portrait viewports or expand vista cleanly on ultrawide/fullscreen
+    if (this.config.mode === 'playground') {
+      this.camera.fov = aspect < 1.0 ? 54 : this.isFullscreenActive ? 44 : 46;
+    }
     this.camera.updateProjectionMatrix();
 
-    this.postProcessor.applyResolutionProfile(profile, this.config);
+    this.postProcessor.applyResolutionProfile(profile, this.config, immediate);
 
     if (this.state === 'paused') {
       this.loop?.stepOnce(0);

@@ -3,11 +3,17 @@ import { AsciiEngineCore } from './core/AsciiEngineCore';
 import { DEFAULT_ASCII_RAMP, DEFAULT_ENGINE_CONFIG, DEFAULT_PALETTE } from './core/defaultConfig';
 import { EngineLoop } from './core/EngineLoop';
 import { LifecycleManager } from './core/LifecycleManager';
-import { computeAdaptiveResolution, detectResolutionTier } from './core/ResolutionController';
+import {
+  computeAdaptiveResolution,
+  detectResolutionTier,
+  ResolutionTransitionController,
+} from './core/ResolutionController';
 import { AnimationSystem } from './animation/AnimationSystem';
 import {
   InputSystem,
   MovementRotationSystem,
+  NeonPulseSystem,
+  PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
 } from './ecs/SystemRunner';
@@ -46,6 +52,7 @@ export type {
 };
 
 export {
+  AsciiEngineCore,
   DEFAULT_ASCII_RAMP,
   DEFAULT_ENGINE_CONFIG,
   DEFAULT_PALETTE,
@@ -53,11 +60,14 @@ export {
   LifecycleManager,
   computeAdaptiveResolution,
   detectResolutionTier,
+  ResolutionTransitionController,
   World,
   SystemRunner,
   InputSystem,
+  PatrolSystem,
   MovementRotationSystem,
   AnimationSystem,
+  NeonPulseSystem,
   RenderSyncSystem,
   MapLoader,
   PlaygroundSceneBuilder,
@@ -69,13 +79,7 @@ export {
 };
 
 /**
- * Clean, framework-agnostic Facade for the modular 3D ASCII Playground & Mascot Engine.
- *
- * Usage:
- * ```ts
- * const engine = new AsciiSceneEngine(containerElement, { mode: 'playground', cellSize: 10 });
- * engine.mount();
- * ```
+ * Clean, framework-agnostic Facade for the modular 3D ASCII Cyberpunk Playground & Mascot Engine.
  */
 export class AsciiSceneEngine {
   private readonly core: AsciiEngineCore;
@@ -97,6 +101,11 @@ export class AsciiSceneEngine {
   /** Resumes the render loop seamlessly with zero `deltaTime` jump. */
   public resume(): void {
     this.core.resume();
+  }
+
+  /** Smoothly updates container resolution and ASCII cell density (also triggered automatically by ResizeObserver & fullscreen). */
+  public resize(dimensions: { width: number; height: number }, immediate = false): void {
+    this.core.resize(dimensions, immediate);
   }
 
   /** Updates theme colors, glyph density, bloom, DoF, or FPS cap dynamically at runtime. */

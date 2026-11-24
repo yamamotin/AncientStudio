@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { computeAdaptiveResolution } from '../core/ResolutionController';
+import {
+  computeAdaptiveResolution,
+  ResolutionTransitionController,
+} from '../core/ResolutionController';
 import {
   ASCII_COMPOSITE_FRAGMENT_SHADER,
   BLOOM_BLUR_FRAGMENT_SHADER,
@@ -13,8 +16,8 @@ import type { EngineConfig, ResolutionProfile } from '../types';
  * Self-contained WebGL multi-pass post-processor:
  *  Pass 1: 3D Scene -> Offscreen RGBA HalfFloat RenderTarget + DepthTexture
  *  Pass 2: Bright-pass extraction & downsample (1/3 desktop, 1/4 mobile)
- *  Pass 3 & 4: Separable wide Gaussian/Kawase blur (H + V) so warm light bleeds across neighboring ASCII cells
- *  Pass 5: High-Resolution Adaptive ASCII Composite (5-tap sub-cell supersampling + DoF + Sobel structural glyphs + sharpened LinearFilter atlas) -> Screen
+ *  Pass 3 & 4: Separable wide Gaussian/Kawase blur (H + V) so neon light bleeds across neighboring ASCII cells
+ *  Pass 5: High-Resolution Adaptive ASCII Composite (center-anchored smooth cell-size transition + 5-tap sub-cell supersampling + DoF + Sobel structural glyphs)
  */
 export class AsciiPostProcessor {
   private readonly quadScene: THREE.Scene;
@@ -32,13 +35,19 @@ export class AsciiPostProcessor {
   private readonly downsampleMaterial: THREE.ShaderMaterial;
   private readonly blurMaterial: THREE.ShaderMaterial;
   private readonly compositeMaterial: THREE.ShaderMaterial;
+  private readonly transitionController: ResolutionTransitionController;
 
   private lastProfile: ResolutionProfile | null = null;
+  private allocatedPhysW = 2;
+  private allocatedPhysH = 2;
+  private allocatedBloomW = 2;
+  private allocatedBloomH = 2;
 
   constructor(config: EngineConfig) {
     this.quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quadScene = new THREE.Scene();
     this.quadGeometry = new THREE.PlaneGeometry(2, 2);
+    this.transitionController = new ResolutionTransitionController(14.0);
 
     this.atlasData = createGlyphAtlas(
       config.characterRamp,
@@ -120,6 +129,7 @@ export class AsciiPostProcessor {
         uResolution: { value: new THREE.Vector2(2, 2) },
         uCellSize: { value: new THREE.Vector2(8, 10) },
         uSubCellSpread: { value: 0.22 },
+        uTransitionMix: { value: 0.0 },
         uRampCount: { value: this.atlasData.rampCount },
         uStructuralCount: { value: this.atlasData.structuralCount },
         uTotalGlyphs: { value: this.atlasData.totalGlyphs },
@@ -140,17 +150,33 @@ export class AsciiPostProcessor {
   }
 
   /**
-   * Applies an adaptive `ResolutionProfile` to offscreen render targets, glyph atlas DPI, and cell uniforms.
+   * Applies an adaptive `ResolutionProfile` to offscreen render targets (skipping redundant GPU
+   * reallocations when dimensions are unchanged) and feeds smooth cell-density interpolation.
    */
-  public applyResolutionProfile(profile: ResolutionProfile, config: EngineConfig): ResolutionProfile {
+  public applyResolutionProfile(
+    profile: ResolutionProfile,
+    config: EngineConfig,
+    immediate = false
+  ): ResolutionProfile {
     this.lastProfile = profile;
 
-    this.sceneTarget.setSize(profile.physicalWidth, profile.physicalHeight);
+    if (
+      this.allocatedPhysW !== profile.physicalWidth ||
+      this.allocatedPhysH !== profile.physicalHeight
+    ) {
+      this.allocatedPhysW = profile.physicalWidth;
+      this.allocatedPhysH = profile.physicalHeight;
+      this.sceneTarget.setSize(profile.physicalWidth, profile.physicalHeight);
+    }
 
     const bloomWidth = Math.max(2, Math.floor(profile.physicalWidth / profile.bloomDownsample));
     const bloomHeight = Math.max(2, Math.floor(profile.physicalHeight / profile.bloomDownsample));
-    this.bloomTargetA.setSize(bloomWidth, bloomHeight);
-    this.bloomTargetB.setSize(bloomWidth, bloomHeight);
+    if (this.allocatedBloomW !== bloomWidth || this.allocatedBloomH !== bloomHeight) {
+      this.allocatedBloomW = bloomWidth;
+      this.allocatedBloomH = bloomHeight;
+      this.bloomTargetA.setSize(bloomWidth, bloomHeight);
+      this.bloomTargetB.setSize(bloomWidth, bloomHeight);
+    }
 
     this.downsampleMaterial.uniforms.uTexelSize.value.set(
       1 / profile.physicalWidth,
@@ -161,8 +187,12 @@ export class AsciiPostProcessor {
       profile.physicalWidth,
       profile.physicalHeight
     );
-    this.compositeMaterial.uniforms.uCellSize.value.set(profile.cellPhysW, profile.cellPhysH);
-    this.compositeMaterial.uniforms.uSubCellSpread.value = profile.subCellSampleSpread;
+
+    this.transitionController.setTarget(profile, immediate);
+    const initialStep = this.transitionController.step(0);
+    this.compositeMaterial.uniforms.uCellSize.value.set(initialStep.cellW, initialStep.cellH);
+    this.compositeMaterial.uniforms.uSubCellSpread.value = initialStep.subCellSpread;
+    this.compositeMaterial.uniforms.uTransitionMix.value = initialStep.transitionMix;
 
     // Upgrade or downgrade 2D Canvas glyph atlas resolution when moving between 1x and HiDPI/Retina
     if (this.atlasData.tileSize !== profile.atlasTileSize) {
@@ -222,7 +252,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
     this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
 
-    return this.applyResolutionProfile(profile, config);
+    return this.applyResolutionProfile(profile, config, false);
   }
 
   private rebuildGlyphAtlas(config: EngineConfig, tileSize: number): void {
@@ -244,8 +274,15 @@ export class AsciiPostProcessor {
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
-    elapsedSeconds: number
+    elapsedSeconds: number,
+    dtSeconds = 1 / 60
   ): { drawCalls: number; triangles: number } {
+    // Advance smooth resolution / cell-density transition
+    const tr = this.transitionController.step(dtSeconds);
+    this.compositeMaterial.uniforms.uCellSize.value.set(tr.cellW, tr.cellH);
+    this.compositeMaterial.uniforms.uSubCellSpread.value = tr.subCellSpread;
+    this.compositeMaterial.uniforms.uTransitionMix.value = tr.transitionMix;
+
     this.compositeMaterial.uniforms.uCameraNear.value = camera.near;
     this.compositeMaterial.uniforms.uCameraFar.value = camera.far;
     this.compositeMaterial.uniforms.uTime.value = elapsedSeconds;

@@ -52,17 +52,17 @@ export interface ResolutionProfile {
  * and classic high-contrast terminal Tux silhouettes.
  */
 export interface ThemePalette {
-  /** Deep night backdrop & shadow floor (default: '#050508') */
+  /** Deep night backdrop & shadow floor (default: '#04050B') */
   background: string;
-  /** Warm amber/orange focal torch & shrine light (default: '#FF8C24') */
+  /** Primary warm/neon focal light — magenta/crimson or amber (default: '#FF2A85') */
   warmLight: string;
-  /** Secondary warm ember accent for inner flames & sparks (default: '#FFB85C') */
+  /** Secondary bright incandescent/amber neon accent (default: '#FFB830') */
   warmCore: string;
-  /** Cool cyan/slate ambient moonlight on rocky ridges (default: '#2E6F95') */
+  /** Cool nocturnal skyline / cyan haze ambient (default: '#00E5FF') */
   coolAmbient: string;
-  /** Emerald green accent for moss, pines, and ancient relief vegetation (default: '#3A7D5C') */
+  /** Secondary architectural/structural neon accent (default: '#1E88E5') */
   foliageAccent: string;
-  /** Interactive cursor lantern tint (default: '#7AD7F0') */
+  /** Interactive cursor drone/spotlight tint (default: '#56F2FF') */
   cursorLight: string;
 }
 
@@ -109,7 +109,7 @@ export interface LifecycleCallbacks {
 export interface EngineConfig {
   /** Scene mode ('playground' for ASCII Realms island, 'mascot' for Neofetch 3D Tux) */
   mode: SceneMode;
-  /** Map identifier loaded by MapLoader when mode === 'playground' (default: 'sanctuary-isle') */
+  /** Map identifier loaded by MapLoader when mode === 'playground' (default: 'cyberpunk-citadel') */
   mapId: string;
   /** Enable keyboard input capture ONLY when explicitly opted-in / focused (default: false) */
   enableKeyboard: boolean;

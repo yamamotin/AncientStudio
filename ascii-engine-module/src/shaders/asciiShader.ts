@@ -36,14 +36,16 @@ export const BLOOM_DOWNSAMPLE_FRAGMENT_SHADER = /* glsl */ `
 
   vec3 extractBright(vec3 color) {
     float luma = getLuma(color);
-    // Boost warm amber/orange emissions slightly for torch/lantern glow
-    float warmth = max(0.0, color.r - color.b * 0.65);
-    float metric = max(luma, warmth * 0.95);
+    // Boost cyberpunk neon emissions (cyan, magenta, amber) equally for vivid halo bleed
+    float maxCh = max(color.r, max(color.g, color.b));
+    float minCh = min(color.r, min(color.g, color.b));
+    float neonChroma = (maxCh - minCh) * 0.62 + maxCh * 0.45;
+    float metric = max(luma, neonChroma);
     float knee = uThreshold * 0.45 + 0.0001;
     float soft = clamp(metric - uThreshold + knee, 0.0, 2.0 * knee);
     soft = (soft * soft) / (4.0 * knee);
     float contribution = max(soft, metric - uThreshold) / max(metric, 0.0001);
-    return color * clamp(contribution, 0.0, 2.5);
+    return color * clamp(contribution, 0.0, 2.65);
   }
 
   void main() {
@@ -99,6 +101,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform vec2 uResolution;
   uniform vec2 uCellSize;
   uniform float uSubCellSpread;
+  uniform float uTransitionMix;
   uniform float uRampCount;
   uniform float uStructuralCount;
   uniform float uTotalGlyphs;
@@ -147,14 +150,17 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    // 1. Quantize screen space into discrete integer monospace character cells
-    vec2 pixelPos = vUv * uResolution;
-    vec2 cellIndex = floor(pixelPos / uCellSize);
-    vec2 localCellUv = fract(pixelPos / uCellSize);
+    // 1. Center-anchored monospace cell quantization: expands/contracts symmetrically from
+    //    viewport center during container resize & fullscreen transitions without corner crawling!
+    vec2 halfRes = uResolution * 0.5;
+    vec2 centeredPx = vUv * uResolution - halfRes;
+    vec2 cellIndex = floor(centeredPx / uCellSize);
+    vec2 localCellUv = fract(centeredPx / uCellSize);
     vec2 glyphUv = vec2(localCellUv.x, 1.0 - localCellUv.y);
 
-    vec2 cellCenterUv = (cellIndex + 0.5) * uCellSize / uResolution;
+    vec2 cellCenterUv = clamp(((cellIndex + 0.5) * uCellSize + halfRes) / uResolution, 0.001, 0.999);
     vec2 cellStepUv = uCellSize / uResolution;
+    vec2 pixelPos = vUv * uResolution;
 
     // 2. Depth & Depth-of-Field calculation at the cell center
     float rawCenterDepth = texture2D(tDepth, cellCenterUv).r;
@@ -246,21 +252,20 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float atlasU = (glyphIndex + clampedLocalX) / uTotalGlyphs;
     float rawMask = texture2D(tGlyphAtlas, vec2(atlasU, clampedLocalY)).r;
 
-    // Adaptive edge sharpness based on physical cell height: crisp pixel threshold at small cells,
-    // clean anti-aliased typographic curves at large HiDPI cells
-    float aaWidth = clamp(1.35 / max(uCellSize.y, 6.0), 0.06, 0.22);
+    // Adaptive edge sharpness based on physical cell height + subtle softening during active resize transition
+    float aaWidth = clamp(1.35 / max(uCellSize.y, 6.0) + uTransitionMix * 0.06, 0.06, 0.28);
     float glyphMask = smoothstep(0.46 - aaWidth, 0.46 + aaWidth, rawMask);
 
-    // 8. Color grading, contrast preservation & atmospheric bloom aura
+    // 8. High-contrast Cyberpunk neon color grading & atmospheric bloom aura
     float rawLuma = max(getLuma(litCellColor), 0.0001);
     vec3 normalizedHue = litCellColor / rawLuma;
-    float boostedBrightness = mix(perceivedLuma, min(1.38, rawLuma * 1.48 + 0.06), 0.70);
+    float boostedBrightness = mix(perceivedLuma, min(1.52, rawLuma * 1.56 + 0.07), 0.74);
     vec3 glyphColor = normalizedHue * boostedBrightness;
 
-    glyphColor = min(glyphColor, vec3(1.48, 1.35, 1.20));
+    glyphColor = min(glyphColor, vec3(1.55, 1.48, 1.58));
 
-    vec3 cellBackdrop = uBgColor + bloomSmooth * (0.24 * uBloomIntensity) + cellColor * 0.042;
-    float phosphor = 0.975 + 0.025 * sin(pixelPos.y * 3.14159265);
+    vec3 cellBackdrop = uBgColor + bloomSmooth * (0.26 * uBloomIntensity) + cellColor * 0.038;
+    float phosphor = 0.972 + 0.028 * sin(pixelPos.y * 3.14159265);
 
     vec3 finalColor = mix(cellBackdrop, glyphColor * phosphor, glyphMask);
 
