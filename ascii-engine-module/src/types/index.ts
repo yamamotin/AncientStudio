@@ -18,6 +18,35 @@ export type DeepPartial<T> = {
  */
 export type SceneMode = 'playground' | 'mascot';
 
+export type ResolutionTier = 'mobile' | 'compact' | 'desktop' | 'hd' | 'uhd';
+
+export interface ResolutionProfile {
+  /** Classified device/viewport tier */
+  tier: ResolutionTier;
+  /** Container width/height in CSS pixels */
+  cssWidth: number;
+  cssHeight: number;
+  /** Capped effective devicePixelRatio */
+  effectiveDpr: number;
+  /** Physical framebuffer dimensions in pixels */
+  physicalWidth: number;
+  physicalHeight: number;
+  /** Effective ASCII cell height in CSS pixels */
+  activeCellSize: number;
+  /** Integer physical pixel width & height of each ASCII glyph cell */
+  cellPhysW: number;
+  cellPhysH: number;
+  /** Active ASCII grid columns x rows */
+  columns: number;
+  rows: number;
+  /** 2D Canvas glyph atlas tile resolution (64 or 96 px) */
+  atlasTileSize: number;
+  /** Sub-cell multi-sample offset in cell UV units (prevents subpixel aliasing) */
+  subCellSampleSpread: number;
+  /** Bloom buffer divisor (3 on desktop, 4 on mobile) */
+  bloomDownsample: number;
+}
+
 /**
  * Art-directed color palette inspired by modern 3D ASCII RPGs (ASCII Realms / Asciify)
  * and classic high-contrast terminal Tux silhouettes.
@@ -56,6 +85,10 @@ export interface EngineStats {
   triangles: number;
   /** Active ECS entity count */
   entityCount?: number;
+  /** Active effective devicePixelRatio */
+  effectiveDpr?: number;
+  /** Classified resolution tier ('mobile' | 'compact' | 'desktop' | 'hd' | 'uhd') */
+  resolutionTier?: ResolutionTier;
 }
 
 /**

@@ -43,6 +43,7 @@ jobs:
           test -f _site/assets/js/api-client.js
           test -f _site/assets/js/engine-adapter.js
           test -f _site/assets/js/ascii-engine.bundle.js
+          test -s _site/assets/js/ascii-engine.bundle.js
           test -f _site/assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf
           test -f _site/assets/cv/Eron_Yamamoto_Resume_EN.pdf
           test -f _site/assets/fonts/jetbrains-mono-latin-400-normal.woff2

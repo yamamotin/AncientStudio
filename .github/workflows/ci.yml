@@ -40,6 +40,10 @@ jobs:
         run: |
           test -s assets/js/ascii-engine.bundle.js
 
+      - name: Verify portfolio bundle is synced with TypeScript sources
+        run: |
+          git diff --exit-code assets/js/ascii-engine.bundle.js
+
       - name: Run Node static & engine contract tests
         run: node --test tests/*.test.js
 

@@ -214,7 +214,7 @@ export class PlaygroundSceneBuilder {
     const [sx, sz] = mapDef.shrineCenter;
     const sy = PlaygroundSceneBuilder.terrainHeight(sx, sz) + 2.35;
 
-    const waterGeo = new THREE.PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 1, 1);
+    const waterGeo = new THREE.PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48);
     waterGeo.rotateX(-Math.PI / 2);
 
     const waterMaterial = createSanctuaryWaterMaterial({

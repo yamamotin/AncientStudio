@@ -3,6 +3,7 @@ import { AnimationSystem } from '../animation/AnimationSystem';
 import { DEFAULT_ENGINE_CONFIG, mergeEngineConfig } from './defaultConfig';
 import { EngineLoop } from './EngineLoop';
 import { LifecycleManager } from './LifecycleManager';
+import { computeAdaptiveResolution } from './ResolutionController';
 import {
   InputSystem,
   MovementRotationSystem,
@@ -19,6 +20,7 @@ import type {
   EngineLifecycleState,
   EngineStats,
   PartialEngineConfig,
+  ResolutionTier,
 } from '../types';
 import { VfxController } from '../vfx/VfxController';
 import { MapLoader } from '../world/MapLoader';
@@ -64,6 +66,8 @@ export class AsciiEngineCore {
   private activeCellSize = 10;
   private gridColumns = 1;
   private gridRows = 1;
+  private effectiveDpr = 1;
+  private resolutionTier: ResolutionTier = 'desktop';
   private lastDrawCalls = 0;
   private lastTriangles = 0;
 
@@ -367,11 +371,15 @@ export class AsciiEngineCore {
         this.config,
         rebuildAtlas,
         this.containerWidth,
-        this.containerHeight
+        this.containerHeight,
+        typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+        this.isCoarsePointerDevice()
       );
       this.activeCellSize = grid.activeCellSize;
       this.gridColumns = grid.columns;
       this.gridRows = grid.rows;
+      this.effectiveDpr = grid.effectiveDpr;
+      this.resolutionTier = grid.tier;
     }
 
     if (this.state === 'paused') {
@@ -438,6 +446,8 @@ export class AsciiEngineCore {
       drawCalls: this.lastDrawCalls,
       triangles: this.lastTriangles,
       entityCount: this.ecsWorld?.getEntityCount() ?? 0,
+      effectiveDpr: this.effectiveDpr,
+      resolutionTier: this.resolutionTier,
     };
   }
 
@@ -484,13 +494,37 @@ export class AsciiEngineCore {
 
     this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
 
-    // 3. Sync Playground Reflective Water Shader Uniforms
+    // 3. Sync Playground Reflective Water Shader Uniforms (camera, shrine, cursor lantern & braziers)
     if (this.builtPlayground) {
       const u = this.builtPlayground.waterMaterial.uniforms;
       if (u.uTime) u.uTime.value = elapsed;
       if (u.uCamPos) u.uCamPos.value.copy(this.camera.position);
       if (u.uShrineLight) {
-        u.uShrineLight.value.w = this.builtPlayground.torchLight.intensity;
+        u.uShrineLight.value.set(
+          this.builtPlayground.torchLight.position.x,
+          this.builtPlayground.torchLight.position.y,
+          this.builtPlayground.torchLight.position.z,
+          this.builtPlayground.torchLight.intensity
+        );
+      }
+
+      if (this.vfx) {
+        const cursorLight = this.vfx.getCursorLight();
+        if (u.uCursorPos) u.uCursorPos.value.copy(cursorLight.position);
+        if (u.uCursorIntensity) u.uCursorIntensity.value = cursorLight.intensity;
+      }
+
+      const torchUniforms = ['uTorch0', 'uTorch1', 'uTorch2', 'uTorch3'] as const;
+      for (let i = 0; i < torchUniforms.length; i++) {
+        const key = torchUniforms[i]!;
+        const bl = this.builtPlayground.brazierLights[i];
+        if (u[key]) {
+          if (bl) {
+            u[key].value.set(bl.position.x, bl.position.y, bl.position.z, bl.intensity);
+          } else {
+            u[key].value.set(0, 0, 0, 0);
+          }
+        }
       }
     }
 
@@ -500,29 +534,48 @@ export class AsciiEngineCore {
     this.lastTriangles = metrics.triangles;
   }
 
+  private isCoarsePointerDevice(): boolean {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    try {
+      return window.matchMedia('(pointer: coarse)').matches;
+    } catch {
+      return false;
+    }
+  }
+
   private applyResize(cssWidth: number, cssHeight: number): void {
     if (!this.renderer || !this.camera || !this.postProcessor) return;
 
-    this.containerWidth = Math.max(1, Math.floor(cssWidth));
-    this.containerHeight = Math.max(1, Math.floor(cssHeight));
+    const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const coarse = this.isCoarsePointerDevice();
 
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, this.config.maxPixelRatio);
-    this.renderer.setPixelRatio(pixelRatio);
-    this.renderer.setSize(this.containerWidth, this.containerHeight, false);
+    const profile = computeAdaptiveResolution({
+      cssWidth,
+      cssHeight,
+      devicePixelRatio: rawDpr,
+      config: this.config,
+      isCoarsePointer: coarse,
+    });
 
-    this.camera.aspect = Math.max(0.1, this.containerWidth / Math.max(1, this.containerHeight));
+    this.containerWidth = profile.cssWidth;
+    this.containerHeight = profile.cssHeight;
+    this.effectiveDpr = profile.effectiveDpr;
+    this.resolutionTier = profile.tier;
+    this.activeCellSize = profile.activeCellSize;
+    this.gridColumns = profile.columns;
+    this.gridRows = profile.rows;
+
+    // Auto-reduce FPS cap slightly on small mobile coarse devices if default 60fps is set & battery conservation applies,
+    // while keeping 60fps smooth target on capable screens
+    this.renderer.setPixelRatio(profile.effectiveDpr);
+    this.renderer.setSize(profile.cssWidth, profile.cssHeight, false);
+
+    this.camera.aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
     this.camera.updateProjectionMatrix();
 
-    const grid = this.postProcessor.setSize(
-      this.containerWidth,
-      this.containerHeight,
-      pixelRatio,
-      this.config
-    );
-
-    this.activeCellSize = grid.activeCellSize;
-    this.gridColumns = grid.columns;
-    this.gridRows = grid.rows;
+    this.postProcessor.applyResolutionProfile(profile, this.config);
 
     if (this.state === 'paused') {
       this.loop?.stepOnce(0);

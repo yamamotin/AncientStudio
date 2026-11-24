@@ -342,6 +342,8 @@ window.TP = window.TP || {};
           ? {
               mode: 'mascot',
               cellSize: 8,
+              autoResponsiveDensity: true,
+              maxPixelRatio: 2,
               bloomIntensity: 0.45,
               dofStrength: 0.0,
               edgeStrength: 0.96,
@@ -349,7 +351,10 @@ window.TP = window.TP || {};
             }
           : {
               mode: 'playground',
-              mapId: 'sanctuary-isle'
+              mapId: 'sanctuary-isle',
+              cellSize: 9,
+              autoResponsiveDensity: true,
+              maxPixelRatio: 2
             };
 
         var mergedConfig = Object.assign(
@@ -457,6 +462,11 @@ window.TP = window.TP || {};
         if (state.instance && typeof state.instance.setPlayableKeyboardEnabled === 'function') {
           state.instance.setPlayableKeyboardEnabled(Boolean(enabled));
         }
+      },
+      getStats: function () {
+        return state.instance && typeof state.instance.getStats === 'function'
+          ? state.instance.getStats()
+          : null;
       },
       destroy: destroy,
       getMode: function () { return state.mode; }

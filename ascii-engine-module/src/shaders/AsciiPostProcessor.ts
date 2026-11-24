@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { computeAdaptiveResolution } from '../core/ResolutionController';
 import {
   ASCII_COMPOSITE_FRAGMENT_SHADER,
   BLOOM_BLUR_FRAGMENT_SHADER,
@@ -6,14 +7,14 @@ import {
   FULLSCREEN_VERTEX_SHADER,
 } from './asciiShader';
 import { createGlyphAtlas, type GlyphAtlasData } from './glyphAtlas';
-import type { EngineConfig } from '../types';
+import type { EngineConfig, ResolutionProfile } from '../types';
 
 /**
  * Self-contained WebGL multi-pass post-processor:
- *  Pass 1: 3D Scene -> Offscreen RGBA HalfFloat/UnsignedByte RenderTarget + DepthTexture
- *  Pass 2: Bright-pass extraction & downsample (1/3 resolution)
+ *  Pass 1: 3D Scene -> Offscreen RGBA HalfFloat RenderTarget + DepthTexture
+ *  Pass 2: Bright-pass extraction & downsample (1/3 desktop, 1/4 mobile)
  *  Pass 3 & 4: Separable wide Gaussian/Kawase blur (H + V) so warm light bleeds across neighboring ASCII cells
- *  Pass 5: ASCII Realms Composite (DoF + Sobel structural glyphs + luminance ramp + bloom + color grading) -> Screen
+ *  Pass 5: High-Resolution Adaptive ASCII Composite (5-tap sub-cell supersampling + DoF + Sobel structural glyphs + sharpened LinearFilter atlas) -> Screen
  */
 export class AsciiPostProcessor {
   private readonly quadScene: THREE.Scene;
@@ -32,22 +33,18 @@ export class AsciiPostProcessor {
   private readonly blurMaterial: THREE.ShaderMaterial;
   private readonly compositeMaterial: THREE.ShaderMaterial;
 
-  private physicalWidth = 1;
-  private physicalHeight = 1;
-  private activeCellCssPx = 10;
-  private pixelRatio = 1;
+  private lastProfile: ResolutionProfile | null = null;
 
   constructor(config: EngineConfig) {
     this.quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quadScene = new THREE.Scene();
-
-    // Single full-screen triangle/quad (PlaneGeometry 2x2)
     this.quadGeometry = new THREE.PlaneGeometry(2, 2);
 
     this.atlasData = createGlyphAtlas(
       config.characterRamp,
       config.structuralChars,
-      config.fontFamily
+      config.fontFamily,
+      64
     );
 
     this.depthTexture = new THREE.DepthTexture(2, 2);
@@ -122,6 +119,7 @@ export class AsciiPostProcessor {
         tGlyphAtlas: { value: this.atlasData.texture },
         uResolution: { value: new THREE.Vector2(2, 2) },
         uCellSize: { value: new THREE.Vector2(8, 10) },
+        uSubCellSpread: { value: 0.22 },
         uRampCount: { value: this.atlasData.rampCount },
         uStructuralCount: { value: this.atlasData.structuralCount },
         uTotalGlyphs: { value: this.atlasData.totalGlyphs },
@@ -142,74 +140,56 @@ export class AsciiPostProcessor {
   }
 
   /**
-   * Computes responsive ASCII cell size and resizes offscreen render targets.
+   * Applies an adaptive `ResolutionProfile` to offscreen render targets, glyph atlas DPI, and cell uniforms.
    */
-  public setSize(
-    cssWidth: number,
-    cssHeight: number,
-    pixelRatio: number,
-    config: EngineConfig
-  ): { activeCellSize: number; columns: number; rows: number } {
-    this.pixelRatio = pixelRatio;
-    this.physicalWidth = Math.max(2, Math.floor(cssWidth * pixelRatio));
-    this.physicalHeight = Math.max(2, Math.floor(cssHeight * pixelRatio));
+  public applyResolutionProfile(profile: ResolutionProfile, config: EngineConfig): ResolutionProfile {
+    this.lastProfile = profile;
 
-    this.sceneTarget.setSize(this.physicalWidth, this.physicalHeight);
+    this.sceneTarget.setSize(profile.physicalWidth, profile.physicalHeight);
 
-    const bloomWidth = Math.max(2, Math.floor(this.physicalWidth / 3));
-    const bloomHeight = Math.max(2, Math.floor(this.physicalHeight / 3));
+    const bloomWidth = Math.max(2, Math.floor(profile.physicalWidth / profile.bloomDownsample));
+    const bloomHeight = Math.max(2, Math.floor(profile.physicalHeight / profile.bloomDownsample));
     this.bloomTargetA.setSize(bloomWidth, bloomHeight);
     this.bloomTargetB.setSize(bloomWidth, bloomHeight);
 
     this.downsampleMaterial.uniforms.uTexelSize.value.set(
-      1 / this.physicalWidth,
-      1 / this.physicalHeight
+      1 / profile.physicalWidth,
+      1 / profile.physicalHeight
     );
     this.blurMaterial.uniforms.uTexelSize.value.set(1 / bloomWidth, 1 / bloomHeight);
     this.compositeMaterial.uniforms.uResolution.value.set(
-      this.physicalWidth,
-      this.physicalHeight
+      profile.physicalWidth,
+      profile.physicalHeight
     );
+    this.compositeMaterial.uniforms.uCellSize.value.set(profile.cellPhysW, profile.cellPhysH);
+    this.compositeMaterial.uniforms.uSubCellSpread.value = profile.subCellSampleSpread;
 
-    return this.recomputeCellGrid(cssWidth, cssHeight, config);
-  }
-
-  public recomputeCellGrid(
-    cssWidth: number,
-    cssHeight: number,
-    config: EngineConfig
-  ): { activeCellSize: number; columns: number; rows: number } {
-    let cellCss = Math.max(5, Math.min(28, config.cellSize));
-    const minDim = Math.min(cssWidth, cssHeight);
-
-    if (config.autoResponsiveDensity) {
-      // Automatically adapt character cell size on mobile & ultra-compact containers
-      // so glyphs remain crisp, legible, and maintain rock-solid 60 FPS
-      if (cssWidth < 480 || minDim < 340) {
-        cellCss = Math.max(cellCss, Math.round(config.cellSize * 1.25));
-      } else if (cssWidth < 768 || minDim < 460) {
-        cellCss = Math.max(cellCss, Math.round(config.cellSize * 1.12));
-      } else if (cssWidth > 1800) {
-        cellCss = Math.max(7, Math.round(config.cellSize * 0.95));
-      }
+    // Upgrade or downgrade 2D Canvas glyph atlas resolution when moving between 1x and HiDPI/Retina
+    if (this.atlasData.tileSize !== profile.atlasTileSize) {
+      this.rebuildGlyphAtlas(config, profile.atlasTileSize);
     }
 
-    this.activeCellCssPx = cellCss;
+    return profile;
+  }
 
-    // Monospace cells look most authentic with slightly taller aspect (~0.82 : 1.0)
-    const cellPhysH = Math.max(4, Math.round(cellCss * this.pixelRatio));
-    const cellPhysW = Math.max(4, Math.round(cellCss * 0.84 * this.pixelRatio));
-
-    this.compositeMaterial.uniforms.uCellSize.value.set(cellPhysW, cellPhysH);
-
-    const columns = Math.max(1, Math.floor(this.physicalWidth / cellPhysW));
-    const rows = Math.max(1, Math.floor(this.physicalHeight / cellPhysH));
-
-    return {
-      activeCellSize: this.activeCellCssPx,
-      columns,
-      rows,
-    };
+  /**
+   * Backward-compatible resize entry computing an adaptive profile directly.
+   */
+  public setSize(
+    cssWidth: number,
+    cssHeight: number,
+    devicePixelRatio: number,
+    config: EngineConfig,
+    isCoarsePointer = false
+  ): ResolutionProfile {
+    const profile = computeAdaptiveResolution({
+      cssWidth,
+      cssHeight,
+      devicePixelRatio,
+      config,
+      isCoarsePointer,
+    });
+    return this.applyResolutionProfile(profile, config);
   }
 
   /**
@@ -219,20 +199,20 @@ export class AsciiPostProcessor {
     config: EngineConfig,
     rebuildAtlas: boolean,
     cssWidth: number,
-    cssHeight: number
-  ): { activeCellSize: number; columns: number; rows: number } {
-    if (rebuildAtlas) {
-      const oldAtlas = this.atlasData;
-      this.atlasData = createGlyphAtlas(
-        config.characterRamp,
-        config.structuralChars,
-        config.fontFamily
-      );
-      this.compositeMaterial.uniforms.tGlyphAtlas.value = this.atlasData.texture;
-      this.compositeMaterial.uniforms.uRampCount.value = this.atlasData.rampCount;
-      this.compositeMaterial.uniforms.uStructuralCount.value = this.atlasData.structuralCount;
-      this.compositeMaterial.uniforms.uTotalGlyphs.value = this.atlasData.totalGlyphs;
-      oldAtlas.texture.dispose();
+    cssHeight: number,
+    devicePixelRatio = 1,
+    isCoarsePointer = false
+  ): ResolutionProfile {
+    const profile = computeAdaptiveResolution({
+      cssWidth,
+      cssHeight,
+      devicePixelRatio: this.lastProfile?.effectiveDpr ?? devicePixelRatio,
+      config,
+      isCoarsePointer,
+    });
+
+    if (rebuildAtlas || this.atlasData.tileSize !== profile.atlasTileSize) {
+      this.rebuildGlyphAtlas(config, profile.atlasTileSize);
     }
 
     this.downsampleMaterial.uniforms.uThreshold.value = config.bloomThreshold;
@@ -242,12 +222,24 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
     this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
 
-    return this.recomputeCellGrid(cssWidth, cssHeight, config);
+    return this.applyResolutionProfile(profile, config);
   }
 
-  /**
-   * Renders the 3D scene into the offscreen target, runs bloom passes, and composites ASCII glyphs.
-   */
+  private rebuildGlyphAtlas(config: EngineConfig, tileSize: number): void {
+    const oldAtlas = this.atlasData;
+    this.atlasData = createGlyphAtlas(
+      config.characterRamp,
+      config.structuralChars,
+      config.fontFamily,
+      tileSize
+    );
+    this.compositeMaterial.uniforms.tGlyphAtlas.value = this.atlasData.texture;
+    this.compositeMaterial.uniforms.uRampCount.value = this.atlasData.rampCount;
+    this.compositeMaterial.uniforms.uStructuralCount.value = this.atlasData.structuralCount;
+    this.compositeMaterial.uniforms.uTotalGlyphs.value = this.atlasData.totalGlyphs;
+    oldAtlas.texture.dispose();
+  }
+
   public render(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
@@ -293,9 +285,6 @@ export class AsciiPostProcessor {
     return { drawCalls, triangles };
   }
 
-  /**
-   * Releases all GPU framebuffers, textures, shader programs, and quad geometry.
-   */
   public dispose(): void {
     this.quadScene.remove(this.quadMesh);
     this.quadGeometry.dispose();
