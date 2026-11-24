@@ -122,7 +122,7 @@ window.TP = window.TP || {};
           preset: 'sanctuary',
           weather: false,
           mascotFocus: true,
-          config: { maxFps: 30, cellSize: 9, dofStrength: 0.25 }
+          config: { mode: 'mascot', maxFps: 36, cellSize: 8, dofStrength: 0.0, edgeStrength: 0.96 }
         })
       : null;
 

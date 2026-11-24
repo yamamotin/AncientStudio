@@ -1,6 +1,18 @@
 import * as THREE from 'three';
+import { AnimationSystem } from '../animation/AnimationSystem';
 import { DEFAULT_ENGINE_CONFIG, mergeEngineConfig } from './defaultConfig';
-import { AsciiWorldScene } from '../scene/AsciiWorldScene';
+import { EngineLoop } from './EngineLoop';
+import { LifecycleManager } from './LifecycleManager';
+import {
+  InputSystem,
+  MovementRotationSystem,
+  RenderSyncSystem,
+  SystemRunner,
+} from '../ecs/SystemRunner';
+import { type EntityId, World } from '../ecs/World';
+import { TuxEntityFactory } from '../entities/TuxEntityFactory';
+import { KeyboardInput } from '../input/KeyboardInput';
+import { PointerInput } from '../input/PointerInput';
 import { AsciiPostProcessor } from '../shaders/AsciiPostProcessor';
 import type {
   EngineConfig,
@@ -8,31 +20,45 @@ import type {
   EngineStats,
   PartialEngineConfig,
 } from '../types';
+import { VfxController } from '../vfx/VfxController';
+import { MapLoader } from '../world/MapLoader';
+import { type BuiltPlaygroundScene, PlaygroundSceneBuilder } from '../world/PlaygroundSceneBuilder';
 
 /**
- * Core WebGL runtime orchestrator:
- * - Container-scoped ResizeObserver (adapts to any arbitrary div size, not window)
- * - Container-scoped Pointer tracking (works seamlessly beneath HTML HUD overlays)
- * - Deterministic requestAnimationFrame loop with FPS limiter & zero-jump pause/resume deltaTime
- * - Page Visibility auto-hibernation
- * - Complete, leak-free GPU & DOM disposal
+ * AsciiEngineCore: Modular WebGL2 runtime orchestrating:
+ * - `EngineLoop` (clamped deltaTime, zero-jump pause/resume, FPS cap & telemetry)
+ * - `LifecycleManager` (ResizeObserver, IntersectionObserver, Page Visibility, leak-free `.dispose()`)
+ * - `World` + `SystemRunner` (lean ECS: InputSystem -> MovementRotationSystem -> AnimationSystem -> RenderSyncSystem)
+ * - `MapLoader` + `PlaygroundSceneBuilder` (small interactive ASCII Realms island playground)
+ * - `TuxEntityFactory` (dedicated high-contrast 3D Linux Tux stage for `[ STACK // NEOFETCH ]`)
+ * - `PointerInput` + `KeyboardInput` (scroll-safe passive mouse/touch tracking + opt-in focus-gated keys)
+ * - `VfxController` + `AsciiPostProcessor` (camera parallax, cursor lantern, reflections, bloom & structural ASCII shader)
  */
 export class AsciiEngineCore {
   private readonly container: HTMLElement;
   private config: EngineConfig;
   private state: EngineLifecycleState = 'idle';
+  private userManuallyPaused = false;
+  private autoPausedOffscreen = false;
+  private autoPausedHiddenTab = false;
 
   private renderer: THREE.WebGLRenderer | null = null;
-  private world: AsciiWorldScene | null = null;
+  private scene: THREE.Scene | null = null;
+  private camera: THREE.PerspectiveCamera | null = null;
   private postProcessor: AsciiPostProcessor | null = null;
-  private resizeObserver: ResizeObserver | null = null;
 
-  private rafId: number | null = null;
-  private lastFrameTimestamp: number | null = null;
-  private elapsedSeconds = 0;
-  private autoPausedByVisibility = false;
+  private loop: EngineLoop | null = null;
+  private lifecycle: LifecycleManager | null = null;
+  private pointerInput: PointerInput | null = null;
+  private keyboardInput: KeyboardInput | null = null;
 
-  // Viewport & ASCII grid tracking
+  private ecsWorld: World | null = null;
+  private systemRunner: SystemRunner | null = null;
+  private vfx: VfxController | null = null;
+  private builtPlayground: BuiltPlaygroundScene | null = null;
+  private primaryEntityId: EntityId | null = null;
+
+  // Viewport & telemetry state
   private containerWidth = 1;
   private containerHeight = 1;
   private activeCellSize = 10;
@@ -41,18 +67,8 @@ export class AsciiEngineCore {
   private lastDrawCalls = 0;
   private lastTriangles = 0;
 
-  // Smoothed FPS telemetry
-  private fpsAccumulatorFrames = 0;
-  private fpsAccumulatorMs = 0;
-  private currentSmoothedFps = 60;
-  private lastFrameDurationMs = 16.67;
-
-  // Bound event listeners for guaranteed removal on destroy()
-  private readonly onPointerMoveBound: (ev: PointerEvent) => void;
-  private readonly onPointerLeaveBound: () => void;
-  private readonly onVisibilityChangeBound: () => void;
+  private readonly onPassivePointerMoveBound: (ev: PointerEvent) => void;
   private readonly onContextLostBound: (ev: Event) => void;
-  private readonly tickBound: (now: number) => void;
 
   constructor(container: HTMLElement, initialConfig?: PartialEngineConfig) {
     if (!container || !(container instanceof HTMLElement)) {
@@ -64,11 +80,8 @@ export class AsciiEngineCore {
     this.container = container;
     this.config = mergeEngineConfig(DEFAULT_ENGINE_CONFIG, initialConfig);
 
-    this.onPointerMoveBound = this.handlePointerMove.bind(this);
-    this.onPointerLeaveBound = this.handlePointerLeave.bind(this);
-    this.onVisibilityChangeBound = this.handleVisibilityChange.bind(this);
+    this.onPassivePointerMoveBound = this.handlePassiveContainerMove.bind(this);
     this.onContextLostBound = this.handleContextLost.bind(this);
-    this.tickBound = this.tick.bind(this);
   }
 
   public mount(): void {
@@ -78,17 +91,16 @@ export class AsciiEngineCore {
       );
     }
     if (this.state !== 'idle') {
-      return; // Idempotent if already mounted
+      return;
     }
 
     try {
-      // Ensure container establishes a positioning context if static
       const computedPosition = window.getComputedStyle(this.container).position;
       if (computedPosition === 'static') {
         this.container.style.position = 'relative';
       }
 
-      // Initialize WebGLRenderer (prefer WebGL2 context automatically in modern Three.js)
+      // 1. Initialize WebGLRenderer
       const renderer = new THREE.WebGLRenderer({
         antialias: false,
         alpha: false,
@@ -104,7 +116,6 @@ export class AsciiEngineCore {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.info.autoReset = true;
 
-      // Style canvas to fill container cleanly behind any HTML HUD overlay
       const canvas = renderer.domElement;
       canvas.style.display = 'block';
       canvas.style.width = '100%';
@@ -112,47 +123,80 @@ export class AsciiEngineCore {
       canvas.style.position = 'absolute';
       canvas.style.inset = '0';
       canvas.style.zIndex = '0';
-      canvas.style.pointerEvents = 'none'; // Allow HUD buttons/links or container events without canvas hijacking
+      canvas.style.pointerEvents = 'none';
       canvas.setAttribute('aria-hidden', 'true');
       canvas.dataset.asciiEngineCanvas = 'true';
 
       canvas.addEventListener('webglcontextlost', this.onContextLostBound, false);
-
       this.container.prepend(canvas);
       this.renderer = renderer;
 
-      // Build 3D RPG scene & ASCII post-processing pipeline
-      this.world = new AsciiWorldScene(this.config);
+      // 2. Initialize Lifecycle, Input, and ECS World
+      const lifecycle = new LifecycleManager(this.container);
+      const pointerInput = new PointerInput(this.container, {
+        trackWindowHover: this.config.mode === 'mascot',
+      });
+      const keyboardInput = new KeyboardInput({
+        enabled: this.config.enableKeyboard,
+        focusTarget: this.container,
+      });
+
+      pointerInput.attach();
+      keyboardInput.attach();
+
+      // Passive container pointermove hook preserving backward-compatible event contract
+      this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+
+      lifecycle.registerCleanup(() => {
+        this.container.removeEventListener('pointermove', this.onPassivePointerMoveBound);
+        pointerInput.detach();
+        keyboardInput.detach();
+      });
+
+      this.lifecycle = lifecycle;
+      this.pointerInput = pointerInput;
+      this.keyboardInput = keyboardInput;
+
+      // 3. Build Scene Mode ('playground' vs 'mascot') + ECS Systems
+      const ecsWorld = new World();
+      const systemRunner = new SystemRunner();
+      this.ecsWorld = ecsWorld;
+      this.systemRunner = systemRunner;
+
+      if (this.config.mode === 'mascot') {
+        this.initMascotStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
+      } else {
+        this.initPlaygroundStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
+      }
+
+      // 4. ASCII Post-Processor
       this.postProcessor = new AsciiPostProcessor(this.config);
 
-      // Measure initial container bounds immediately
+      // 5. Initial Resize + Observers
       const rect = this.container.getBoundingClientRect();
       this.applyResize(Math.max(1, rect.width), Math.max(1, rect.height));
 
-      // Attach container-scoped ResizeObserver
-      this.resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.target === this.container) {
-            const width = entry.contentRect.width;
-            const height = entry.contentRect.height;
-            if (width > 0 && height > 0) {
-              this.applyResize(width, height);
-            }
-          }
+      lifecycle.observeContainer(
+        {
+          onResize: (w, h) => this.applyResize(w, h),
+          onVisibilityChange: (visible) => this.handleIntersectionVisibility(visible),
+          onTabHiddenChange: (hidden) => this.handleTabVisibility(hidden),
+        },
+        {
+          observeViewportIntersection: this.config.pauseOffscreen,
+          observeTabVisibility: this.config.pauseOnHiddenTab,
         }
-      });
-      this.resizeObserver.observe(this.container);
+      );
 
-      // Attach pointer listeners to container so HUD overlays (buttons/cards) keep receiving clicks
-      // while mouse movement anywhere inside the container drives camera parallax & lantern light!
-      this.container.addEventListener('pointermove', this.onPointerMoveBound, { passive: true });
-      this.container.addEventListener('pointerleave', this.onPointerLeaveBound, { passive: true });
-      document.addEventListener('visibilitychange', this.onVisibilityChangeBound);
+      // 6. Start EngineLoop
+      this.loop = new EngineLoop({
+        maxFps: this.config.maxFps,
+        onFrame: ({ dt, elapsed }) => this.renderFrame(dt, elapsed),
+        onTelemetry: () => this.config.callbacks?.onFpsUpdate?.(this.getStats()),
+      });
 
       this.state = 'running';
-      this.lastFrameTimestamp = null;
-      this.scheduleNextFrame();
-
+      this.loop.start();
       this.config.callbacks?.onMount?.();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -161,33 +205,109 @@ export class AsciiEngineCore {
     }
   }
 
+  private initPlaygroundStage(
+    ecsWorld: World,
+    systemRunner: SystemRunner,
+    pointerInput: PointerInput,
+    keyboardInput: KeyboardInput
+  ): void {
+    const mapDef = MapLoader.load(this.config.mapId);
+    const built = PlaygroundSceneBuilder.build(mapDef, this.config, ecsWorld);
+    this.builtPlayground = built;
+    this.scene = built.scene;
+    this.primaryEntityId = built.avatarEntityId;
+
+    const camera = new THREE.PerspectiveCamera(46, 16 / 9, 0.5, 110);
+    camera.position.set(...mapDef.cameraAnchor);
+    camera.lookAt(...mapDef.cameraLookAt);
+    this.camera = camera;
+
+    this.vfx = new VfxController({
+      scene: built.scene,
+      config: this.config,
+      baseCameraPos: mapDef.cameraAnchor,
+      lookAtTarget: mapDef.cameraLookAt,
+      particleOrigin: mapDef.shrineCenter,
+      particleCount: 64,
+    });
+
+    systemRunner
+      .addSystem(new InputSystem(pointerInput, keyboardInput))
+      .addSystem(new MovementRotationSystem(built.terrainHeightAt))
+      .addSystem(new AnimationSystem())
+      .addSystem(new RenderSyncSystem());
+  }
+
+  private initMascotStage(
+    ecsWorld: World,
+    systemRunner: SystemRunner,
+    pointerInput: PointerInput,
+    keyboardInput: KeyboardInput
+  ): void {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(this.config.palette.background);
+    this.scene = scene;
+
+    // Dedicated studio three-point lighting rig for high-contrast ASCII Tux silhouette
+    const hemi = new THREE.HemisphereLight(0xd8f3ff, 0x09111a, 1.35);
+    scene.add(hemi);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.35);
+    keyLight.position.set(-2.6, 4.2, 4.8);
+    scene.add(keyLight);
+
+    const rimLight = new THREE.PointLight(new THREE.Color(this.config.palette.warmCore), 10.5, 12, 1.5);
+    rimLight.position.set(2.8, 2.5, -2.2);
+    scene.add(rimLight);
+
+    const cameraAnchor: [number, number, number] = [0, 1.02, 4.15];
+    const lookTarget: [number, number, number] = [0, 0.92, 0];
+
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.3, 40);
+    camera.position.set(...cameraAnchor);
+    camera.lookAt(...lookTarget);
+    this.camera = camera;
+
+    const { entityId } = TuxEntityFactory.spawn(ecsWorld, scene, {
+      position: [0, -0.05, 0],
+      scale: 1.05,
+      includeShowcaseRig: true,
+    });
+    this.primaryEntityId = entityId;
+
+    this.vfx = new VfxController({
+      scene,
+      config: this.config,
+      baseCameraPos: cameraAnchor,
+      lookAtTarget: lookTarget,
+      particleOrigin: [0, 0],
+      particleCount: 16,
+    });
+
+    systemRunner
+      .addSystem(new InputSystem(pointerInput, keyboardInput))
+      .addSystem(new MovementRotationSystem())
+      .addSystem(new AnimationSystem())
+      .addSystem(new RenderSyncSystem());
+  }
+
   public pause(): void {
-    if (this.state !== 'running') {
-      return;
-    }
-    this.autoPausedByVisibility = false;
-    this.cancelScheduledFrame();
-    this.lastFrameTimestamp = null;
-    this.state = 'paused';
-    this.config.callbacks?.onPause?.();
+    this.userManuallyPaused = true;
+    this.transitionToPaused();
   }
 
   public resume(): void {
-    if (this.state !== 'paused') {
-      return;
-    }
-    this.autoPausedByVisibility = false;
-    this.state = 'running';
-    // Reset timestamp to null so the first resumed frame computes dt = 0 (zero jump!)
-    this.lastFrameTimestamp = null;
-    this.scheduleNextFrame();
-    this.config.callbacks?.onResume?.();
+    this.userManuallyPaused = false;
+    this.tryResumeIfEligible();
+  }
+
+  public setPlayableKeyboardEnabled(enabled: boolean): void {
+    this.config.enableKeyboard = enabled;
+    this.keyboardInput?.setEnabled(enabled);
   }
 
   public updateConfig(partialConfig: PartialEngineConfig): void {
-    if (this.state === 'destroyed') {
-      return;
-    }
+    if (this.state === 'destroyed') return;
 
     const prevRamp = this.config.characterRamp;
     const prevStruct = this.config.structuralChars;
@@ -196,22 +316,49 @@ export class AsciiEngineCore {
     const prevMaxDpr = this.config.maxPixelRatio;
 
     this.config = mergeEngineConfig(this.config, partialConfig);
+    this.keyboardInput?.setEnabled(this.config.enableKeyboard);
+    this.loop?.setMaxFps(this.config.maxFps);
 
-    if (!this.renderer || !this.world || !this.postProcessor) {
-      return;
-    }
+    if (!this.renderer || !this.scene || !this.postProcessor) return;
 
     if (prevShadows !== this.config.enableShadows) {
       this.renderer.shadowMap.enabled = this.config.enableShadows;
       this.renderer.shadowMap.needsUpdate = true;
     }
 
+    // Apply live palette updates to background, fog, lights & water uniforms
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.set(this.config.palette.background);
+    }
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.set(this.config.palette.background);
+    }
+
+    if (this.builtPlayground) {
+      const p = this.config.palette;
+      this.builtPlayground.ambientHemi.color.set(p.coolAmbient);
+      this.builtPlayground.moonDirLight.color
+        .set(p.coolAmbient)
+        .lerp(new THREE.Color('#CBE8FF'), 0.45);
+      this.builtPlayground.torchLight.color.set(p.warmLight);
+      for (const bl of this.builtPlayground.brazierLights) {
+        bl.color.set(p.warmLight);
+      }
+
+      const u = this.builtPlayground.waterMaterial.uniforms;
+      u.uDeepColor?.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
+      u.uShallowColor?.value.set(p.coolAmbient).lerp(new THREE.Color('#8be4ff'), 0.32);
+      u.uWarmColor?.value.set(p.warmLight);
+      u.uWarmCoreColor?.value.set(p.warmCore);
+      u.uCursorColor?.value.set(p.cursorLight);
+    }
+
+    this.vfx?.applyConfig(this.config);
+
     const rebuildAtlas =
       prevRamp !== this.config.characterRamp ||
       prevStruct !== this.config.structuralChars ||
       prevFont !== this.config.fontFamily;
-
-    this.world.applyConfig(this.config);
 
     if (prevMaxDpr !== this.config.maxPixelRatio) {
       this.applyResize(this.containerWidth, this.containerHeight);
@@ -227,49 +374,41 @@ export class AsciiEngineCore {
       this.gridRows = grid.rows;
     }
 
-    // If currently paused, render a single refreshed frame immediately so live config edits preview cleanly
     if (this.state === 'paused') {
-      this.renderSingleFrame(0);
+      this.loop?.stepOnce(0);
     }
   }
 
   public destroy(): void {
-    if (this.state === 'destroyed') {
-      return;
-    }
+    if (this.state === 'destroyed') return;
 
-    this.cancelScheduledFrame();
-    this.lastFrameTimestamp = null;
+    this.loop?.stop();
+    this.loop = null;
 
-    // 1. Disconnect observers & DOM listeners
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
+    this.systemRunner?.clear();
+    this.systemRunner = null;
+    this.ecsWorld?.clear();
+    this.ecsWorld = null;
+    this.builtPlayground = null;
+    this.vfx = null;
 
-    this.container.removeEventListener('pointermove', this.onPointerMoveBound);
-    this.container.removeEventListener('pointerleave', this.onPointerLeaveBound);
-    document.removeEventListener('visibilitychange', this.onVisibilityChangeBound);
+    this.lifecycle?.disposeAll(this.scene);
+    this.lifecycle = null;
+    this.scene = null;
+    this.camera = null;
+    this.pointerInput = null;
+    this.keyboardInput = null;
 
-    // 2. Dispose 3D scene geometries, materials, shadow maps & textures
-    if (this.world) {
-      this.world.dispose();
-      this.world = null;
-    }
-
-    // 3. Dispose post-processor render targets, glyph atlas & shader programs
     if (this.postProcessor) {
       this.postProcessor.dispose();
       this.postProcessor = null;
     }
 
-    // 4. Dispose WebGLRenderer, release GPU context, and remove canvas from DOM
     if (this.renderer) {
       const canvas = this.renderer.domElement;
       canvas.removeEventListener('webglcontextlost', this.onContextLostBound, false);
       this.renderer.renderLists.dispose();
       this.renderer.dispose();
-
       if (canvas.parentNode) {
         canvas.parentNode.removeChild(canvas);
       }
@@ -289,106 +428,80 @@ export class AsciiEngineCore {
   }
 
   public getStats(): EngineStats {
+    const telemetry = this.loop?.getTelemetry() ?? { fps: 60, frameTimeMs: 16.67 };
     return {
-      fps: Math.round(this.currentSmoothedFps),
-      frameTimeMs: Number(this.lastFrameDurationMs.toFixed(2)),
+      fps: telemetry.fps,
+      frameTimeMs: telemetry.frameTimeMs,
       activeCellSize: this.activeCellSize,
       gridColumns: this.gridColumns,
       gridRows: this.gridRows,
       drawCalls: this.lastDrawCalls,
       triangles: this.lastTriangles,
+      entityCount: this.ecsWorld?.getEntityCount() ?? 0,
     };
   }
 
   public getScene(): THREE.Scene | null {
-    return this.world ? this.world.scene : null;
+    return this.scene;
   }
 
   public getCamera(): THREE.PerspectiveCamera | null {
-    return this.world ? this.world.camera : null;
+    return this.camera;
   }
 
-  private scheduleNextFrame(): void {
-    if (this.rafId === null && this.state === 'running') {
-      this.rafId = window.requestAnimationFrame(this.tickBound);
-    }
+  /**
+   * Returns current rotation (yaw, pitch in radians) of the primary entity (e.g. Tux in mascot mode)
+   * so host UI telemetry badges can read exact angles without polling duplicate rAF loops.
+   */
+  public getPrimaryEntityAngles(): { yaw: number; pitch: number } | null {
+    if (!this.ecsWorld || this.primaryEntityId === null) return null;
+    const t = this.ecsWorld.getComponent(this.primaryEntityId, 'Transform');
+    if (!t) return null;
+    return { yaw: t.rotY, pitch: t.rotX };
   }
 
-  private cancelScheduledFrame(): void {
-    if (this.rafId !== null) {
-      window.cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
-  }
+  private renderFrame(dt: number, elapsed: number): void {
+    if (!this.renderer || !this.scene || !this.camera || !this.postProcessor) return;
 
-  private tick(now: number): void {
-    this.rafId = null;
-    if (this.state !== 'running') {
-      return;
+    // 1. Run ECS Systems (Input -> Movement/Rotation -> Animation -> RenderSync)
+    if (this.ecsWorld && this.systemRunner) {
+      this.systemRunner.run(this.ecsWorld, { dt, elapsed });
     }
 
-    if (this.lastFrameTimestamp === null) {
-      // First frame after mount() or resume() -> smooth zero-jump start
-      this.lastFrameTimestamp = now;
-      this.renderSingleFrame(1 / 60);
-      this.scheduleNextFrame();
-      return;
+    // 2. Update Camera Parallax, Cursor Light & Particles
+    const ptr = this.pointerInput
+      ? this.pointerInput.sample(0)
+      : {
+          normX: 0,
+          normY: 0,
+          dragYaw: 0,
+          dragPitch: 0,
+          active: false,
+          isDown: false,
+          motionSpeed: 0,
+          lastInteractionMs: 0,
+        };
+
+    this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
+
+    // 3. Sync Playground Reflective Water Shader Uniforms
+    if (this.builtPlayground) {
+      const u = this.builtPlayground.waterMaterial.uniforms;
+      if (u.uTime) u.uTime.value = elapsed;
+      if (u.uCamPos) u.uCamPos.value.copy(this.camera.position);
+      if (u.uShrineLight) {
+        u.uShrineLight.value.w = this.builtPlayground.torchLight.intensity;
+      }
     }
 
-    const elapsedMs = now - this.lastFrameTimestamp;
-    const minIntervalMs = this.config.maxFps > 0 ? 1000 / this.config.maxFps : 0;
-
-    // Optional FPS cap tolerance (1.5ms slack for 60Hz VSync alignment)
-    if (minIntervalMs > 0 && elapsedMs < minIntervalMs - 1.5) {
-      this.scheduleNextFrame();
-      return;
-    }
-
-    this.lastFrameTimestamp = now;
-
-    // Clamp deltaTime to max 100ms (0.1s) to prevent any physics/lerp overshoot on heavy main-thread stalls
-    const clampedDt = Math.min(0.1, Math.max(0.0001, elapsedMs / 1000));
-    this.lastFrameDurationMs = elapsedMs;
-
-    this.renderSingleFrame(clampedDt);
-
-    // Update FPS telemetry (~every 450ms)
-    this.fpsAccumulatorFrames += 1;
-    this.fpsAccumulatorMs += elapsedMs;
-    if (this.fpsAccumulatorMs >= 450) {
-      const instantFps = (this.fpsAccumulatorFrames * 1000) / this.fpsAccumulatorMs;
-      this.currentSmoothedFps = this.currentSmoothedFps * 0.35 + instantFps * 0.65;
-      this.fpsAccumulatorFrames = 0;
-      this.fpsAccumulatorMs = 0;
-      this.config.callbacks?.onFpsUpdate?.(this.getStats());
-    }
-
-    this.scheduleNextFrame();
-  }
-
-  private renderSingleFrame(dt: number): void {
-    if (!this.renderer || !this.world || !this.postProcessor) {
-      return;
-    }
-
-    this.elapsedSeconds += dt;
-    this.world.update(dt, this.elapsedSeconds, this.config);
-
-    const renderMetrics = this.postProcessor.render(
-      this.renderer,
-      this.world.scene,
-      this.world.camera,
-      this.elapsedSeconds
-    );
-
-    this.lastDrawCalls = renderMetrics.drawCalls;
-    this.lastTriangles = renderMetrics.triangles;
+    // 4. Multi-Pass ASCII Post-Processing Render
+    const metrics = this.postProcessor.render(this.renderer, this.scene, this.camera, elapsed);
+    this.lastDrawCalls = metrics.drawCalls;
+    this.lastTriangles = metrics.triangles;
   }
 
   private applyResize(cssWidth: number, cssHeight: number): void {
-    if (!this.renderer || !this.world || !this.postProcessor) {
-      return;
-    }
+    if (!this.renderer || !this.camera || !this.postProcessor) return;
 
     this.containerWidth = Math.max(1, Math.floor(cssWidth));
     this.containerHeight = Math.max(1, Math.floor(cssHeight));
@@ -397,7 +510,8 @@ export class AsciiEngineCore {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(this.containerWidth, this.containerHeight, false);
 
-    this.world.resizeCamera(this.containerWidth, this.containerHeight);
+    this.camera.aspect = Math.max(0.1, this.containerWidth / Math.max(1, this.containerHeight));
+    this.camera.updateProjectionMatrix();
 
     const grid = this.postProcessor.setSize(
       this.containerWidth,
@@ -411,53 +525,56 @@ export class AsciiEngineCore {
     this.gridRows = grid.rows;
 
     if (this.state === 'paused') {
-      this.renderSingleFrame(0);
+      this.loop?.stepOnce(0);
     }
   }
 
-  private handlePointerMove(ev: PointerEvent): void {
-    if (!this.world) return;
-    const rect = this.container.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    // Container-relative normalized coordinates: [-1, +1] on X (left..right) and Y (bottom..top)
-    const relX = (ev.clientX - rect.left) / rect.width;
-    const relY = (ev.clientY - rect.top) / rect.height;
-
-    const nx = relX * 2 - 1;
-    const ny = -(relY * 2 - 1);
-
-    this.world.setPointerNormalized(nx, ny, true);
+  private transitionToPaused(): void {
+    if (this.state !== 'running') return;
+    this.loop?.pause();
+    this.state = 'paused';
+    this.config.callbacks?.onPause?.();
   }
 
-  private handlePointerLeave(): void {
-    if (!this.world) return;
-    this.world.setPointerNormalized(0, 0, false);
+  private tryResumeIfEligible(): void {
+    if (this.state !== 'paused') return;
+    if (this.userManuallyPaused || this.autoPausedOffscreen || this.autoPausedHiddenTab) {
+      return;
+    }
+    this.state = 'running';
+    this.loop?.resume();
+    this.config.callbacks?.onResume?.();
   }
 
-  private handleVisibilityChange(): void {
+  private handleIntersectionVisibility(isVisible: boolean): void {
+    if (!this.config.pauseOffscreen) return;
+    if (!isVisible) {
+      this.autoPausedOffscreen = true;
+      this.transitionToPaused();
+    } else {
+      this.autoPausedOffscreen = false;
+      this.tryResumeIfEligible();
+    }
+  }
+
+  private handleTabVisibility(isHidden: boolean): void {
     if (!this.config.pauseOnHiddenTab) return;
-
-    if (document.hidden && this.state === 'running') {
-      this.cancelScheduledFrame();
-      this.lastFrameTimestamp = null;
-      this.state = 'paused';
-      this.autoPausedByVisibility = true;
-      this.config.callbacks?.onPause?.();
-    } else if (!document.hidden && this.state === 'paused' && this.autoPausedByVisibility) {
-      this.autoPausedByVisibility = false;
-      this.state = 'running';
-      this.lastFrameTimestamp = null;
-      this.scheduleNextFrame();
-      this.config.callbacks?.onResume?.();
+    if (isHidden) {
+      this.autoPausedHiddenTab = true;
+      this.transitionToPaused();
+    } else {
+      this.autoPausedHiddenTab = false;
+      this.tryResumeIfEligible();
     }
+  }
+
+  private handlePassiveContainerMove(_ev: PointerEvent): void {
+    // Handled via PointerInput; kept attached passively on container for direct event contract compatibility.
   }
 
   private handleContextLost(ev: Event): void {
     ev.preventDefault();
-    this.cancelScheduledFrame();
-    this.config.callbacks?.onError?.(
-      new Error('[AsciiSceneEngine] WebGL context lost.')
-    );
+    this.loop?.pause();
+    this.config.callbacks?.onError?.(new Error('[AsciiSceneEngine] WebGL context lost.'));
   }
 }

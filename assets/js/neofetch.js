@@ -1,73 +1,80 @@
-/* Interactive 3D ASCII Tux penguin for [ STACK // NEOFETCH ].
-   Tracks pointer coordinates smoothly across the page/section, rotating a volumetric
-   voxel/ellipsoid penguin in 3D and rasterizing directional & luminance ASCII glyphs in real time.
-   Zero external dependencies; gracefully preserves static <pre> if reduced-motion is requested. */
+/* Interactive 3D ASCII Tux penguin fallback & instant boot stage for [ STACK // NEOFETCH ].
+   - Targets `#penguin-stage` and `.penguin-fallback` (with backward compatibility for `.neofetch .ascii-logo`)
+   - Renders a high-contrast 3D raycast Tux silhouette inspired by classic dense ASCII Tux art:
+     dense dark dorsal coat (`M`, `W`, `#`, `@`), bright clean white belly (` `, `.`, `:`),
+     defined eyes, sculpted beak, flippers, and webbed feet.
+   - Tracks mouse & touch (`pointermove` / `pointerdown`) passively (`{ passive: true }`) without blocking page scroll.
+   - Automatically yields its `requestAnimationFrame` loop as soon as `#penguin-stage[data-mode="engine"]` mounts! */
 window.TP = window.TP || {};
 
 (function (TP) {
   'use strict';
 
-  var COLS = 26;
-  var ROWS = 17;
-  var ASPECT_Y = 1.9; // Monospace character height/width ratio compensation
+  var COLS = 30;
+  var ROWS = 18;
+  var ASPECT_Y = 1.92;
 
-  // Luminance ramps per surface material (body, belly, beak/feet, eyes)
-  var RAMP_DARK = ' .:-=+*#%@';
-  var RAMP_BELLY = ' .:+*#@@@';
-  var RAMP_BEAK = ' .-~=+*#%@';
+  // High-contrast ramps calibrated to the Tux ASCII reference:
+  // Dark outer coat uses dense heavy glyphs ('RM#W@'), white belly stays crisp & open (' .,:;+i')
+  var RAMP_COAT = 'itIYVRBM#W@';
+  var RAMP_BELLY = '   ..,:;+iI';
+  var RAMP_BEAK = '.:;+itIYVR#';
 
-  // Ellipsoids composing Tux in local penguin space (x right, y up, z forward toward viewer)
-  // { cx, cy, cz, rx, ry, rz, mat: 0=obsidian coat, 1=white belly, 2=amber beak/feet, 3=eye sclera, 4=pupil }
+  // Ellipsoid parts in penguin local space (x right, y up, z forward toward viewer)
+  // mat: 0=dense dark coat, 1=bright white belly/cheeks, 2=beak/webbed feet, 3=eye sclera, 4=pupil
   var PARTS = [
-    // Torso
-    { cx: 0.0, cy: -0.22, cz: 0.0, rx: 0.72, ry: 0.92, rz: 0.64, mat: 0 },
-    // White belly patch (protrudes slightly forward +Z)
-    { cx: 0.0, cy: -0.30, cz: 0.19, rx: 0.52, ry: 0.74, rz: 0.52, mat: 1 },
+    // Pear-shaped torso
+    { cx: 0.0, cy: -0.22, cz: 0.0, rx: 0.74, ry: 0.94, rz: 0.65, mat: 0 },
+    // Crisp high-contrast white belly patch
+    { cx: 0.0, cy: -0.28, cz: 0.22, rx: 0.54, ry: 0.76, rz: 0.50, mat: 1 },
     // Head
-    { cx: 0.0, cy: 0.74, cz: 0.03, rx: 0.52, ry: 0.48, rz: 0.50, mat: 0 },
-    // Left & Right flippers
-    { cx: -0.78, cy: -0.18, cz: 0.02, rx: 0.17, ry: 0.62, rz: 0.28, mat: 0 },
-    { cx:  0.78, cy: -0.18, cz: 0.02, rx: 0.17, ry: 0.62, rz: 0.28, mat: 0 },
-    // Beak (protrudes forward +Z so yaw rotation is unmistakably 3D!)
-    { cx: 0.0, cy: 0.66, cz: 0.52, rx: 0.22, ry: 0.13, rz: 0.28, mat: 2 },
-    // Left & Right webbed feet
-    { cx: -0.34, cy: -1.12, cz: 0.24, rx: 0.24, ry: 0.12, rz: 0.36, mat: 2 },
-    { cx:  0.34, cy: -1.12, cz: 0.24, rx: 0.24, ry: 0.12, rz: 0.36, mat: 2 },
-    // Left & Right eyes
-    { cx: -0.20, cy: 0.84, cz: 0.44, rx: 0.13, ry: 0.15, rz: 0.12, mat: 3 },
-    { cx:  0.20, cy: 0.84, cz: 0.44, rx: 0.13, ry: 0.15, rz: 0.12, mat: 3 },
+    { cx: 0.0, cy: 0.74, cz: 0.04, rx: 0.50, ry: 0.47, rz: 0.48, mat: 0 },
+    // White brow/cheek masks
+    { cx: -0.15, cy: 0.76, cz: 0.30, rx: 0.19, ry: 0.21, rz: 0.22, mat: 1 },
+    { cx:  0.15, cy: 0.76, cz: 0.30, rx: 0.19, ry: 0.21, rz: 0.22, mat: 1 },
+    // Left & Right flippers (articulated in renderPenguinAscii via breathe/sway)
+    { cx: -0.80, cy: -0.18, cz: 0.02, rx: 0.17, ry: 0.62, rz: 0.28, mat: 0, wing: -1 },
+    { cx:  0.80, cy: -0.18, cz: 0.02, rx: 0.17, ry: 0.62, rz: 0.28, mat: 0, wing: 1 },
+    // Sculpted Tux beak
+    { cx: 0.0, cy: 0.65, cz: 0.52, rx: 0.24, ry: 0.13, rz: 0.28, mat: 2 },
+    // Splayed webbed feet
+    { cx: -0.38, cy: -1.10, cz: 0.26, rx: 0.26, ry: 0.13, rz: 0.36, mat: 2 },
+    { cx:  0.38, cy: -1.10, cz: 0.26, rx: 0.26, ry: 0.13, rz: 0.36, mat: 2 },
+    // Eye sclera
+    { cx: -0.16, cy: 0.82, cz: 0.43, rx: 0.11, ry: 0.14, rz: 0.11, mat: 3 },
+    { cx:  0.16, cy: 0.82, cz: 0.43, rx: 0.11, ry: 0.14, rz: 0.11, mat: 3 },
     // Pupils
-    { cx: -0.20, cy: 0.84, cz: 0.54, rx: 0.06, ry: 0.07, rz: 0.06, mat: 4 },
-    { cx:  0.20, cy: 0.84, cz: 0.54, rx: 0.06, ry: 0.07, rz: 0.06, mat: 4 },
-    // Stubby tail (+Z negative)
-    { cx: 0.0, cy: -0.95, cz: -0.58, rx: 0.18, ry: 0.14, rz: 0.22, mat: 0 }
+    { cx: -0.15, cy: 0.82, cz: 0.52, rx: 0.055, ry: 0.065, rz: 0.055, mat: 4 },
+    { cx:  0.15, cy: 0.82, cz: 0.52, rx: 0.055, ry: 0.065, rz: 0.055, mat: 4 },
+    // Stubby tail
+    { cx: 0.0, cy: -0.94, cz: -0.58, rx: 0.18, ry: 0.14, rz: 0.22, mat: 0 }
   ];
 
   var state = {
     frameEl: null,
     logoEl: null,
     angleBadgeEl: null,
-    targetYaw: 0,
+    targetYaw: 0.14,
     targetPitch: 0,
-    yaw: 0,
+    yaw: 0.14,
     pitch: 0,
     pointerActive: false,
     visible: true,
+    engineActive: false,
     rafId: null,
     lastRenderedText: ''
   };
 
-  /**
-   * Ray-ellipsoid intersection in penguin local space.
-   * Ray origin O = (ox, oy, oz), unit direction D = (dx, dy, dz).
-   */
-  function intersectPart(ox, oy, oz, dx, dy, dz, p) {
+  function intersectPart(ox, oy, oz, dx, dy, dz, p, wingSway) {
+    var cx = p.cx + (p.wing ? p.wing * wingSway : 0);
+    var cy = p.cy + (p.wing ? Math.abs(wingSway) * 0.35 : 0);
+
     var invRx = 1 / p.rx;
     var invRy = 1 / p.ry;
     var invRz = 1 / p.rz;
 
-    var rox = (ox - p.cx) * invRx;
-    var roy = (oy - p.cy) * invRy;
+    var rox = (ox - cx) * invRx;
+    var roy = (oy - cy) * invRy;
     var roz = (oz - p.cz) * invRz;
 
     var rdx = dx * invRx;
@@ -85,31 +92,31 @@ window.TP = window.TP || {};
     return t > 0 ? t : -1;
   }
 
-  function renderPenguinAscii(yaw, pitch) {
+  function renderPenguinAscii(yaw, pitch, timeSec) {
+    var tSec = timeSec || 0;
+    var breathe = Math.sin(tSec * 2.1) * 0.025;
+    var wingSway = Math.sin(tSec * 2.6) * 0.035;
+
     var cosY = Math.cos(yaw);
     var sinY = Math.sin(yaw);
     var cosX = Math.cos(pitch);
     var sinX = Math.sin(pitch);
 
-    // Light direction in world space (upper-left-front)
-    var lx = -0.48;
-    var ly = 0.62;
-    var lz = 0.62;
+    var lx = -0.46;
+    var ly = 0.64;
+    var lz = 0.61;
 
-    // Transform world ray into penguin local space (inverse rotation R_y(-yaw) * R_x(-pitch))
-    // Camera sits at world (0, -0.08, 3.8) looking toward -Z
     var lines = [];
 
     for (var row = 0; row < ROWS; row += 1) {
-      var sy = ((ROWS - 1) * 0.5 - row) / (ROWS * 0.44);
+      var sy = (((ROWS - 1) * 0.5 - row) / (ROWS * 0.44)) * (1 - breathe);
       var rowChars = '';
 
       for (var col = 0; col < COLS; col += 1) {
-        var sx = (col - (COLS - 1) * 0.5) / (COLS * 0.44 * (ASPECT_Y * 0.52));
+        var sx = ((col - (COLS - 1) * 0.5) / (COLS * 0.44 * (ASPECT_Y * 0.52))) * (1 + breathe * 0.5);
 
-        // Orthographic-perspective hybrid ray in world space
         var wox = sx * 1.18;
-        var woy = sy * 1.32 - 0.08;
+        var woy = sy * 1.32 - 0.06;
         var woz = 3.5;
 
         var wdx = -sx * 0.08;
@@ -120,14 +127,12 @@ window.TP = window.TP || {};
         wdy /= wLen;
         wdz /= wLen;
 
-        // Rotate origin by R_x(-pitch) then R_y(-yaw)
         var oy1 = woy * cosX + woz * sinX;
         var oz1 = -woy * sinX + woz * cosX;
         var ox = wox * cosY - oz1 * sinY;
         var oy = oy1;
         var oz = wox * sinY + oz1 * cosY;
 
-        // Rotate direction by R_x(-pitch) then R_y(-yaw)
         var dy1 = wdy * cosX + wdz * sinX;
         var dz1 = -wdy * sinX + wdz * cosX;
         var dx = wdx * cosY - dz1 * sinY;
@@ -138,7 +143,7 @@ window.TP = window.TP || {};
         var bestPart = null;
 
         for (var i = 0; i < PARTS.length; i += 1) {
-          var t = intersectPart(ox, oy, oz, dx, dy, dz, PARTS[i]);
+          var t = intersectPart(ox, oy, oz, dx, dy, dz, PARTS[i], wingSway);
           if (t > 0 && t < bestT) {
             bestT = t;
             bestPart = PARTS[i];
@@ -150,20 +155,21 @@ window.TP = window.TP || {};
           continue;
         }
 
-        // Hit point & local surface normal
         var hx = ox + dx * bestT;
         var hy = oy + dy * bestT;
         var hz = oz + dz * bestT;
 
-        var lnx = (hx - bestPart.cx) / (bestPart.rx * bestPart.rx);
-        var lny = (hy - bestPart.cy) / (bestPart.ry * bestPart.ry);
+        var pcx = bestPart.cx + (bestPart.wing ? bestPart.wing * wingSway : 0);
+        var pcy = bestPart.cy + (bestPart.wing ? Math.abs(wingSway) * 0.35 : 0);
+
+        var lnx = (hx - pcx) / (bestPart.rx * bestPart.rx);
+        var lny = (hy - pcy) / (bestPart.ry * bestPart.ry);
         var lnz = (hz - bestPart.cz) / (bestPart.rz * bestPart.rz);
         var nLen = Math.sqrt(lnx * lnx + lny * lny + lnz * lnz) || 1;
         lnx /= nLen;
         lny /= nLen;
         lnz /= nLen;
 
-        // Rotate normal back to world space: R_x(pitch) * R_y(yaw)
         var nx1 = lnx * cosY + lnz * sinY;
         var nz1 = -lnx * sinY + lnz * cosY;
         var wnx = nx1;
@@ -171,25 +177,23 @@ window.TP = window.TP || {};
         var wnz = lny * sinX + nz1 * cosX;
 
         var ndotl = Math.max(0, wnx * lx + wny * ly + wnz * lz);
-        var rim = Math.pow(Math.max(0, 1 - Math.max(0, wnz)), 2.2) * 0.35;
 
         var ch = '#';
         if (bestPart.mat === 4) {
-          ch = 'o'; // Crisp pupil
+          ch = '#'; // Dark pupil
         } else if (bestPart.mat === 3) {
-          ch = '@'; // Bright eye sclera
+          ch = '.'; // Crisp bright sclera
         } else if (bestPart.mat === 2) {
-          // Beak & webbed feet
-          var bLum = Math.min(0.99, 0.32 + ndotl * 0.65);
+          var bLum = Math.min(0.99, 0.28 + ndotl * 0.68);
           ch = RAMP_BEAK.charAt(Math.floor(bLum * RAMP_BEAK.length));
         } else if (bestPart.mat === 1) {
-          // Bright white belly
-          var wLum = Math.min(0.99, 0.48 + ndotl * 0.52);
-          ch = RAMP_BELLY.charAt(Math.floor(wLum * RAMP_BELLY.length));
+          // High-contrast bright belly (sparse dots near core, subtle shading near coat seam)
+          var seam = Math.max(0, 1 - Math.max(0, wnz));
+          var wIdx = Math.min(RAMP_BELLY.length - 1, Math.floor((seam * 0.72 + (1 - ndotl) * 0.28) * RAMP_BELLY.length));
+          ch = RAMP_BELLY.charAt(wIdx);
         } else {
-          // Obsidian penguin coat + silhouette rim
-          if (wnz < 0.28) {
-            // Silhouette contour glyph based on normal angle
+          // Dense dark coat + crisp structural silhouette edges
+          if (wnz < 0.26) {
             if (Math.abs(wnx) > Math.abs(wny) * 1.6) {
               ch = '|';
             } else if (wnx * wny > 0) {
@@ -198,8 +202,8 @@ window.TP = window.TP || {};
               ch = '/';
             }
           } else {
-            var cLum = Math.min(0.99, 0.14 + ndotl * 0.52 + rim);
-            ch = RAMP_DARK.charAt(Math.floor(cLum * RAMP_DARK.length));
+            var coatDensity = Math.min(0.99, 0.35 + (1 - ndotl) * 0.62);
+            ch = RAMP_COAT.charAt(Math.floor(coatDensity * RAMP_COAT.length));
           }
         }
 
@@ -215,28 +219,29 @@ window.TP = window.TP || {};
   function updateFromClientPoint(clientX, clientY) {
     if (!state.frameEl) return;
     var rect = state.frameEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
     var centerX = rect.left + rect.width * 0.5;
     var centerY = rect.top + rect.height * 0.5;
 
-    // Normalize relative to penguin center across viewport width/height so moving the mouse
-    // anywhere near or inside [ STACK // NEOFETCH ] smoothly rotates Tux up to +-75 deg yaw & +-28 deg pitch
-    var halfSpanX = Math.max(180, window.innerWidth * 0.42);
-    var halfSpanY = Math.max(160, window.innerHeight * 0.42);
+    var halfSpanX = Math.max(160, window.innerWidth * 0.38);
+    var halfSpanY = Math.max(140, window.innerHeight * 0.38);
 
     var nx = Math.max(-1, Math.min(1, (clientX - centerX) / halfSpanX));
     var ny = Math.max(-1, Math.min(1, (clientY - centerY) / halfSpanY));
 
-    state.targetYaw = nx * 1.28;   // ~ +-73 degrees yaw
-    state.targetPitch = ny * 0.46; // ~ +-26 degrees pitch
+    state.targetYaw = nx * 1.25;
+    state.targetPitch = ny * 0.44;
     state.pointerActive = true;
   }
 
   function tick(now) {
     state.rafId = null;
-    if (!state.visible || !state.logoEl) return;
+    if (!state.visible || !state.logoEl || state.engineActive) return;
 
-    var idleYaw = Math.sin((now || 0) * 0.0014) * 0.38;
-    var idlePitch = Math.cos((now || 0) * 0.0011) * 0.08;
+    var tSec = (now || 0) * 0.001;
+    var idleYaw = Math.sin(tSec * 0.85) * 0.28;
+    var idlePitch = Math.cos(tSec * 0.65) * 0.06;
 
     var desiredYaw = state.pointerActive ? state.targetYaw : idleYaw;
     var desiredPitch = state.pointerActive ? state.targetPitch : idlePitch;
@@ -244,26 +249,24 @@ window.TP = window.TP || {};
     state.yaw += (desiredYaw - state.yaw) * 0.14;
     state.pitch += (desiredPitch - state.pitch) * 0.14;
 
-    var isFallbackMode = !state.frameEl || state.frameEl.getAttribute('data-mode') !== 'engine';
-    if (isFallbackMode) {
-      var ascii = renderPenguinAscii(state.yaw, state.pitch);
-      if (ascii !== state.lastRenderedText) {
-        state.logoEl.textContent = ascii;
-        state.lastRenderedText = ascii;
-      }
+    var ascii = renderPenguinAscii(state.yaw, state.pitch, tSec);
+    if (ascii !== state.lastRenderedText) {
+      state.logoEl.textContent = ascii;
+      state.lastRenderedText = ascii;
     }
 
     if (state.angleBadgeEl) {
       var degYaw = Math.round((state.yaw * 180) / Math.PI);
       var degPitch = Math.round((-state.pitch * 180) / Math.PI);
-      state.angleBadgeEl.textContent = 'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch ' + (degPitch >= 0 ? '+' : '') + degPitch + '°';
+      state.angleBadgeEl.textContent =
+        'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch ' + (degPitch >= 0 ? '+' : '') + degPitch + '°';
     }
 
     state.rafId = window.requestAnimationFrame(tick);
   }
 
   function startLoop() {
-    if (state.rafId === null && state.visible) {
+    if (state.rafId === null && state.visible && !state.engineActive) {
       state.rafId = window.requestAnimationFrame(tick);
     }
   }
@@ -276,8 +279,13 @@ window.TP = window.TP || {};
   }
 
   function init() {
-    var logoEl = document.querySelector('.neofetch .ascii-logo');
-    var frameEl = document.querySelector('.neofetch .logo-frame');
+    var frameEl =
+      document.getElementById('penguin-stage') ||
+      document.querySelector('.neofetch .logo-frame');
+    var logoEl =
+      document.querySelector('#penguin-stage .penguin-fallback') ||
+      document.querySelector('.neofetch .ascii-logo');
+
     if (!logoEl || !frameEl) return;
 
     state.logoEl = logoEl;
@@ -285,16 +293,26 @@ window.TP = window.TP || {};
     state.angleBadgeEl = document.getElementById('neofetch-penguin-telemetry');
     frameEl.setAttribute('data-penguin-ready', 'true');
 
-    // Render initial 3D frame even if reduced motion is active
-    state.logoEl.textContent = renderPenguinAscii(0.18, -0.05);
+    // Watch for WebGL2 engine handoff so there is NEVER a dual-rAF conflict
+    state.engineActive = frameEl.getAttribute('data-mode') === 'engine';
+    frameEl.addEventListener('tp:scene-mode', function (ev) {
+      state.engineActive = Boolean(ev && ev.detail && ev.detail.mode === 'engine');
+      if (state.engineActive) {
+        stopLoop();
+      } else {
+        startLoop();
+      }
+    });
+
+    state.logoEl.textContent = renderPenguinAscii(0.14, -0.04, 0);
 
     if (TP.utils && TP.utils.reducedMotion) {
-      // Still respond immediately on pointermove without continuous idle rAF
       window.addEventListener('pointermove', function (ev) {
+        if (state.engineActive) return;
         updateFromClientPoint(ev.clientX, ev.clientY);
         state.yaw = state.targetYaw;
         state.pitch = state.targetPitch;
-        state.logoEl.textContent = renderPenguinAscii(state.yaw, state.pitch);
+        state.logoEl.textContent = renderPenguinAscii(state.yaw, state.pitch, 0);
       }, { passive: true });
       return;
     }
@@ -303,7 +321,7 @@ window.TP = window.TP || {};
       updateFromClientPoint(ev.clientX, ev.clientY);
     }, { passive: true });
 
-    window.addEventListener('mousemove', function (ev) {
+    frameEl.addEventListener('pointerdown', function (ev) {
       updateFromClientPoint(ev.clientX, ev.clientY);
     }, { passive: true });
 
@@ -336,8 +354,8 @@ window.TP = window.TP || {};
       state.targetPitch = pitchRad;
       state.yaw = yawRad;
       state.pitch = pitchRad;
-      if (state.logoEl) {
-        state.logoEl.textContent = renderPenguinAscii(yawRad, pitchRad);
+      if (state.logoEl && !state.engineActive) {
+        state.logoEl.textContent = renderPenguinAscii(yawRad, pitchRad, 0);
       }
     },
     getState: function () {
@@ -346,7 +364,8 @@ window.TP = window.TP || {};
         pitch: state.pitch,
         targetYaw: state.targetYaw,
         targetPitch: state.targetPitch,
-        pointerActive: state.pointerActive
+        pointerActive: state.pointerActive,
+        engineActive: state.engineActive
       };
     }
   };

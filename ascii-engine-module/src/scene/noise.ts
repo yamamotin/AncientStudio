@@ -50,6 +50,23 @@ export function fbm2D(x: number, z: number, octaves = 4): number {
   return value / (norm || 1);
 }
 
+export function ridgedFbm2D(x: number, z: number, octaves = 4): number {
+  let value = 0;
+  let amplitude = 0.5;
+  let frequency = 1.0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i++) {
+    const n = 1.0 - Math.abs(valueNoise2D(x * frequency, z * frequency));
+    value += amplitude * (n * n);
+    norm += amplitude;
+    frequency *= 2.05;
+    amplitude *= 0.5;
+  }
+
+  return value / (norm || 1);
+}
+
 /**
  * Evaluates world terrain elevation at (x, z) so stones, torches, trees, and ruins
  * sit accurately on the sculpted low-poly terrain, surrounded by a reflective sanctuary lake moat.

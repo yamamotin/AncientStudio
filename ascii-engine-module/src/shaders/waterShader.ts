@@ -1,5 +1,8 @@
+import * as THREE from 'three';
+import type { ThemePalette } from '../types';
+
 /**
- * Custom GLSL shader for the Sanctuary Water Lake surface:
+ * Custom GLSL shader & factory for the Sanctuary Water Lake surface:
  * - Animated multi-wave ripple normal perturbation
  * - Planar reflection approximation of the moon, sky gradient, flickering torch pillars,
  *   central rune crystal, and interactive cursor spirit lantern
@@ -68,8 +71,6 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
     vec3 lightColor,
     float intensity
   ) {
-    // Mirror the point light across the water plane for true planar reflection trails
-    vec3 mirroredLight = vec3(lightPos.x, 2.0 * worldPos.y - lightPos.y, lightPos.z);
     vec3 toMirrored = normalize(lightPos - worldPos);
     vec3 reflDir = reflect(-viewDir, normal);
 
@@ -124,10 +125,10 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
       uCursorIntensity
     );
 
-    // Subtle shoreline foam / ripple ring around sanctuary island (center at 0, -2.5)
-    float islandDist = length(vWorldPos.xz - vec2(0.0, -2.5));
+    // Subtle shoreline foam / ripple ring around sanctuary island (center at 0, -1.8)
+    float islandDist = length(vWorldPos.xz - vec2(0.0, -1.8));
     float shoreWave = sin(islandDist * 4.2 - uTime * 2.2) * 0.5 + 0.5;
-    float shoreMask = exp(-pow((islandDist - 4.75) / 0.55, 2.0));
+    float shoreMask = exp(-pow((islandDist - 5.2) / 0.65, 2.0));
     color += uShallowColor * shoreMask * shoreWave * 0.28;
 
     // Distance fog blend so far water merges seamlessly into #050508 horizon
@@ -137,3 +138,44 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
     gl_FragColor = vec4(color, 0.94);
   }
 `;
+
+export function createSanctuaryWaterMaterial(options: {
+  palette: ThemePalette;
+  shrineLightPos: THREE.Vector3;
+  moonDir: THREE.Vector3;
+}): THREE.ShaderMaterial {
+  const { palette, shrineLightPos, moonDir } = options;
+
+  const deepWater = new THREE.Color(palette.background).lerp(
+    new THREE.Color(palette.coolAmbient),
+    0.26
+  );
+  const shallowWater = new THREE.Color(palette.coolAmbient).lerp(
+    new THREE.Color('#8be4ff'),
+    0.32
+  );
+
+  return new THREE.ShaderMaterial({
+    vertexShader: WATER_VERTEX_SHADER,
+    fragmentShader: WATER_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uCamPos: { value: new THREE.Vector3(0, 5.2, 13.6) },
+      uDeepColor: { value: deepWater },
+      uShallowColor: { value: shallowWater },
+      uWarmColor: { value: new THREE.Color(palette.warmLight) },
+      uWarmCoreColor: { value: new THREE.Color(palette.warmCore) },
+      uCursorColor: { value: new THREE.Color(palette.cursorLight) },
+      uCursorPos: { value: new THREE.Vector3(0, 2.2, 3.2) },
+      uCursorIntensity: { value: 12 },
+      uMoonDir: { value: moonDir.clone().normalize() },
+      uTorch0: { value: new THREE.Vector4(-2.05, 1.5, 1.65, 14) },
+      uTorch1: { value: new THREE.Vector4(2.05, 1.5, 1.65, 14) },
+      uTorch2: { value: new THREE.Vector4(-2.5, 1.2, -1.8, 10) },
+      uTorch3: { value: new THREE.Vector4(2.5, 1.2, -1.8, 10) },
+      uShrineLight: { value: new THREE.Vector4(shrineLightPos.x, shrineLightPos.y, shrineLightPos.z, 42) },
+    },
+  });
+}

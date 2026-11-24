@@ -1,5 +1,8 @@
-/* Integration layer for the ASCII Engine Core (bundle: ascii-engine.bundle.js).
-   No engine source is modified here: this file only uses its public facade. */
+/* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
+   Connects:
+   1. `#ascii-scene` -> Lightweight interactive ASCII Realms Playground (`mode: 'playground'`)
+   2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
+   Zero framework dependencies; preserves scroll-safe `{ passive: true }` pointer/touch listeners. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -10,23 +13,23 @@ window.TP = window.TP || {};
   var PRESETS = {
     sanctuary: {
       palette: { background: '#050508', warmLight: '#FF8C24', warmCore: '#FFB85C', coolAmbient: '#2E6F95', foliageAccent: '#3A7D5C', cursorLight: '#7AD7F0' },
-      bloomIntensity: 1.2, dofStrength: 0.68, edgeStrength: 0.85, parallaxIntensity: 1.45
+      bloomIntensity: 1.2, dofStrength: 0.65, edgeStrength: 0.88, parallaxIntensity: 1.45
     },
     dawn: {
       palette: { background: '#0a0d12', warmLight: '#FFB46B', warmCore: '#FFE0B2', coolAmbient: '#6D9FC0', foliageAccent: '#4D8B68', cursorLight: '#C9F0FF' },
-      bloomIntensity: 0.9, dofStrength: 0.5, edgeStrength: 0.7, parallaxIntensity: 1.3
+      bloomIntensity: 0.9, dofStrength: 0.5, edgeStrength: 0.72, parallaxIntensity: 1.3
     },
     day: {
       palette: { background: '#0b1820', warmLight: '#FFD27A', warmCore: '#FFF4CF', coolAmbient: '#A6D8F0', foliageAccent: '#5FA97A', cursorLight: '#EAFBFF' },
-      bloomIntensity: 0.55, dofStrength: 0.35, edgeStrength: 0.6, parallaxIntensity: 1.15
+      bloomIntensity: 0.55, dofStrength: 0.35, edgeStrength: 0.65, parallaxIntensity: 1.15
     },
     storm: {
       palette: { background: '#04060a', warmLight: '#FF6B3D', warmCore: '#FFB199', coolAmbient: '#4A6E8A', foliageAccent: '#2C4A48', cursorLight: '#9FC6E8' },
-      bloomIntensity: 1.9, dofStrength: 0.9, edgeStrength: 0.98, parallaxIntensity: 1.75
+      bloomIntensity: 1.85, dofStrength: 0.88, edgeStrength: 0.98, parallaxIntensity: 1.75
     },
     emerald: {
       palette: { background: '#040808', warmLight: '#38E5A5', warmCore: '#A6FFE0', coolAmbient: '#1F5C78', foliageAccent: '#3D8C54', cursorLight: '#FFD166' },
-      bloomIntensity: 1.35, dofStrength: 0.62, edgeStrength: 0.8, parallaxIntensity: 1.4
+      bloomIntensity: 1.35, dofStrength: 0.62, edgeStrength: 0.82, parallaxIntensity: 1.4
     }
   };
 
@@ -65,9 +68,8 @@ window.TP = window.TP || {};
     return result;
   }
 
-  /* Software WebGL (SwiftShader/llvmpipe) spends seconds per frame on the ASCII
-     post-processing pipeline. The static ASCII fallback keeps those devices fast
-     and keeps Lighthouse's TTB budget intact; hardware WebGL gets full 3D. */
+  /* Software WebGL (SwiftShader/llvmpipe) spends seconds per frame on multi-pass shaders.
+     Keep software devices on the instant 3D raycast / static ASCII fallback; hardware GPUs get full WebGL2. */
   function hasHardwareWebGL2() {
     try {
       var canvas = document.createElement('canvas');
@@ -113,6 +115,8 @@ window.TP = window.TP || {};
   }
 
   function createController(container, options) {
+    var isMascot = Boolean(options && options.mascotFocus);
+
     var state = {
       container: container,
       engine: null,
@@ -120,21 +124,21 @@ window.TP = window.TP || {};
       mode: 'fallback',
       preset: (options && options.preset) || 'sanctuary',
       paused: false,
-      weatherEnabled: !options || options.weather !== false,
+      weatherEnabled: !isMascot && (!options || options.weather !== false),
       cycleTimer: null,
       cycleStart: 0,
       orbitTimer: null,
       lastUserPointer: 0,
-      penguin: null,
-      penguinBaseY: 1.1,
-      penguinRaf: null,
+      penguinTargetYaw: 0,
+      penguinTargetPitch: 0,
+      penguinPointerActive: false,
+      telemetryRaf: null,
       weather: null,
       weatherRaf: null,
       weatherMode: '',
       observer: null,
-      visibilityObserver: null,
-      autoPaused: false,
-      pointerListener: null
+      pointerListener: null,
+      windowPointerListener: null
     };
 
     function emit(mode) {
@@ -152,81 +156,25 @@ window.TP = window.TP || {};
     function getThreeScene() {
       if (!state.instance) return null;
       if (typeof state.instance.getScene === 'function') return state.instance.getScene();
-      return state.instance.core && state.instance.core.world && state.instance.core.world.scene;
+      return null;
     }
 
-    function createPenguin() {
-      var THREE = state.engine && state.engine.THREE;
-      var scene = getThreeScene();
-      if (!THREE || !scene || state.penguin) return;
+    function syncMascotTelemetry() {
+      state.telemetryRaf = null;
+      if (!isMascot || state.paused || !state.instance) return;
 
-      var group = new THREE.Group();
-      var dark = new THREE.MeshStandardMaterial({ color: 0x16242c, flatShading: true, roughness: 0.9 });
-      var light = new THREE.MeshStandardMaterial({ color: 0xe8f3f4, flatShading: true, roughness: 0.85 });
-      var beak = new THREE.MeshStandardMaterial({ color: 0xff9a3c, flatShading: true, roughness: 0.7 });
-      var eye = new THREE.MeshBasicMaterial({ color: 0x0b1015 });
-
-      function add(geometry, material, position, scale) {
-        var mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(position[0], position[1], position[2]);
-        if (scale) mesh.scale.set(scale[0], scale[1], scale[2]);
-        group.add(mesh);
-        return mesh;
+      var badge = document.getElementById('neofetch-penguin-telemetry');
+      if (badge && typeof state.instance.getPrimaryEntityAngles === 'function') {
+        var angles = state.instance.getPrimaryEntityAngles();
+        if (angles) {
+          var degYaw = Math.round((angles.yaw * 180) / Math.PI);
+          var degPitch = Math.round((-angles.pitch * 180) / Math.PI);
+          badge.textContent =
+            'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch ' + (degPitch >= 0 ? '+' : '') + degPitch + '°';
+        }
       }
 
-      add(new THREE.SphereGeometry(0.62, 14, 10), dark, [0, 0.78, 0], [0.9, 1.15, 0.8]);
-      add(new THREE.SphereGeometry(0.42, 12, 10), light, [0, 0.7, 0.36], [0.82, 1.12, 0.45]);
-      add(new THREE.SphereGeometry(0.4, 12, 10), dark, [0, 1.48, 0.06]);
-      add(new THREE.SphereGeometry(0.26, 10, 8), light, [0, 1.42, 0.29], [0.9, 0.9, 0.45]);
-      add(new THREE.ConeGeometry(0.13, 0.34, 6), beak, [0, 1.42, 0.52]).rotation.x = Math.PI / 2;
-      add(new THREE.SphereGeometry(0.055, 8, 6), eye, [-0.16, 1.56, 0.38]);
-      add(new THREE.SphereGeometry(0.055, 8, 6), eye, [0.16, 1.56, 0.38]);
-      add(new THREE.ConeGeometry(0.16, 0.8, 6), dark, [-0.58, 0.82, 0]).rotation.z = 0.28;
-      add(new THREE.ConeGeometry(0.16, 0.8, 6), dark, [0.58, 0.82, 0]).rotation.z = -0.28;
-      add(new THREE.BoxGeometry(0.3, 0.09, 0.42), beak, [-0.22, 0.08, 0.2]);
-      add(new THREE.BoxGeometry(0.3, 0.09, 0.42), beak, [0.22, 0.08, 0.2]);
-
-      if (options && options.mascotFocus) {
-        // Position close to camera (z=8.4 vs camera z=11.8) with dedicated spotlight so Tux fills #penguin-stage crisply
-        group.position.set(0, state.penguinBaseY, 8.4);
-        group.scale.setScalar(1.22);
-        var keyLight = new THREE.PointLight(0xffffff, 18, 9, 1.4);
-        keyLight.position.set(1.2, 2.6, 2.8);
-        group.add(keyLight);
-      } else {
-        group.position.set(0, state.penguinBaseY, 3.2);
-        group.scale.setScalar(0.85);
-      }
-
-      scene.add(group);
-      state.penguin = group;
-    }
-
-    function spinPenguin(now) {
-      if (!state.penguin || state.paused) return;
-      var userRecent = state.penguinPointerActive && (Date.now() - state.lastUserPointer < 5000);
-      if (userRecent) {
-        // Smoothly rotate 3D penguin toward mouse cursor yaw & pitch!
-        state.penguin.rotation.y += (state.penguinTargetYaw - state.penguin.rotation.y) * 0.16;
-        state.penguin.rotation.x += (state.penguinTargetPitch - state.penguin.rotation.x) * 0.16;
-      } else {
-        state.penguin.rotation.y += 0.012;
-        state.penguin.rotation.x += (0 - state.penguin.rotation.x) * 0.1;
-      }
-      state.penguin.position.y = state.penguinBaseY + Math.sin(now / 700) * 0.05;
-      state.penguinRaf = window.requestAnimationFrame(spinPenguin);
-    }
-
-    function removePenguin() {
-      if (state.penguinRaf) window.cancelAnimationFrame(state.penguinRaf);
-      state.penguinRaf = null;
-      if (!state.penguin) return;
-      if (state.penguin.parent) state.penguin.parent.remove(state.penguin);
-      state.penguin.traverse(function (object) {
-        if (object.geometry) object.geometry.dispose();
-        if (object.material) object.material.dispose();
-      });
-      state.penguin = null;
+      state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
     }
 
     function removeWeather() {
@@ -240,16 +188,16 @@ window.TP = window.TP || {};
     }
 
     function setWeather(mode) {
+      if (!state.weatherEnabled) return;
       if (state.weatherMode === mode && state.weather) return;
       removeWeather();
       state.weatherMode = mode;
 
       var THREE = state.engine && state.engine.THREE;
       var scene = getThreeScene();
-      if (!THREE || !scene || !mode) return;
+      if (!THREE || !scene || mode !== 'storm') return;
 
-      var storm = mode === 'storm';
-      var count = storm ? 220 : 90;
+      var count = 180;
       var positions = new Float32Array(count * 3);
       var speeds = new Float32Array(count);
 
@@ -257,22 +205,22 @@ window.TP = window.TP || {};
         positions[index * 3] = (Math.random() - 0.5) * 26;
         positions[index * 3 + 1] = Math.random() * 18 - 1;
         positions[index * 3 + 2] = (Math.random() - 0.5) * 22 - 3;
-        speeds[index] = storm ? 7 + Math.random() * 8 : 0.25 + Math.random() * 0.5;
+        speeds[index] = 7 + Math.random() * 8;
       }
 
       var geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       var material = new THREE.PointsMaterial({
-        color: storm ? 0x9fc6e8 : 0xffd27a,
-        size: storm ? 0.16 : 0.1,
+        color: 0x9fc6e8,
+        size: 0.16,
         transparent: true,
-        opacity: storm ? 0.55 : 0.75,
+        opacity: 0.55,
         sizeAttenuation: true,
         depthWrite: false
       });
       var points = new THREE.Points(geometry, material);
       scene.add(points);
-      state.weather = { points: points, speeds: speeds, storm: storm, last: performance.now() };
+      state.weather = { points: points, speeds: speeds, last: performance.now() };
       if (!state.paused) state.weatherRaf = window.requestAnimationFrame(stepWeather);
     }
 
@@ -288,12 +236,9 @@ window.TP = window.TP || {};
         var y = index * 3 + 1;
         values[y] -= weather.speeds[index] * delta;
         if (values[y] < -2) {
-          values[y] = weather.storm ? 16 : 12;
+          values[y] = 16;
           values[index * 3] = (Math.random() - 0.5) * 26;
           values[index * 3 + 2] = (Math.random() - 0.5) * 22 - 3;
-        }
-        if (!weather.storm) {
-          values[index * 3] += Math.sin(now / 900 + index) * 0.002;
         }
       }
       attribute.needsUpdate = true;
@@ -317,7 +262,7 @@ window.TP = window.TP || {};
         applyConfig({
           palette: mixPalettes(night, day, phase),
           bloomIntensity: 1.2 - phase * 0.65,
-          dofStrength: 0.68 - phase * 0.33,
+          dofStrength: 0.65 - phase * 0.3,
           parallaxIntensity: 1.45 - phase * 0.3
         });
       }, 120);
@@ -330,19 +275,19 @@ window.TP = window.TP || {};
 
     function setAutoOrbit(enabled) {
       stopOrbit();
-      if (!enabled || state.mode !== 'engine') return;
+      if (!enabled || state.mode !== 'engine' || isMascot) return;
 
       state.orbitTimer = window.setInterval(function () {
-        if (state.paused || Date.now() - state.lastUserPointer < 4000) return;
+        if (state.paused || Date.now() - state.lastUserPointer < 4500) return;
         var rect = container.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
-        var angle = Date.now() / 2600;
-        var x = rect.left + rect.width * (0.5 + Math.cos(angle) * 0.4);
-        var y = rect.top + rect.height * (0.5 + Math.sin(angle) * 0.32);
+        var angle = Date.now() / 2800;
+        var x = rect.left + rect.width * (0.5 + Math.cos(angle) * 0.38);
+        var y = rect.top + rect.height * (0.5 + Math.sin(angle) * 0.28);
         container.dispatchEvent(new PointerEvent('pointermove', {
           clientX: x, clientY: y, bubbles: true, pointerType: 'mouse'
         }));
-      }, 60);
+      }, 75);
     }
 
     function setPaused(paused) {
@@ -350,13 +295,15 @@ window.TP = window.TP || {};
       if (!state.instance) return;
       if (state.paused) {
         if (typeof state.instance.pause === 'function') state.instance.pause();
-        if (state.penguinRaf) window.cancelAnimationFrame(state.penguinRaf);
-        state.penguinRaf = null;
+        if (state.telemetryRaf) window.cancelAnimationFrame(state.telemetryRaf);
+        state.telemetryRaf = null;
         if (state.weatherRaf) window.cancelAnimationFrame(state.weatherRaf);
         state.weatherRaf = null;
       } else {
         if (typeof state.instance.resume === 'function') state.instance.resume();
-        if (state.penguin && !state.penguinRaf) state.penguinRaf = window.requestAnimationFrame(spinPenguin);
+        if (isMascot && !state.telemetryRaf) {
+          state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
+        }
         if (state.weather && !state.weatherRaf) {
           state.weather.last = performance.now();
           state.weatherRaf = window.requestAnimationFrame(stepWeather);
@@ -374,28 +321,12 @@ window.TP = window.TP || {};
       if (!window.ResizeObserver) return;
       state.observer = new ResizeObserver(function (entries) {
         if (entries[0] && entries[0].contentRect.width > 0) {
-          /* The engine owns its own ResizeObserver; this keeps the wrapper contract
-             ready for engines that need an explicit resize hook. */
           if (state.instance && typeof state.instance.resize === 'function') {
             state.instance.resize({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
           }
         }
       });
       state.observer.observe(container);
-
-      if (!window.IntersectionObserver) return;
-      state.visibilityObserver = new IntersectionObserver(function (entries) {
-        if (!state.instance || state.paused) return;
-        var getState = typeof state.instance.getState === 'function' ? state.instance.getState() : 'running';
-        if (!entries[0].isIntersecting && getState === 'running') {
-          state.instance.pause();
-          state.autoPaused = true;
-        } else if (entries[0].isIntersecting && state.autoPaused) {
-          state.instance.resume();
-          state.autoPaused = false;
-        }
-      }, { threshold: 0.01 });
-      state.visibilityObserver.observe(container);
     }
 
     async function mount() {
@@ -406,10 +337,32 @@ window.TP = window.TP || {};
       }
 
       try {
+        var basePresetConfig = configFor(state.preset);
+        var modeDefaults = isMascot
+          ? {
+              mode: 'mascot',
+              cellSize: 8,
+              bloomIntensity: 0.45,
+              dofStrength: 0.0,
+              edgeStrength: 0.96,
+              enableShadows: false
+            }
+          : {
+              mode: 'playground',
+              mapId: 'sanctuary-isle'
+            };
+
+        var mergedConfig = Object.assign(
+          {},
+          basePresetConfig,
+          modeDefaults,
+          (options && options.config) || {}
+        );
+
         var created = resolved.factory(container, {
           preset: state.preset,
           paused: state.paused,
-          config: Object.assign(configFor(state.preset), (options && options.config) || {})
+          config: mergedConfig
         });
         if (created && typeof created.then === 'function') created = await created;
         state.instance = created || resolved.source;
@@ -419,12 +372,13 @@ window.TP = window.TP || {};
         if (lifecycle === 'idle' && typeof state.instance.mount === 'function') state.instance.mount();
 
         emit('engine');
-        createPenguin();
-        if (state.penguin) state.penguinRaf = window.requestAnimationFrame(spinPenguin);
+        if (isMascot) {
+          state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
+        }
         if (state.weatherEnabled) setWeather(state.preset === 'storm' ? 'storm' : 'ambient');
         observe();
         setPaused(state.paused);
-        setAutoOrbit(true);
+        if (!isMascot) setAutoOrbit(true);
         return true;
       } catch (error) {
         state.instance = null;
@@ -437,15 +391,14 @@ window.TP = window.TP || {};
     function destroy() {
       stopCycle();
       stopOrbit();
-      removePenguin();
       removeWeather();
+      if (state.telemetryRaf) {
+        window.cancelAnimationFrame(state.telemetryRaf);
+        state.telemetryRaf = null;
+      }
       if (state.observer) {
         state.observer.disconnect();
         state.observer = null;
-      }
-      if (state.visibilityObserver) {
-        state.visibilityObserver.disconnect();
-        state.visibilityObserver = null;
       }
       if (state.pointerListener) {
         container.removeEventListener('pointermove', state.pointerListener);
@@ -483,7 +436,7 @@ window.TP = window.TP || {};
     };
     container.addEventListener('pointermove', state.pointerListener, { passive: true });
 
-    if (options && options.mascotFocus) {
+    if (isMascot) {
       state.windowPointerListener = function (event) {
         if (!event.isTrusted) return;
         state.lastUserPointer = Date.now();
@@ -500,13 +453,16 @@ window.TP = window.TP || {};
       setPreset: setPreset,
       setCycle: setCycle,
       setAutoOrbit: setAutoOrbit,
+      setPlayableKeyboard: function (enabled) {
+        if (state.instance && typeof state.instance.setPlayableKeyboardEnabled === 'function') {
+          state.instance.setPlayableKeyboardEnabled(Boolean(enabled));
+        }
+      },
       destroy: destroy,
       getMode: function () { return state.mode; }
     };
   }
 
-  /* Loaded after first paint so the engine bundle never delays the terminal UI
-     or its LCP text; hardware engines attach dynamically when the file is ready. */
   function loadEngineBundle() {
     if (window.ASCIIRealms || document.querySelector('script[data-ascii-engine]')) return;
     var script = document.createElement('script');
@@ -527,8 +483,6 @@ window.TP = window.TP || {};
     }
   }
 
-  /* Load only when an engine stage approaches the viewport or the user interacts.
-     This keeps first paint independent of the 3D bundle. */
   function initDeferredEngineLoad() {
     var stages = [document.getElementById('penguin-stage'), document.getElementById('ascii-scene')].filter(Boolean);
     var trigger = function () { scheduleEngineLoad(); };

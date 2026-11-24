@@ -12,5 +12,10 @@ export default defineConfig({
       formats: ['iife'],
       fileName: () => 'ascii-engine.bundle.js',
     },
+    rollupOptions: {
+      output: {
+        exports: 'named',
+      },
+    },
   },
 });
