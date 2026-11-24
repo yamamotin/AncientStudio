@@ -5,8 +5,13 @@ set -euo pipefail
 PAGES_URL="${PAGES_URL:-https://yamamotin.github.io/AncientStudio}"
 VERCEL_URL="${VERCEL_URL:-https://ancientstudio.vercel.app}"
 
-pages_sha=$(curl -fsSL "$PAGES_URL/build.txt" | tr -d '[:space:]')
-vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build" \
+# Both hosts cache GET responses at the edge. A unique query string makes the
+# probe read the current deployment instead of a stale SHA from the CDN.
+main_sha="${MAIN_SHA:-$(git rev-parse origin/main 2>/dev/null || git rev-parse main 2>/dev/null || true)}"
+cache_key="${CACHE_KEY:-${main_sha:-$(date +%s)}}"
+
+pages_sha=$(curl -fsSL "$PAGES_URL/build.txt?v=$cache_key" | tr -d '[:space:]')
+vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build?v=$cache_key" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha", ""))')
 
 printf 'pages=%s\nvercel=%s\n' "$pages_sha" "$vercel_sha"
@@ -23,8 +28,7 @@ fi
 
 echo 'PARITY OK'
 
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  main_sha=$(git rev-parse origin/main 2>/dev/null || git rev-parse main)
+if [ -n "$main_sha" ]; then
   printf 'main=%s\n' "$main_sha"
   [ "$pages_sha" = "$main_sha" ] && echo 'PAGES MATCHES MAIN' || echo 'PAGES DIFFERS FROM LOCAL MAIN'
 fi

@@ -1,87 +1,99 @@
-# GitHub Pages 404 — diagnóstico e recuperação (atualizado)
+# GitHub Pages 404 — diagnóstico e recuperação (resolvido)
 
 ## Estado atual
 
-O repositório `yamamotin/AncientStudio` agora é **público**:
+O repositório `yamamotin/AncientStudio` é público e o site do Pages está **habilitado e publicado**:
 
 ```bash
 gh api repos/yamamotin/AncientStudio \
   --jq '{private,visibility,has_pages,default_branch}'
-# {"private":false,"visibility":"public","has_pages":false,"default_branch":"main"}
+# {"private":false,"visibility":"public","has_pages":true,"default_branch":"main"}
+
+gh api repos/yamamotin/AncientStudio/pages \
+  --jq '{status,build_type,html_url,public,source}'
+# {"status":"built","build_type":"workflow","html_url":"https://yamamotin.github.io/AncientStudio/","public":true,"source":{"branch":"main","path":"/"}}
 ```
 
-Tornar o repositório público removeu o bloqueio de visibilidade/plano, mas **ainda não cria nem habilita o site do Pages**. Evidências reais:
+A configuração correta em **Settings → Pages → Build and deployment** é:
+
+- **Source:** `GitHub Actions`
+- Branch: `main`
+- Path: `/`
+
+O environment `github-pages` existe, usa `main` como único branch permitido e não tem required reviewers nem wait timer:
 
 ```bash
-gh api repos/yamamotin/AncientStudio/pages
-# HTTP 404: {"message":"Not Found"}
-
-gh api -X PUT repos/yamamotin/AncientStudio/pages \
-  --input - <<'JSON'
-{"build_type":"workflow","source":{"branch":"main","path":"/"}}
-JSON
-# HTTP 403: Resource not accessible by integration
+gh api repos/yamamotin/AncientStudio/environments/github-pages/deployment-branch-policies \
+  --jq '.branch_policies[].name'
+# main
 ```
 
-Ou seja: o token de integração não tem permissão para ativar o Pages por API. O último passo é de configuração no painel do repositório, mas agora é executável porque o bloqueio de visibilidade não existe mais.
+## Causa raiz do 404
 
-## Diagnóstico do 404
+Antes da habilitação, `has_pages` era `false` e `GET /repos/yamamotin/AncientStudio/pages` retornava 404. Consequentemente, `actions/configure-pages@v5` falhava com:
 
-- `has_pages: false` e `GET /pages` com 404: não existe site do Pages configurado.
-- Consequência real no CI: as execuções `45484368524`, `45495502318` e `45495982085` falham exatamente em `Run actions/configure-pages@v5`; `Stage static site` e `Verify static artifact root` passam, mas `upload-pages-artifact`, `deploy` e `verify-parity` ficam pulados.
-- Antes disso, a execução `45469829169` para `2b65476` terminou com sucesso e o site respondia. Portanto o código do workflow e o artefato estão íntegros; o que mudou foi a configuração/habilitação do Pages no repositório.
+```text
+HttpError: Not Found
+Get Pages site failed. Please verify that the repository has Pages enabled and
+configured to build using GitHub Actions...
+```
 
-## Workflow verificado em `main`
+As execuções `45484368524`, `45495502318`, `45495982085` e `45498148487` falharam exatamente nesse passo, depois de `Stage static site` e `Verify static artifact root` terem passado.
 
-`.github/workflows/pages.yml` foi conferido diretamente em `origin/main` e está íntegro:
+A tentativa de habilitar o Pages por API falhou com `403 Resource not accessible by integration`. Além disso, `configure-pages@v5 --enablement true` exige um PAT ou GitHub App com `administration:write` + `pages:write`; o `GITHUB_TOKEN` do workflow não serve. Portanto, a seleção do Source no painel foi o único ajuste necessário fora do código.
+
+## Correção confirmada
+
+Após Source = GitHub Actions, o run manual `45499594209` (commit `0baeee6`) terminou:
+
+```text
+build           success
+deploy          success
+verify-parity   success
+```
+
+E os dois hosts passaram a servir o mesmo SHA:
+
+```text
+https://yamamotin.github.io/AncientStudio/build.txt
+https://ancientstudio.vercel.app/api/v1/build
+→ 0baeee6305df9463dd1e2af22abf31c6ace2bc60
+```
+
+## Workflow auditado em `main`
+
+`.github/workflows/pages.yml` está íntegro e usa o fluxo oficial:
 
 1. `push` em `main` + `workflow_dispatch`.
-2. Permissões: `contents: read`, `pages: write`, `id-token: write`.
-3. `build`:
-   - checkout;
-   - `cp -R index.html robots.txt sitemap.xml api-status.json assets _site/`;
-   - `printf '%s\n' "$GITHUB_SHA" > _site/build.txt`;
-   - verificação explícita de `_site/index.html`, `_site/build.txt`, dicionários i18n e `api-client.js`;
-   - `actions/configure-pages@v5`;
-   - `actions/upload-pages-artifact@v3` com `path: _site`.
-4. `deploy`: `needs: build`, environment `github-pages`, `actions/deploy-pages@v4`.
-5. `verify-parity`: `needs: deploy`, `continue-on-error: true`, compara `build.txt` do Pages com `/api/v1/build` da Vercel; divergência é aviso, nunca falha o deploy.
+2. Permissões explícitas: `contents: read`, `pages: write`, `id-token: write`.
+3. `build`: checkout, staging em `_site/`, `build.txt` com `$GITHUB_SHA`, verificação da raiz, `actions/configure-pages@v5`, `actions/upload-pages-artifact@v3`.
+4. `deploy`: `needs: build`, `environment: github-pages`, `actions/deploy-pages@v4`.
+5. `verify-parity`: `needs: deploy`, `continue-on-error: true`, compara `build.txt` com `/api/v1/build` da Vercel.
 
-Não há `basePath` problemático: todos os caminhos são relativos; o bundle Vite escreve diretamente em `assets/js/ascii-engine.bundle.js`. A URL do projeto já é `/AncientStudio/`. O `Dockerfile` da raiz e o deploy da Vercel não são alterados.
-
-## Configuração atual no GitHub (única pendência real)
-
-1. Abra **Settings → Pages → Build and deployment**.
-2. Em **Source**, selecione **GitHub Actions** (não `Deploy from a branch`).
-3. Confirme que o branch mostrado é `main` e o path é `/` quando solicitado.
-4. Abra **Settings → Environments → `github-pages`**:
-   - o environment deve existir e estar visível;
-   - se houver **Required reviewers** ou **Wait timer**, remova-os ou configure os revisores — o job `deploy` usa `environment: github-pages` e pode ficar preso aguardando aprovação;
-   - não é necessário nenhum secret adicional: o `GITHUB_TOKEN` do workflow já tem `pages: write` e `id-token: write`.
-5. Rode o workflow:
-
-```bash
-gh workflow run "Deploy static site to GitHub Pages" --ref main
-gh run watch "$(gh run list --workflow=pages.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --interval 10
-```
-
-Quando `configure-pages@v5` passar, `upload-pages-artifact`, `deploy` e `verify-parity` devem executar.
+Não há problema de `basePath`: os caminhos são relativos e o bundle Vite escreve diretamente em `assets/js/ascii-engine.bundle.js`. A Vercel continua usando o `Dockerfile` da raiz; `ci-cd.yml` constrói somente `infra/docker/Dockerfile`.
 
 ## Validação após o deploy
 
 ```bash
 PAGES_URL=https://yamamotin.github.io/AncientStudio
 VERCEL_URL=https://ancientstudio.vercel.app
-
-pages_sha=$(curl -fsSL "$PAGES_URL/build.txt" | tr -d '[:space:]')
-vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
 main_sha=$(git rev-parse origin/main)
+
+# Cache-buster obrigatório: sem ele as CDNs podem devolver o SHA anterior.
+pages_sha=$(curl -fsSL "$PAGES_URL/build.txt?v=$main_sha" | tr -d '[:space:]')
+vercel_sha=$(curl -fsSL "$VERCEL_URL/api/v1/build?v=$main_sha" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
 
 printf 'pages=%s\nvercel=%s\nmain=%s\n' "$pages_sha" "$vercel_sha" "$main_sha"
 
-test -n "$pages_sha" && test "$pages_sha" = "$vercel_sha" && echo 'PARITY OK'
+test "$pages_sha" = "$vercel_sha" && echo 'PARITY OK'
 test "$pages_sha" = "$main_sha" && echo 'PAGES MATCHES MAIN'
 ```
 
-Um helper versionado com a mesma lógica está em `scripts/verify-pages-parity.sh`.
+Ou:
+
+```bash
+./scripts/verify-pages-parity.sh
+```
+
+Configurações adicionais de CI/CD e auto-merge estão em `docs/cicd-auto-merge.md`.
