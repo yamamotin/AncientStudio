@@ -161,7 +161,7 @@ def pipeline_run_payload(body=None):
     data = body if isinstance(body, dict) else {}
     force_failure = bool(data.get("force_failure", False))
 
-    bundle_path = ROOT / "assets" / "js" / "vendor" / "ascii-realms-bundle.js"
+    bundle_path = ROOT / "assets" / "js" / "ascii-engine.bundle.js"
     bundle_exists = bundle_path.is_file()
     bundle_kb = round(bundle_path.stat().st_size / 1024, 1) if bundle_exists else 0.0
 
@@ -194,7 +194,7 @@ def pipeline_run_payload(body=None):
                     "title": "[STEP 2: ASCII ENGINE & CONTAINER ARTIFACT]",
                     "status": "passed",
                     "lines": [
-                        "$ verify Dockerfile + ascii-realms-bundle.js",
+                        "$ verify Dockerfile + ascii-engine.bundle.js",
                         f"ascii_bundle={'present' if bundle_exists else 'missing'} ({bundle_kb} KB)",
                         "base image: python:3.11-slim · container health endpoint ready",
                     ],
@@ -233,7 +233,7 @@ def pipeline_run_payload(body=None):
 
 
 def health_payload():
-    bundle_path = ROOT / "assets" / "js" / "vendor" / "ascii-realms-bundle.js"
+    bundle_path = ROOT / "assets" / "js" / "ascii-engine.bundle.js"
     return {
         "ok": True,
         "service": "eron-terminal-portfolio",
@@ -311,6 +311,10 @@ class PortfolioHandler(BaseHTTPRequestHandler):
         if path == "/api-status.json":
             record_event("GET", path, 200, "api_status_probe")
             self._send_json({"ok": True, "service": "python-api", "uptime_seconds": round(time.monotonic() - BOOT_TIME, 2)})
+        elif path == "/api/v1/build":
+            # Exposed so CI can compare the deployed SHA with Pages build.txt.
+            record_event("GET", path, 200, "build_sha_probe")
+            self._send_json({"sha": os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GITHUB_SHA") or "local"})
         elif path == "/api/v1/health":
             payload = health_payload()
             record_event("GET", path, 200, "health_ok")

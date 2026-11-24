@@ -244,10 +244,13 @@ window.TP = window.TP || {};
     state.yaw += (desiredYaw - state.yaw) * 0.14;
     state.pitch += (desiredPitch - state.pitch) * 0.14;
 
-    var ascii = renderPenguinAscii(state.yaw, state.pitch);
-    if (ascii !== state.lastRenderedText) {
-      state.logoEl.textContent = ascii;
-      state.lastRenderedText = ascii;
+    var isFallbackMode = !state.frameEl || state.frameEl.getAttribute('data-mode') !== 'engine';
+    if (isFallbackMode) {
+      var ascii = renderPenguinAscii(state.yaw, state.pitch);
+      if (ascii !== state.lastRenderedText) {
+        state.logoEl.textContent = ascii;
+        state.lastRenderedText = ascii;
+      }
     }
 
     if (state.angleBadgeEl) {

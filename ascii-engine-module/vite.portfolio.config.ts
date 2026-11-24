@@ -3,14 +3,14 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   build: {
-    outDir: resolve(__dirname, '../assets/js/vendor'),
-    emptyOutDir: true,
+    outDir: resolve(__dirname, '../assets/js'),
+    emptyOutDir: false,
     minify: 'esbuild',
     lib: {
-      entry: resolve(__dirname, 'src/browser-global.ts'),
-      name: 'ASCIIRealmsBundle',
+      entry: resolve(__dirname, 'integration-entry.ts'),
+      name: 'ASCIIRealms',
       formats: ['iife'],
-      fileName: () => 'ascii-realms-bundle.js',
+      fileName: () => 'ascii-engine.bundle.js',
     },
   },
 });

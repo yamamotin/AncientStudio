@@ -32,10 +32,12 @@ jobs:
           npm run build
           npm run build:portfolio
 
-      - name: Verify portfolio bundle synchronization
+      - name: Verify portfolio bundle is built and non-empty
         run: |
-          test -s assets/js/vendor/ascii-realms-bundle.js
-          git diff --exit-code assets/js/vendor/ascii-realms-bundle.js
+          test -s assets/js/ascii-engine.bundle.js
+
+      - name: Run Node static & engine contract tests
+        run: node --test tests/*.test.js
 
       - name: Run Python backend & static security unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py" -v

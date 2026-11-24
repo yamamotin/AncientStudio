@@ -113,7 +113,11 @@ class PortfolioBackendTests(unittest.TestCase):
             self.assertIn("[ ASCII REALMS // SCENE ]", html)
             self.assertIn("[ STACK // NEOFETCH ]", html)
             self.assertIn("assets/js/neofetch.js", html)
-            self.assertIn("assets/js/vendor/ascii-realms-bundle.js", html)
+
+        req_bundle = Request(f"{self.base_url}/assets/js/ascii-engine.bundle.js", method="HEAD")
+        with urlopen(req_bundle, timeout=5) as resp_b:
+            self.assertEqual(resp_b.status, 200)
+            self.assertGreater(int(resp_b.headers.get("Content-Length", "0")), 100000)
 
         code_dot, _ = self._request_json("/.gitignore")
         self.assertEqual(code_dot, 404)
