@@ -24,26 +24,21 @@ AncientStudio/
 │   ├── cv/                            # PDFs originais autorizados
 │   └── fonts/                         # JetBrains Mono self-hosted
 │
-├── backend/                           # FastAPI modular (implementado)
+├── backend/                           # FastAPI monólito modular (implementado)
 │   ├── app/
-│   │   ├── main.py                    # create_app(), middlewares, static mount
-│   │   ├── config.py                  # pydantic-settings, segredos por env
-│   │   ├── api/
-│   │   │   ├── deps.py                # injeção de dependências
-│   │   │   └── v1/
-│   │   │       ├── router.py
-│   │   │       ├── health.py          # /health, /build
-│   │   │       ├── etl.py             # /etl/datasets/...
-│   │   │       ├── gateway.py         # /gateway/invoices/parse
-│   │   │       └── workflows.py       # /workflows/{id}/run, /runs/{id}
-│   │   ├── core/
-│   │   │   ├── errors.py              # problem+json + correlation id
-│   │   │   ├── logging.py
-│   │   │   └── security.py            # HMAC-SHA256, fingerprint
+│   │   ├── main.py                    # create_app(), middlewares, lifespan, static mount
+│   │   ├── api/v1/                    # health, etl, gateway, workflows, jobs,
+│   │   │                              # scraping, ai_workflows, pipelines
+│   │   ├── core/config.py             # pydantic-settings, segredos por env
+│   │   ├── domains/                   # etl, gateway, automation_n8n, scraping,
+│   │   │                              # ai_workflows, pipelines_simulator
+│   │   ├── cache/                     # store em memória + backend Redis
+│   │   ├── queue/                     # fila Redis
+│   │   ├── workers/                   # workers iniciados no lifespan
 │   │   ├── schemas/                   # contratos Pydantic v2
-│   │   ├── services/                  # regras de negócio, clients, idempotência
+│   │   ├── services/                  # clients e regras compartilhadas
 │   │   └── data/ledger.csv            # dataset real de ETL
-│   ├── tests/                         # pytest, httpx MockTransport
+│   ├── tests/                         # pytest (unit + integration), httpx MockTransport
 │   ├── pyproject.toml                 # ruff + pytest
 │   ├── requirements.txt
 │   └── requirements-dev.txt
@@ -98,7 +93,10 @@ AncientStudio/
 - **n8n**: `POST /api/v1/workflows/{workflow_id}/run` (header `X-API-Key`) dispara o
   webhook autenticado; `GET /api/v1/workflows/runs/{execution_id}` consulta a execução pela
   REST API do n8n. Falhas upstream viram `502`, ausência vira `404`.
-- `IdempotencyStore` é thread-safe e substituível por Redis quando houver múltiplas réplicas.
+- `IdempotencyStore` é thread-safe, com backend Redis para múltiplas réplicas; fila e
+  workers também podem usar Redis e são iniciados no lifespan da aplicação.
+- Fase 2/3 (2026-11-25): rate limit, scrapers, pipelines de IA e ponte n8n, além dos
+  routers `/jobs`, `/scraping`, `/ai-workflows` e `/pipelines`.
 - `Settings` rejeita valores `dev-only-*` / `change-me` quando `ENVIRONMENT` não é
   `local`, `test`, `dev` ou `development`: a API falha no startup em vez de rodar com
   credenciais de exemplo em produção.
@@ -112,12 +110,18 @@ AncientStudio/
 - O `Dockerfile` da raiz continua servindo o site/API legados na Vercel. A troca para a
   imagem FastAPI acontece na fase de integração, após o frontend consumir os novos endpoints.
 
-## 3. Estado atual
+## 3. Estado atual (2026-11-25)
 
-- Estrutura acima criada, com backend FastAPI modular, 22 testes `pytest` passando e `ruff`
-  limpo.
-- `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflow de CI/CD e um
-  export de workflow n8n versionado.
-- UX/UI: i18n `pt-br`/`en` implementado com toggle no topbar, dicionários versionados e
-  fallback embutido para `file://`; `api-client.js` usa somente `/api/v1` real.
-- Pages: diagnóstico e passos de recuperação em `docs/pages-recovery.md`.
+- Estrutura acima criada, com backend FastAPI em monólito modular, **53 testes `pytest`
+  passando** e `ruff` limpo.
+- `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflow de CI/CD e
+  exports de workflows n8n versionados.
+- UX/UI: i18n `pt-br`/`en` com toggle no topbar; foto em cartão no hero à esquerda de
+  `ERON YAMAMOTO`; controle de brilho com padrão `110%`; pinguim sem ponteiro; três
+  modos de cena (`Dia`, `Noite`, `Com chuva`).
+- Engine: modos unificados, sombras PCF, vento ECS e API de contorno por objeto; o
+  frontend ainda não consome essa API de contorno.
+- CI/CD: ordem permanente `merge (resolve-conflicts) → delete-branch → redeploy`, com
+  dispatch explícito dos workflows de Pages e Vercel após merges feitos pelo bot.
+- Pages: diagnóstico e passos de recuperação em `docs/pages-recovery.md`; histórico do
+  dia em `docs/changelog-2026-11-25.md`.

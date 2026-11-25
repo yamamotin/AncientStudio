@@ -735,3 +735,136 @@ test('single scenario supports Dia/Noite/Com chuva modes, calibrated PCF street 
   ecsWorld.clear(true);
   pkg.LifecycleManager.disposeObject3D(built.scene);
 });
+
+test('configurable per-object outline API is exported for on-demand targets, inactive by default, and supports optional highlightColor', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/shaders/objectOutline.ts')),
+    'objectOutline.ts module exists'
+  );
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(typeof pkg.applyObjectOutline, 'function');
+  assert.equal(typeof pkg.clearObjectOutline, 'function');
+  assert.equal(typeof pkg.getObjectOutlineState, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.setObjectOutline, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.clearObjectOutline, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.getObjectOutlineState, 'function');
+
+  // 1. Default spawns (Playground & Tux mascot) have ZERO outlines applied globally or on Tux
+  const ecsWorld = new pkg.World();
+  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  let defaultPlaygroundOutlines = 0;
+  built.scene.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME || (obj.userData && obj.userData.__isAsciiOutlineShell)) {
+      defaultPlaygroundOutlines += 1;
+    }
+  });
+  assert.equal(defaultPlaygroundOutlines, 0, 'Playground has no global or default outline shells');
+
+  const mascotScene = new pkg.THREE.Scene();
+  const mascotEcs = new pkg.World();
+  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(mascotEcs, mascotScene, {
+    includeShowcaseRig: true
+  });
+  const bystanderBox = new pkg.THREE.Mesh(
+    new pkg.THREE.BoxGeometry(1, 1, 1),
+    new pkg.THREE.MeshStandardMaterial({ color: 0x223344 })
+  );
+  mascotScene.add(bystanderBox);
+
+  assert.equal(pkg.getObjectOutlineState(tuxRoot), null, 'Tux has no outline active by default');
+  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
+
+  // 2. On-demand application on a specific target (with default highlightColor when omitted)
+  const handle = pkg.applyObjectOutline(tuxRoot, { thickness: 1.4 });
+  const initialState = handle.getState();
+  assert.equal(initialState.enabled, true);
+  assert.equal(initialState.thickness, 1.4);
+  assert.equal(
+    initialState.highlightColor,
+    pkg.DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
+    'Uses high-visibility default highlightColor when omitted'
+  );
+  assert.ok(initialState.outlinedMeshCount >= 8, 'Outlines Tux body, head, beak, eyes, wings, feet & tail');
+
+  // Verify bystander object in the same scene is completely unaffected (strictly per-target, not global)
+  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
+  let bystanderShells = 0;
+  bystanderBox.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME) bystanderShells += 1;
+  });
+  assert.equal(bystanderShells, 0, 'Non-targeted objects in scene receive zero outline shells');
+
+  // Verify showcase pedestal plinth was skipped by default (`excludePedestal: true`)
+  const plinth = tuxRoot.getObjectByName('TuxShowcasePlinth');
+  assert.ok(plinth, 'TuxShowcasePlinth exists when includeShowcaseRig is true');
+  assert.equal(
+    plinth.children.some((c) => c.name === pkg.OUTLINE_SHELL_NAME),
+    false,
+    'Showcase floor plinth is excluded by default so only the character silhouette is outlined'
+  );
+
+  // 3. Dynamic update: custom highlightColor, width alias, and visibility toggle without reallocating shells
+  const updated = handle.update({
+    highlightColor: '#FFD166',
+    width: 2.25,
+    intensity: 2.4,
+    opacity: 0.9
+  });
+  assert.equal(updated.highlightColor, '#FFD166', 'Custom highlightColor updates cleanly');
+  assert.equal(updated.thickness, 2.25, 'width alias updates outline thickness');
+  assert.equal(updated.intensity, 2.4);
+  assert.equal(updated.opacity, 0.9);
+  assert.equal(updated.outlinedMeshCount, initialState.outlinedMeshCount, 'Idempotent update creates zero duplicate shells');
+
+  const hidden = handle.setVisible(false);
+  assert.equal(hidden.enabled, false);
+  let visibleShellsWhileHidden = 0;
+  tuxRoot.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME && obj.visible) visibleShellsWhileHidden += 1;
+  });
+  assert.equal(visibleShellsWhileHidden, 0, 'setVisible(false) hides all outline shells on target');
+
+  // 4. Welded smooth corner normals on BoxGeometry (`aOutlineNormal` has symmetric ~0.577 components)
+  pkg.applyObjectOutline(bystanderBox, { color: 0x00ffcc, thickness: 1.0 });
+  const weldedAttr = bystanderBox.geometry.getAttribute('aOutlineNormal');
+  assert.ok(weldedAttr && weldedAttr.count === 24, 'BoxGeometry receives welded smooth outline normals');
+  assert.ok(
+    Math.abs(Math.abs(weldedAttr.getX(0)) - 1 / Math.sqrt(3)) < 0.02 &&
+      Math.abs(Math.abs(weldedAttr.getY(0)) - 1 / Math.sqrt(3)) < 0.02 &&
+      Math.abs(Math.abs(weldedAttr.getZ(0)) - 1 / Math.sqrt(3)) < 0.02,
+    'Cube corner welded normal is symmetric 1/sqrt(3) miter vector (gap-free corners)'
+  );
+
+  // 5. Clean disposal removes 100% of outline shells
+  const removedCount = handle.dispose();
+  assert.equal(removedCount, initialState.outlinedMeshCount);
+  assert.equal(pkg.getObjectOutlineState(tuxRoot), null);
+  let remainingShells = 0;
+  tuxRoot.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME) remainingShells += 1;
+  });
+  assert.equal(remainingShells, 0, 'dispose() detaches all outline shells cleanly');
+
+  pkg.clearObjectOutline(bystanderBox);
+  ecsWorld.clear(true);
+  mascotEcs.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+  pkg.LifecycleManager.disposeObject3D(mascotScene);
+});

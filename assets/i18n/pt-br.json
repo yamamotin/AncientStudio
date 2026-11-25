@@ -78,5 +78,5 @@
   "scene.day": "[ Dia ]",
   "scene.night": "[ Noite ]",
   "scene.rain": "[ Com chuva ]",
-  "contrast.label": "Contraste da página"
+  "brightness.label": "Brilho da página"
 }
