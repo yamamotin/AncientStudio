@@ -64,13 +64,20 @@ test('uploaded portrait is a local, responsive asset with bilingual alt text', (
     'loading="lazy"'
   ]);
   assert.ok(pt['hero.portraitAlt'] && en['hero.portraitAlt'], 'portrait alt is translated');
+  includesAll(html, ['class="hero-name" aria-hidden="true">ERON YAMAMOTO</p>']);
   includesAll(css, [
+    '.hero-name',
     '.hero-portrait',
     'aspect-ratio: 3 / 4',
     'object-fit: cover',
-    'grid-template-columns: minmax(0, 1fr) clamp(8rem, 18vw, 11rem)'
+    'grid-template-columns: clamp(8rem, 18vw, 11rem) minmax(0, 1fr)',
+    'grid-row: 3 / span 4'
   ]);
   assert.doesNotMatch(css, /\.hero-portrait\s*\{[^}]*float:/s);
+  assert.ok(
+    css.indexOf('.hero-name') < css.indexOf('.banner-frame'),
+    'name is rendered before the portrait anchor'
+  );
 });
 
 test('stack section shows only the penguin and the exact requested rows', () => {
@@ -117,29 +124,32 @@ test('scene modes replace the old preset selector with day, night and rain', () 
   includesAll(main, ['data-scene-mode', 'scene.setPreset(activeMode)', 'aria-pressed']);
 });
 
-test('page contrast defaults to 110% and updates live', () => {
+test('page brightness defaults to 110% and updates live', () => {
+  assert.doesNotMatch(html, /contrast-control|contrast\.label|--page-contrast/i);
   includesAll(html, [
-    'id="contrast-control"',
+    'id="brightness-control"',
     'type="range"',
     'min="100"',
     'max="130"',
     'step="5"',
     'value="110"',
-    'id="contrast-value"',
-    'data-i18n-attr="aria-label:contrast.label"'
+    'id="brightness-value"',
+    'data-i18n-attr="aria-label:brightness.label"'
   ]);
-  assert.ok(pt['contrast.label'] && en['contrast.label'], 'contrast label is translated');
+  assert.ok(pt['brightness.label'] && en['brightness.label'], 'brightness label is translated');
   includesAll(css, [
-    '--page-contrast: 1.1',
-    'contrast(var(--page-contrast))',
-    '.contrast-control input[type="range"]'
+    '--page-brightness: 1.1',
+    'brightness(var(--page-brightness))',
+    '.brightness-control input[type="range"]'
   ]);
+  assert.doesNotMatch(css, /--page-contrast|contrast\(/i);
   includesAll(main, [
-    "getElementById('contrast-control')",
-    "setProperty('--page-contrast'",
+    "getElementById('brightness-control')",
+    "setProperty('--page-brightness'",
     "addEventListener('input'",
     "localStorage.setItem(storageKey"
   ]);
+  assert.doesNotMatch(main, /page-contrast|contrast-control/i);
 });
 
 test('fallback penguin yaw advances from elapsed time without pointer events', () => {
