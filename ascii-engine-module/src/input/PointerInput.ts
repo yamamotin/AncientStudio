@@ -28,10 +28,20 @@ export interface PointerSnapshot {
   lastInteractionMs: number;
 }
 
+export interface PointerTap {
+  /** Container-relative normalized X in [-1, +1] */
+  ndcX: number;
+  /** Container-relative normalized Y in [-1, +1] (up is +1) */
+  ndcY: number;
+}
+
 export interface PointerInputOptions {
   /** Also listen to window pointermove for mascot look-at across adjacent section cards (default: false) */
   trackWindowHover?: boolean;
 }
+
+const MAX_TAP_TRAVEL_PX_SQ = 14 * 14;
+const TAP_DEDUP_WINDOW_MS = 320;
 
 export class PointerInput {
   private readonly container: HTMLElement;
@@ -47,6 +57,13 @@ export class PointerInput {
   private activeTouchId: number | null = null;
   private lastClientX = 0;
   private lastClientY = 0;
+  private downOriginX = 0;
+  private downOriginY = 0;
+  private maxGestureDistSq = 0;
+  private gestureActive = false;
+  private hasPendingTap = false;
+  private lastTapRecordedMs = 0;
+  private readonly pendingTap: PointerTap = { ndcX: 0, ndcY: 0 };
   private motionSpeed = 0;
   private lastInteractionMs = 0;
   private touchReleaseHoldTimer = 0;
@@ -56,10 +73,13 @@ export class PointerInput {
   private readonly onPointerMoveBound: (ev: PointerEvent) => void;
   private readonly onWindowPointerMoveBound: (ev: PointerEvent) => void;
   private readonly onPointerUpBound: (ev: PointerEvent) => void;
+  private readonly onPointerCancelBound: (ev: PointerEvent) => void;
   private readonly onPointerLeaveBound: (ev: PointerEvent) => void;
   private readonly onTouchStartBound: (ev: TouchEvent) => void;
   private readonly onTouchMoveBound: (ev: TouchEvent) => void;
   private readonly onTouchEndBound: (ev: TouchEvent) => void;
+  private readonly onTouchCancelBound: (ev: TouchEvent) => void;
+  private readonly onClickBound: (ev: MouseEvent) => void;
 
   constructor(container: HTMLElement, options?: PointerInputOptions) {
     this.container = container;
@@ -69,10 +89,13 @@ export class PointerInput {
     this.onPointerMoveBound = this.handleContainerPointerMove.bind(this);
     this.onWindowPointerMoveBound = this.handleWindowPointerMove.bind(this);
     this.onPointerUpBound = this.handlePointerUp.bind(this);
+    this.onPointerCancelBound = this.handlePointerCancel.bind(this);
     this.onPointerLeaveBound = this.handlePointerLeave.bind(this);
     this.onTouchStartBound = this.handleTouchStart.bind(this);
     this.onTouchMoveBound = this.handleTouchMove.bind(this);
     this.onTouchEndBound = this.handleTouchEnd.bind(this);
+    this.onTouchCancelBound = this.handleTouchCancel.bind(this);
+    this.onClickBound = this.handleClick.bind(this);
   }
 
   public attach(): void {
@@ -87,14 +110,15 @@ export class PointerInput {
     this.container.addEventListener('pointerdown', this.onPointerDownBound, { passive: true });
     this.container.addEventListener('pointermove', this.onPointerMoveBound, { passive: true });
     this.container.addEventListener('pointerup', this.onPointerUpBound, { passive: true });
-    this.container.addEventListener('pointercancel', this.onPointerUpBound, { passive: true });
+    this.container.addEventListener('pointercancel', this.onPointerCancelBound, { passive: true });
     this.container.addEventListener('pointerleave', this.onPointerLeaveBound, { passive: true });
+    this.container.addEventListener('click', this.onClickBound, { passive: true });
 
     // Explicit passive touch listeners guarantee smooth mobile interaction across iOS Safari, Android WebView & touch laptops
     this.container.addEventListener('touchstart', this.onTouchStartBound, { passive: true });
     this.container.addEventListener('touchmove', this.onTouchMoveBound, { passive: true });
     this.container.addEventListener('touchend', this.onTouchEndBound, { passive: true });
-    this.container.addEventListener('touchcancel', this.onTouchEndBound, { passive: true });
+    this.container.addEventListener('touchcancel', this.onTouchCancelBound, { passive: true });
 
     if (this.trackWindowHover && typeof window !== 'undefined') {
       window.addEventListener('pointermove', this.onWindowPointerMoveBound, { passive: true });
@@ -105,17 +129,20 @@ export class PointerInput {
   public detach(): void {
     if (!this.attached) return;
     this.attached = false;
+    this.hasPendingTap = false;
+    this.gestureActive = false;
 
     this.container.removeEventListener('pointerdown', this.onPointerDownBound);
     this.container.removeEventListener('pointermove', this.onPointerMoveBound);
     this.container.removeEventListener('pointerup', this.onPointerUpBound);
-    this.container.removeEventListener('pointercancel', this.onPointerUpBound);
+    this.container.removeEventListener('pointercancel', this.onPointerCancelBound);
     this.container.removeEventListener('pointerleave', this.onPointerLeaveBound);
+    this.container.removeEventListener('click', this.onClickBound);
 
     this.container.removeEventListener('touchstart', this.onTouchStartBound);
     this.container.removeEventListener('touchmove', this.onTouchMoveBound);
     this.container.removeEventListener('touchend', this.onTouchEndBound);
-    this.container.removeEventListener('touchcancel', this.onTouchEndBound);
+    this.container.removeEventListener('touchcancel', this.onTouchCancelBound);
 
     if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
       window.removeEventListener('pointermove', this.onWindowPointerMoveBound);
@@ -167,11 +194,44 @@ export class PointerInput {
     this.active = active;
   }
 
+  /**
+   * Queues a normalized ground-navigation tap/click in [-1, +1] container space.
+   */
+  public triggerTapNormalized(ndcX: number, ndcY: number): void {
+    this.pendingTap.ndcX = Math.max(-1, Math.min(1, ndcX));
+    this.pendingTap.ndcY = Math.max(-1, Math.min(1, ndcY));
+    this.hasPendingTap = true;
+    this.lastTapRecordedMs = Date.now();
+  }
+
+  /**
+   * Consumes the latest discrete click/tap on the stage without allocating per frame.
+   */
+  public consumeTap(): PointerTap | null {
+    if (!this.hasPendingTap) return null;
+    this.hasPendingTap = false;
+    return this.pendingTap;
+  }
+
+  private recordTapFromClient(clientX: number, clientY: number): void {
+    const rect = this.container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const relX = (clientX - rect.left) / rect.width;
+    const relY = (clientY - rect.top) / rect.height;
+    if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
+
+    this.pendingTap.ndcX = Math.max(-1, Math.min(1, relX * 2 - 1));
+    this.pendingTap.ndcY = Math.max(-1, Math.min(1, -(relY * 2 - 1)));
+    this.hasPendingTap = true;
+    this.lastTapRecordedMs = Date.now();
+  }
+
   private handlePointerDown(ev: PointerEvent): void {
     if (ev.pointerType === 'touch') {
       this.isTouch = true;
-      // Touch coordinates are handled uniformly with touch sensitivity below
     } else {
+      if (typeof ev.button === 'number' && ev.button !== 0) return;
       this.isTouch = false;
     }
 
@@ -180,6 +240,10 @@ export class PointerInput {
     this.touchReleaseHoldTimer = 0;
     this.lastClientX = ev.clientX;
     this.lastClientY = ev.clientY;
+    this.downOriginX = ev.clientX;
+    this.downOriginY = ev.clientY;
+    this.maxGestureDistSq = 0;
+    this.gestureActive = true;
     if (ev.isTrusted) {
       this.lastInteractionMs = Date.now();
     }
@@ -198,6 +262,13 @@ export class PointerInput {
 
     const touchFactor = ev.pointerType === 'touch' ? 1.35 : 1.0;
     if (this.isDown) {
+      const originDx = ev.clientX - this.downOriginX;
+      const originDy = ev.clientY - this.downOriginY;
+      const distSq = originDx * originDx + originDy * originDy;
+      if (distSq > this.maxGestureDistSq) {
+        this.maxGestureDistSq = distSq;
+      }
+
       const dx = ev.clientX - this.lastClientX;
       const dy = ev.clientY - this.lastClientY;
       this.lastClientX = ev.clientX;
@@ -223,7 +294,30 @@ export class PointerInput {
     if (ev.pointerType === 'touch') {
       this.touchReleaseHoldTimer = 1.6;
     }
+    if (
+      this.gestureActive &&
+      this.maxGestureDistSq <= MAX_TAP_TRAVEL_PX_SQ &&
+      Date.now() - this.lastTapRecordedMs > TAP_DEDUP_WINDOW_MS * 0.5
+    ) {
+      this.recordTapFromClient(ev.clientX, ev.clientY);
+    }
+    this.gestureActive = false;
     this.isDown = false;
+  }
+
+  private handlePointerCancel(ev: PointerEvent): void {
+    if (ev.pointerType === 'touch') {
+      this.touchReleaseHoldTimer = 1.6;
+    }
+    this.gestureActive = false;
+    this.isDown = false;
+  }
+
+  private handleClick(ev: MouseEvent): void {
+    if (Date.now() - this.lastTapRecordedMs <= TAP_DEDUP_WINDOW_MS) {
+      return;
+    }
+    this.recordTapFromClient(ev.clientX, ev.clientY);
   }
 
   private handlePointerLeave(ev: PointerEvent): void {
@@ -245,6 +339,10 @@ export class PointerInput {
     this.activeTouchId = touch.identifier ?? 0;
     this.lastClientX = touch.clientX;
     this.lastClientY = touch.clientY;
+    this.downOriginX = touch.clientX;
+    this.downOriginY = touch.clientY;
+    this.maxGestureDistSq = 0;
+    this.gestureActive = true;
     if (ev.isTrusted !== false) {
       this.lastInteractionMs = Date.now();
     }
@@ -269,6 +367,13 @@ export class PointerInput {
       this.lastInteractionMs = Date.now();
     }
 
+    const originDx = touch.clientX - this.downOriginX;
+    const originDy = touch.clientY - this.downOriginY;
+    const distSq = originDx * originDx + originDy * originDy;
+    if (distSq > this.maxGestureDistSq) {
+      this.maxGestureDistSq = distSq;
+    }
+
     const dx = touch.clientX - this.lastClientX;
     const dy = touch.clientY - this.lastClientY;
     this.lastClientX = touch.clientX;
@@ -285,13 +390,29 @@ export class PointerInput {
   }
 
   private handleTouchEnd(ev: TouchEvent): void {
+    const touch = ev.changedTouches?.[0];
     const remaining = ev.touches ? ev.touches.length : 0;
     if (remaining === 0) {
+      if (
+        touch &&
+        this.gestureActive &&
+        this.maxGestureDistSq <= MAX_TAP_TRAVEL_PX_SQ &&
+        Date.now() - this.lastTapRecordedMs > TAP_DEDUP_WINDOW_MS * 0.5
+      ) {
+        this.recordTapFromClient(touch.clientX, touch.clientY);
+      }
+      this.gestureActive = false;
       this.isDown = false;
       this.activeTouchId = null;
       // Hold camera look angle briefly after finger lift before smoothly relaxing back
       this.touchReleaseHoldTimer = 1.8;
     }
+  }
+
+  private handleTouchCancel(): void {
+    this.gestureActive = false;
+    this.isDown = false;
+    this.activeTouchId = null;
   }
 
   private updateNormalizedFromClient(clientX: number, clientY: number, wideSpan: boolean): void {

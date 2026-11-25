@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { EcsSystem, SystemContext } from '../animation/AnimationSystem';
 import type { World } from './World';
 import type { KeyboardInput } from '../input/KeyboardInput';
@@ -11,26 +12,80 @@ export interface SystemEntry {
 }
 
 /**
- * InputSystem (priority 10): Transfers normalized PointerInput (mouse + touch) and optional
- * KeyboardInput into ECS `InputState`, `RotationTarget`, and `AnimationState.excitement`.
+ * InputSystem (priority 10): Transfers normalized PointerInput (mouse + touch), discrete
+ * click/tap ground raycasts (`NavigationTarget`), and optional KeyboardInput into ECS state.
+ * Uses pre-allocated Three.js math primitives for zero per-frame heap allocations.
  */
 export class InputSystem implements EcsSystem {
   public readonly name = 'InputSystem';
   private readonly pointer: PointerInput;
   private readonly keyboard: KeyboardInput;
+  private camera: THREE.Camera | null;
 
-  constructor(pointer: PointerInput, keyboard: KeyboardInput) {
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly tapNdc = new THREE.Vector2();
+  private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly groundHit = new THREE.Vector3();
+
+  constructor(pointer: PointerInput, keyboard: KeyboardInput, camera: THREE.Camera | null = null) {
     this.pointer = pointer;
     this.keyboard = keyboard;
+    this.camera = camera;
+  }
+
+  public setCamera(camera: THREE.Camera | null): void {
+    this.camera = camera;
   }
 
   public update(world: World, { dt }: SystemContext): void {
     const ptr = this.pointer.sample(dt);
+    const tap = this.pointer.consumeTap();
     const keys = this.keyboard.sampleAxes();
+    const hasKeyMove = Math.abs(keys.moveX) > 0.01 || Math.abs(keys.moveZ) > 0.01;
+
+    if (tap) {
+      const navEntities = world.query('Transform', 'NavigationTarget');
+      for (const id of navEntities) {
+        const transform = world.getComponent(id, 'Transform')!;
+        const nav = world.getComponent(id, 'NavigationTarget')!;
+        const anim = world.getComponent(id, 'AnimationState');
+        const groundY = anim ? anim.baseY : transform.y;
+
+        let targetX = transform.x + tap.ndcX * 3.5;
+        let targetZ = transform.z - tap.ndcY * 4.5;
+
+        if (this.camera) {
+          this.camera.updateMatrixWorld();
+          this.tapNdc.set(tap.ndcX, tap.ndcY);
+          this.raycaster.setFromCamera(this.tapNdc, this.camera);
+          this.groundPlane.constant = -groundY;
+
+          if (this.raycaster.ray.direction.y < -0.025) {
+            const hit = this.raycaster.ray.intersectPlane(this.groundPlane, this.groundHit);
+            if (hit) {
+              targetX = hit.x;
+              targetZ = hit.z;
+            }
+          } else {
+            // Above-horizon tap: project forward along horizontal camera ray into walkable boulevard
+            const dirX = this.raycaster.ray.direction.x;
+            const dirZ = this.raycaster.ray.direction.z;
+            const horizLen = Math.hypot(dirX, dirZ) || 1;
+            targetX = this.raycaster.ray.origin.x + (dirX / horizLen) * 14.0;
+            targetZ = this.raycaster.ray.origin.z + (dirZ / horizLen) * 14.0;
+          }
+        }
+
+        nav.targetX = Math.max(nav.minX, Math.min(nav.maxX, targetX));
+        nav.targetZ = Math.max(nav.minZ, Math.min(nav.maxZ, targetZ));
+        nav.active = true;
+      }
+    }
 
     const entities = world.query('InputState');
     for (const id of entities) {
       const input = world.getComponent(id, 'InputState')!;
+      const nav = world.getComponent(id, 'NavigationTarget');
       input.pointerX = ptr.normX;
       input.pointerY = ptr.normY;
       input.pointerActive = ptr.active;
@@ -38,8 +93,12 @@ export class InputSystem implements EcsSystem {
       input.moveX = keys.moveX;
       input.moveZ = keys.moveZ;
 
+      if (hasKeyMove && nav) {
+        nav.active = false;
+      }
+
       const rotTarget = world.getComponent(id, 'RotationTarget');
-      if (rotTarget && ptr.active) {
+      if (rotTarget && ptr.active && !nav) {
         const desiredYaw = ptr.normX * input.yawSensitivity + ptr.dragYaw * 0.85;
         const desiredPitch = -ptr.normY * input.pitchSensitivity + ptr.dragPitch * 0.65;
 
@@ -53,7 +112,7 @@ export class InputSystem implements EcsSystem {
 
       const anim = world.getComponent(id, 'AnimationState');
       if (anim && ptr.motionSpeed > 0.04) {
-        anim.excitement = Math.min(1, anim.excitement + ptr.motionSpeed * 0.35);
+        anim.excitement = Math.min(1, anim.excitement + ptr.motionSpeed * 0.25);
       }
     }
   }
@@ -99,29 +158,189 @@ export class PatrolSystem implements EcsSystem {
 }
 
 /**
- * MovementRotationSystem (priority 20): Applies smooth exponential `lerp` toward `RotationTarget`
- * (or gentle idle sway/spin when pointer is inactive), plus bounded ground movement.
+ * MovementRotationSystem (priority 20): Resolves click/tap `NavigationTarget` ground locomotion,
+ * optional keyboard movement, bounded stage clamping, and smooth exponential `RotationTarget` yaw/pitch.
  */
 export class MovementRotationSystem implements EcsSystem {
   public readonly name = 'MovementRotationSystem';
   private readonly terrainHeightFn?: (x: number, z: number) => number;
+  private waypointMarker: THREE.Object3D | null;
 
-  constructor(terrainHeightFn?: (x: number, z: number) => number) {
+  constructor(
+    terrainHeightFn?: (x: number, z: number) => number,
+    waypointMarker: THREE.Object3D | null = null
+  ) {
     this.terrainHeightFn = terrainHeightFn;
+    this.waypointMarker = waypointMarker;
+  }
+
+  public setWaypointMarker(marker: THREE.Object3D | null): void {
+    this.waypointMarker = marker;
   }
 
   public update(world: World, { dt, elapsed }: SystemContext): void {
-    // 1. Smooth yaw/pitch lerp rotation
+    let activeWaypointX = 0;
+    let activeWaypointZ = 0;
+    let activeWaypointY = 0.025;
+    let hasActiveWaypoint = false;
+
+    // 1. Click/tap ground navigation (`NavigationTarget`) + Velocity / optional keyboard locomotion
+    const movEntities = world.query('Transform', 'Velocity');
+    for (const id of movEntities) {
+      const transform = world.getComponent(id, 'Transform')!;
+      const vel = world.getComponent(id, 'Velocity')!;
+      const input = world.getComponent(id, 'InputState');
+      const nav = world.getComponent(id, 'NavigationTarget');
+      const anim = world.getComponent(id, 'AnimationState');
+      const rot = world.getComponent(id, 'RotationTarget');
+
+      if (input && input.moveSpeed > 0 && (input.moveX !== 0 || input.moveZ !== 0)) {
+        if (nav) nav.active = false;
+        vel.vx = input.moveX * input.moveSpeed;
+        vel.vz = input.moveZ * input.moveSpeed;
+
+        if (rot) {
+          rot.targetYaw = Math.atan2(vel.vx, vel.vz);
+          rot.targetPitch = 0;
+          rot.targetRoll = 0;
+        }
+        if (anim) {
+          anim.excitement = Math.min(1, anim.excitement + dt * 2.0);
+        }
+
+        transform.x += vel.vx * dt;
+        transform.y += vel.vy * dt;
+        transform.z += vel.vz * dt;
+
+        const velDamp = Math.exp(-vel.damping * dt);
+        vel.vx *= velDamp;
+        vel.vy *= velDamp;
+        vel.vz *= velDamp;
+      } else if (nav && nav.active) {
+        const dx = nav.targetX - transform.x;
+        const dz = nav.targetZ - transform.z;
+        const dist = Math.hypot(dx, dz);
+
+        if (dist <= nav.arrivalRadius) {
+          transform.x = nav.targetX;
+          transform.z = nav.targetZ;
+          vel.vx = 0;
+          vel.vz = 0;
+          nav.active = false;
+        } else {
+          // Smooth arrival deceleration ramp inside the final 0.65m prevents overshoot
+          const arrivalRamp = Math.min(1, Math.max(0.30, dist / 0.65));
+          const desiredSpeed = nav.moveSpeed * arrivalRamp;
+          const dirX = dx / dist;
+          const dirZ = dz / dist;
+          const step = Math.min(dist, desiredSpeed * dt);
+
+          vel.vx = dirX * desiredSpeed;
+          vel.vz = dirZ * desiredSpeed;
+          transform.x += dirX * step;
+          transform.z += dirZ * step;
+
+          if (rot) {
+            rot.targetYaw = Math.atan2(dirX, dirZ);
+            rot.targetPitch = 0;
+            rot.targetRoll = 0;
+          }
+          if (anim) {
+            anim.excitement = Math.min(1, anim.excitement + dt * 1.4);
+          }
+
+          const remaining = Math.hypot(nav.targetX - transform.x, nav.targetZ - transform.z);
+          if (remaining <= nav.arrivalRadius) {
+            transform.x = nav.targetX;
+            transform.z = nav.targetZ;
+            vel.vx = 0;
+            vel.vz = 0;
+            nav.active = false;
+          } else {
+            hasActiveWaypoint = true;
+            activeWaypointX = nav.targetX;
+            activeWaypointZ = nav.targetZ;
+          }
+        }
+      } else {
+        transform.x += vel.vx * dt;
+        transform.y += vel.vy * dt;
+        transform.z += vel.vz * dt;
+
+        const velDamp = Math.exp(-vel.damping * dt);
+        vel.vx *= velDamp;
+        vel.vy *= velDamp;
+        vel.vz *= velDamp;
+        if (Math.hypot(vel.vx, vel.vz) < 0.02) {
+          vel.vx = 0;
+          vel.vz = 0;
+        }
+      }
+
+      transform.rotX += vel.angularVx * dt;
+      transform.rotY += vel.angularVy * dt;
+      transform.rotZ += vel.angularVz * dt;
+
+      if (nav) {
+        transform.x = Math.max(nav.minX, Math.min(nav.maxX, transform.x));
+        transform.z = Math.max(nav.minZ, Math.min(nav.maxZ, transform.z));
+      } else if (input && input.boundsRadius > 0) {
+        const dist = Math.hypot(transform.x, transform.z + 1.5);
+        if (dist > input.boundsRadius) {
+          const ratio = input.boundsRadius / dist;
+          transform.x *= ratio;
+          transform.z = -1.5 + (transform.z + 1.5) * ratio;
+        }
+      }
+
+      if (this.terrainHeightFn && (nav || (input && input.moveSpeed > 0))) {
+        const groundY = this.terrainHeightFn(transform.x, transform.z);
+        if (anim) {
+          anim.baseY = groundY;
+        } else {
+          transform.y = groundY;
+        }
+        if (hasActiveWaypoint) {
+          activeWaypointY = this.terrainHeightFn(activeWaypointX, activeWaypointZ) + 0.025;
+        }
+      }
+    }
+
+    if (this.waypointMarker) {
+      this.waypointMarker.visible = hasActiveWaypoint;
+      if (hasActiveWaypoint) {
+        this.waypointMarker.position.set(activeWaypointX, activeWaypointY, activeWaypointZ);
+        const pulse = 0.92 + Math.sin(elapsed * 5.0) * 0.08;
+        this.waypointMarker.scale.set(pulse, 1, pulse);
+      }
+    }
+
+    // 2. Smooth yaw/pitch lerp rotation
     const rotEntities = world.query('Transform', 'RotationTarget');
     for (const id of rotEntities) {
       const transform = world.getComponent(id, 'Transform')!;
       const rot = world.getComponent(id, 'RotationTarget')!;
       const input = world.getComponent(id, 'InputState');
+      const nav = world.getComponent(id, 'NavigationTarget');
+      const vel = world.getComponent(id, 'Velocity');
 
       const damp = 1 - Math.exp(-rot.lerpSpeed * dt);
-      const userControlling = Boolean(input && input.pointerActive);
+      const isLocomoting = Boolean(
+        (nav && nav.active) || (vel && Math.hypot(vel.vx, vel.vz) > 0.05)
+      );
 
-      if (userControlling) {
+      if (nav) {
+        // Navigable avatar faces walking heading smoothly and holds arrival orientation calmly
+        const idleBreathYaw = isLocomoting ? 0 : Math.sin(elapsed * 0.75) * 0.035;
+        const desiredYaw = rot.targetYaw + idleBreathYaw;
+        const diffYaw = Math.atan2(
+          Math.sin(desiredYaw - transform.rotY),
+          Math.cos(desiredYaw - transform.rotY)
+        );
+        transform.rotY += diffYaw * damp;
+        transform.rotX += (rot.targetPitch - transform.rotX) * damp;
+        transform.rotZ += (rot.targetRoll - transform.rotZ) * damp;
+      } else if (input && input.pointerActive) {
         const diffYaw = Math.atan2(
           Math.sin(rot.targetYaw - transform.rotY),
           Math.cos(rot.targetYaw - transform.rotY)
@@ -140,58 +359,6 @@ export class MovementRotationSystem implements EcsSystem {
         transform.rotX += (idlePitch - transform.rotX) * (damp * 0.6);
         transform.rotZ += (0 - transform.rotZ) * damp;
       }
-    }
-
-    // 2. Velocity & optional keyboard-driven cyber-runner / wanderer movement
-    const movEntities = world.query('Transform', 'Velocity');
-    for (const id of movEntities) {
-      const transform = world.getComponent(id, 'Transform')!;
-      const vel = world.getComponent(id, 'Velocity')!;
-      const input = world.getComponent(id, 'InputState');
-      const anim = world.getComponent(id, 'AnimationState');
-
-      if (input && input.moveSpeed > 0 && (input.moveX !== 0 || input.moveZ !== 0)) {
-        vel.vx = input.moveX * input.moveSpeed;
-        vel.vz = input.moveZ * input.moveSpeed;
-
-        const rot = world.getComponent(id, 'RotationTarget');
-        if (rot) {
-          rot.targetYaw = Math.atan2(vel.vx, vel.vz);
-        }
-        if (anim) {
-          anim.excitement = Math.min(1, anim.excitement + dt * 2.5);
-        }
-      }
-
-      transform.x += vel.vx * dt;
-      transform.y += vel.vy * dt;
-      transform.z += vel.vz * dt;
-      transform.rotX += vel.angularVx * dt;
-      transform.rotY += vel.angularVy * dt;
-      transform.rotZ += vel.angularVz * dt;
-
-      if (input && input.boundsRadius > 0) {
-        const dist = Math.hypot(transform.x, transform.z + 1.5);
-        if (dist > input.boundsRadius) {
-          const ratio = input.boundsRadius / dist;
-          transform.x *= ratio;
-          transform.z = -1.5 + (transform.z + 1.5) * ratio;
-        }
-      }
-
-      if (this.terrainHeightFn && input && input.moveSpeed > 0) {
-        const groundY = this.terrainHeightFn(transform.x, transform.z);
-        if (anim) {
-          anim.baseY = groundY;
-        } else {
-          transform.y = groundY;
-        }
-      }
-
-      const velDamp = Math.exp(-vel.damping * dt);
-      vel.vx *= velDamp;
-      vel.vy *= velDamp;
-      vel.vz *= velDamp;
     }
   }
 }
@@ -279,6 +446,56 @@ export class NeonPulseSystem implements EcsSystem {
 declare module './World' {
   interface NeonBeaconComponent {
     emissiveIntensityCache?: number;
+  }
+}
+
+/**
+ * CameraFollowSystem (priority 38): Keeps the active `THREE.PerspectiveCamera` stably centered
+ * on and smoothly accompanying the primary `CameraFollow` entity across the stage ground,
+ * using `deltaTime` exponential damping and zero per-frame allocations.
+ */
+export class CameraFollowSystem implements EcsSystem {
+  public readonly name = 'CameraFollowSystem';
+  private camera: THREE.PerspectiveCamera | null;
+  private readonly lookTarget = new THREE.Vector3();
+
+  constructor(camera: THREE.PerspectiveCamera | null = null) {
+    this.camera = camera;
+  }
+
+  public setCamera(camera: THREE.PerspectiveCamera | null): void {
+    this.camera = camera;
+  }
+
+  public update(world: World, { dt }: SystemContext): void {
+    if (!this.camera) return;
+
+    const entities = world.query('Transform', 'CameraFollow');
+    if (entities.length === 0) return;
+
+    const id = entities[0]!;
+    const transform = world.getComponent(id, 'Transform')!;
+    const follow = world.getComponent(id, 'CameraFollow')!;
+    const anim = world.getComponent(id, 'AnimationState');
+
+    const anchorY = anim ? anim.baseY : transform.y;
+    const desiredX = transform.x + follow.offsetX;
+    const desiredY = anchorY + follow.offsetY;
+    const desiredZ = transform.z + follow.offsetZ;
+
+    if (!follow.initialized || dt <= 0) {
+      this.camera.position.set(desiredX, desiredY, desiredZ);
+      follow.initialized = true;
+    } else {
+      const alpha = 1 - Math.exp(-follow.followSharpness * dt);
+      this.camera.position.x += (desiredX - this.camera.position.x) * alpha;
+      this.camera.position.y += (desiredY - this.camera.position.y) * alpha;
+      this.camera.position.z += (desiredZ - this.camera.position.z) * alpha;
+    }
+
+    this.lookTarget.set(transform.x, anchorY + follow.lookAtOffsetY, transform.z);
+    this.camera.lookAt(this.lookTarget);
+    this.camera.updateMatrixWorld();
   }
 }
 

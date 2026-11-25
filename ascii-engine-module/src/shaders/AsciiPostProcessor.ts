@@ -266,16 +266,14 @@ export class AsciiPostProcessor {
 
   /**
    * Resolves the terminal cell substrate color written directly to the sRGB backbuffer:
-   * - Playground keeps Three.js linear-darkened `palette.background` for deep nocturnal contrast.
+   * - Playground preserves `#0C1217` entropic night sky/substrate hue at 88% dark substrate value.
    * - Mascot preserves sRGB hue proportions of `#13222E` at 72% dark-substrate value (`#0E1821`)
    *   so ASCII glyphs on Tux, floor (`#1D2B36`), and backdrop (`#13222E`) share one unified pass.
    */
   private syncSubstrateColor(config: EngineConfig, target: THREE.Color): void {
     target.set(config.palette.background);
-    if (config.mode === 'mascot') {
-      target.convertLinearToSRGB();
-      target.multiplyScalar(0.72);
-    }
+    target.convertLinearToSRGB();
+    target.multiplyScalar(config.mode === 'mascot' ? 0.72 : 0.88);
   }
 
   private rebuildGlyphAtlas(config: EngineConfig, tileSize: number): void {

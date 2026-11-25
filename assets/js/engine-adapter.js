@@ -12,57 +12,57 @@ window.TP = window.TP || {};
 
   var controllers = [];
 
-  // The UI exposes one scene with exactly three modes: day, night and rain.
+  // The UI exposes one Cyber-Noir + Entropism scene with three modes: day, night and rain.
   var DEFAULT_MODE = 'night';
   var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
     night: {
       palette: {
-        background: '#05070F',
-        warmLight: '#FF2A85',
-        warmCore: '#FFC145',
-        coolAmbient: '#00F0FF',
-        foliageAccent: '#8A5CFF',
-        cursorLight: '#64F5FF'
+        background: '#0C1217',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#6E7B87',
+        foliageAccent: '#2A3540',
+        cursorLight: '#6E7B87'
       },
-      bloomIntensity: 1.42,
-      dofStrength: 0.34,
+      bloomIntensity: 0.24,
+      dofStrength: 0.20,
       edgeStrength: 0.96,
-      blockBlendWeight: 0.35,
+      blockBlendWeight: 0.18,
       windStrength: 0.62,
-      parallaxIntensity: 1.6
+      parallaxIntensity: 0.35
     },
     day: {
       palette: {
-        background: '#1E3F66',
-        warmLight: '#FF8A3D',
-        warmCore: '#FFF1A8',
-        coolAmbient: '#7AD4FF',
-        foliageAccent: '#4895EF',
-        cursorLight: '#FFF6D6'
+        background: '#162029',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#7A8894',
+        foliageAccent: '#2A3540',
+        cursorLight: '#8A99A6'
       },
-      bloomIntensity: 0.78,
-      dofStrength: 0.24,
+      bloomIntensity: 0.16,
+      dofStrength: 0.16,
       edgeStrength: 0.94,
-      blockBlendWeight: 0.32,
-      windStrength: 0.45,
-      parallaxIntensity: 1.4
+      blockBlendWeight: 0.14,
+      windStrength: 0.42,
+      parallaxIntensity: 0.30
     },
     rain: {
       palette: {
-        background: '#04060D',
-        warmLight: '#FF1E75',
-        warmCore: '#FFB703',
-        coolAmbient: '#00D8FF',
-        foliageAccent: '#6930C3',
-        cursorLight: '#8CF4FF'
+        background: '#0A0F14',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#5E6C78',
+        foliageAccent: '#2A3540',
+        cursorLight: '#6E7B87'
       },
-      bloomIntensity: 1.72,
-      dofStrength: 0.44,
-      edgeStrength: 0.98,
-      blockBlendWeight: 0.37,
-      windStrength: 1.52,
-      parallaxIntensity: 1.75
+      bloomIntensity: 0.28,
+      dofStrength: 0.24,
+      edgeStrength: 0.96,
+      blockBlendWeight: 0.20,
+      windStrength: 1.45,
+      parallaxIntensity: 0.40
     }
   };
 
@@ -331,6 +331,7 @@ window.TP = window.TP || {};
           : {
               mode: 'playground',
               mapId: 'cyberpunk-citadel',
+              fov: 106,
               cellSize: 8,
               autoResponsiveDensity: true,
               enableShadows: true,
@@ -360,7 +361,6 @@ window.TP = window.TP || {};
         if (isMascot) startMascotSpin();
         observe();
         setPaused(state.paused);
-        if (!isMascot) setAutoOrbit(true);
         return true;
       } catch (error) {
         state.instance = null;
@@ -372,6 +372,7 @@ window.TP = window.TP || {};
 
     function destroy() {
       stopOrbit();
+      window.removeEventListener('pagehide', destroy);
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;

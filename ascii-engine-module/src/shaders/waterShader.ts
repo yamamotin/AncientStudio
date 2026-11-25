@@ -175,12 +175,12 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
     float dist = length(lightPos.xz - worldPos.xz);
     float attenuation = 1.0 / (1.0 + dist * dist * 0.085);
 
-    float rippleBand = 0.78 + 0.22 * uWetness * sin(worldPos.z * 6.4 - uTime * 4.2 + worldPos.x * 2.2);
-    float specCore = pow(specAlign, 22.0) * 1.9;
-    float specWide = pow(specAlign, 4.5) * 0.65;
-    float wetColumn = streakMask * 0.42 * uWetness;
+    float rippleBand = 0.82 + 0.18 * uWetness * sin(worldPos.z * 6.4 - uTime * 4.2 + worldPos.x * 2.2);
+    float specCore = pow(specAlign, 20.0) * 0.85;
+    float specWide = pow(specAlign, 5.0) * 0.34;
+    float wetColumn = streakMask * 0.22 * uWetness;
 
-    return lightColor * ((specCore + specWide) * attenuation + wetColumn) * rippleBand * (intensity * 0.055 * mirrorGain);
+    return lightColor * ((specCore + specWide) * attenuation + wetColumn) * rippleBand * (intensity * 0.024 * mirrorGain);
   }
 
   void main() {
@@ -194,62 +194,64 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
     // Real-time PCF directional shadow + soft contact AO beneath foreground protagonist
     float dirShadow = sampleDirectionalShadow(vWorldPos);
     float avatarDist = length(vWorldPos.xz - uAvatarPos.xz);
-    float contactAo = 1.0 - 0.36 * exp(-avatarDist * avatarDist * 2.4) * uShadowEnabled;
-    float shadowMask = clamp(dirShadow * contactAo, 0.18, 1.0);
+    float contactAo = 1.0 - 0.38 * exp(-avatarDist * avatarDist * 2.4) * uShadowEnabled;
+    float shadowMask = clamp(dirShadow * contactAo, 0.22, 1.0);
 
     // Puddle distribution & Fresnel mirror strength governed by uWetness
     float puddleWave = sin(vWorldPos.x * 0.75 + cos(vWorldPos.z * 0.55)) * 0.5 + 0.5;
-    float puddleMask = smoothstep(0.24, 0.78, puddleWave);
-    float effectiveMirror = clamp(uWetness * (0.55 + 0.45 * puddleMask), 0.06, 1.0);
+    float puddleMask = smoothstep(0.26, 0.78, puddleWave);
+    float effectiveMirror = clamp(uWetness * (0.52 + 0.48 * puddleMask), 0.05, 1.0);
 
     float fresnel = pow(1.0 - max(0.0, dot(viewDir, normal)), 2.6);
-    fresnel = clamp(0.18 + fresnel * 0.82, 0.0, 1.0) * effectiveMirror;
+    fresnel = clamp(0.14 + fresnel * 0.72, 0.0, 1.0) * effectiveMirror;
 
-    // Base asphalt surface: sunlit textured concrete-asphalt in Day vs deep reflective asphalt in Night/Rain
-    float grain = (hash21(floor(vWorldPos.xz * 6.0)) - 0.5) * 0.04;
-    vec3 dayAsphaltLit = vec3(0.34, 0.42, 0.52) + grain;
-    vec3 dayAsphaltShadow = vec3(0.10, 0.15, 0.23) + grain * 0.5;
+    // Base ASCII ground surface calibrated around #1A222A (entropic weathered asphalt)
+    float grain = (hash21(floor(vWorldPos.xz * 5.5)) - 0.5) * 0.018;
+    float macroWear = (sin(vWorldPos.x * 0.9 + cos(vWorldPos.z * 0.65)) * 0.5 + 0.5) * 0.014;
+    vec3 dayAsphaltLit = vec3(0.068, 0.088, 0.108) + grain + macroWear;
+    vec3 dayAsphaltShadow = vec3(0.026, 0.035, 0.045) + grain * 0.5;
     vec3 dayBase = mix(dayAsphaltShadow, dayAsphaltLit, shadowMask);
 
-    vec3 skyReflect = mix(uDeepColor * 1.30, uShallowColor * 0.90, clamp(reflDir.y * 1.5 + 0.22, 0.0, 1.0));
-    vec3 nightBase = mix(uDeepColor * 0.88, skyReflect, fresnel) * mix(0.46, 1.0, shadowMask);
+    vec3 skyReflect = mix(uDeepColor * 1.12, uShallowColor * 0.52, clamp(reflDir.y * 1.4 + 0.18, 0.0, 1.0));
+    vec3 nightBase = (mix(uDeepColor, skyReflect, fresnel * 0.65) + grain + macroWear) * mix(0.54, 1.0, shadowMask);
 
     vec3 color = mix(nightBase, dayBase, uDaylight);
 
-    // Painted & illuminated cybernetic lane lines & pedestrian crosswalk bars along central street (|x| < 4.6)
+    // Weathered entropic road markings (#2A3540 / #3B424C value hierarchy, never bright neon)
     float inRoad = step(abs(vWorldPos.x), 4.6);
-    float centerDash = step(abs(vWorldPos.x), 0.09) * step(0.45, fract(vWorldPos.z * 0.45));
-    float sideLine = step(abs(abs(vWorldPos.x) - 3.85), 0.08);
-    float crossZ1 = step(abs(vWorldPos.z - 4.5), 0.58);
-    float crossZ2 = step(abs(vWorldPos.z + 0.8), 0.52);
-    float zebra = step(0.48, fract(vWorldPos.x * 1.35)) * max(crossZ1, crossZ2) * step(abs(vWorldPos.x), 3.6);
+    float wearMask = 0.45 + 0.55 * hash21(floor(vWorldPos.xz * 2.8));
+    float centerDash = step(abs(vWorldPos.x), 0.08) * step(0.48, fract(vWorldPos.z * 0.45)) * wearMask;
+    float sideLine = step(abs(abs(vWorldPos.x) - 3.85), 0.07) * wearMask;
+    float crossZ1 = step(abs(vWorldPos.z - 4.5), 0.52);
+    float crossZ2 = step(abs(vWorldPos.z + 0.8), 0.48);
+    float zebra = step(0.52, fract(vWorldPos.x * 1.35)) * max(crossZ1, crossZ2) * step(abs(vWorldPos.x), 3.5) * wearMask;
 
-    float paintShadowScale = mix(1.0, 0.45 + 0.55 * shadowMask, uDaylight);
-    color += uWarmCoreColor * centerDash * inRoad * 0.50 * paintShadowScale;
-    color += uShallowColor * sideLine * 0.44 * paintShadowScale;
-    color += mix(uShallowColor, vec3(0.95, 0.98, 1.0), 0.52) * zebra * 0.44 * paintShadowScale;
+    float paintShadowScale = mix(0.85, 0.50 + 0.50 * shadowMask, uDaylight);
+    color += uWarmColor * centerDash * inRoad * 0.14 * paintShadowScale;
+    color += uShallowColor * sideLine * 0.12 * paintShadowScale;
+    color += uWarmCoreColor * zebra * 0.11 * paintShadowScale;
 
-    // Reflected flanking storefront neon strips (strong in Rain, subtle in Night, minimal in Day)
-    float neonMirrorGain = mix(0.22 + 0.78 * uWetness, 0.12, uDaylight);
-    float leftFacadeGlow = exp(-abs(vWorldPos.x + 4.2) * 0.62) * (0.55 + 0.45 * sin(vWorldPos.z * 1.4 + 0.8));
-    float rightFacadeGlow = exp(-abs(vWorldPos.x - 4.2) * 0.62) * (0.55 + 0.45 * cos(vWorldPos.z * 1.3 - 0.5));
-    color += uShallowColor * leftFacadeGlow * fresnel * 0.48 * neonMirrorGain;
-    color += uWarmColor * rightFacadeGlow * fresnel * 0.48 * neonMirrorGain;
+    // Restrained architectural reflection bands along wet asphalt (modulates ASCII glyphs, zero washout)
+    float neonMirrorGain = mix(0.16 + 0.54 * uWetness, 0.08, uDaylight);
+    float leftFacadeGlow = exp(-abs(vWorldPos.x + 4.2) * 0.68) * (0.55 + 0.45 * sin(vWorldPos.z * 1.4 + 0.8));
+    float rightFacadeGlow = exp(-abs(vWorldPos.x - 4.2) * 0.68) * (0.55 + 0.45 * cos(vWorldPos.z * 1.3 - 0.5));
+    color += uShallowColor * leftFacadeGlow * fresnel * 0.14 * neonMirrorGain;
+    color += uWarmColor * rightFacadeGlow * fresnel * 0.14 * neonMirrorGain;
 
-    // Sun / Moon specular glint along street perspective (attenuated inside cast shadows!)
+    // Desaturated lunar / overcast sky glint along boulevard perspective
     float moonAlign = max(0.0, dot(reflDir, normalize(uMoonDir)));
-    float moonGlint = (pow(moonAlign, 28.0) * 1.3 + pow(moonAlign, 6.5) * 0.30) * shadowMask;
-    vec3 skySpecTint = mix(uShallowColor, uWarmCoreColor, uDaylight * 0.75);
-    color += skySpecTint * moonGlint * mix(0.35 + 0.85 * uWetness, 0.42, uDaylight);
+    float moonGlint = (pow(moonAlign, 26.0) * 0.36 + pow(moonAlign, 6.5) * 0.10) * shadowMask;
+    vec3 skySpecTint = mix(uShallowColor, uWarmCoreColor, 0.45);
+    color += skySpecTint * moonGlint * mix(0.22 + 0.48 * uWetness, 0.24, uDaylight);
 
-    // Reflected Holo-Portal Core + 4 Street Neon Beacons/Signs
-    color += evalPointReflection(vWorldPos, normal, viewDir, uShrineLight.xyz, uWarmCoreColor, uShrineLight.w, neonMirrorGain);
+    // Controlled planar reflections from distant reactor + streetlamps (pure ASCII value ramp)
+    color += evalPointReflection(vWorldPos, normal, viewDir, uShrineLight.xyz, uWarmColor, uShrineLight.w, neonMirrorGain);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch0.xyz, uShallowColor, uTorch0.w, neonMirrorGain);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch1.xyz, uWarmColor, uTorch1.w, neonMirrorGain);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch2.xyz, uShallowColor, uTorch2.w, neonMirrorGain);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch3.xyz, uWarmColor, uTorch3.w, neonMirrorGain);
 
-    // Interactive cursor/touch spotlight reflection
+    // Subtle cursor inspection glint
     color += evalPointReflection(
       vWorldPos,
       normal,
@@ -257,22 +259,25 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
       uCursorPos,
       uCursorColor,
       uCursorIntensity,
-      mix(0.35 + 0.65 * uWetness, 0.25, uDaylight)
+      mix(0.20 + 0.38 * uWetness, 0.14, uDaylight)
     );
 
     // Raindrop splash glints (active ONLY when uRainIntensity > 0)
     if (uRainIntensity > 0.01) {
       float splash = raindropRings(vWorldPos.xz * 1.25, uTime * 1.15);
-      color += mix(uShallowColor, uWarmColor, 0.45) * splash * 0.56 * clamp(1.2 - camDist / 22.0, 0.0, 1.0);
+      color += mix(uShallowColor, uWarmColor, 0.45) * splash * 0.22 * clamp(1.2 - camDist / 22.0, 0.0, 1.0);
     }
 
-    // Distance perspective haze blending smoothly toward horizon
-    float fogRate = mix(0.00038 + uRainIntensity * 0.00022, 0.00018, uDaylight);
+    // Clamp reflected ground luminance so floor reflections never exceed crisp ASCII glyph range
+    color = min(color, vec3(0.28, 0.32, 0.35));
+
+    // Distance perspective haze blending smoothly toward #0C1217 entropic horizon
+    float fogRate = mix(0.00042 + uRainIntensity * 0.00024, 0.00024, uDaylight);
     float fogFactor = 1.0 - exp(-fogRate * camDist * camDist);
-    vec3 horizonTint = mix(uDeepColor * 0.48 + uWarmColor * 0.05, vec3(0.20, 0.34, 0.50), uDaylight);
+    vec3 horizonTint = mix(uDeepColor * 0.62, vec3(0.032, 0.046, 0.058), uDaylight);
     color = mix(color, horizonTint, clamp(fogFactor, 0.0, 1.0));
 
-    float surfaceAlpha = mix(0.76 + 0.20 * effectiveMirror, 0.88, uDaylight);
+    float surfaceAlpha = mix(0.86 + 0.12 * effectiveMirror, 0.92, uDaylight);
     gl_FragColor = vec4(color, surfaceAlpha);
   }
 `;
@@ -304,13 +309,14 @@ export function createSanctuaryWaterMaterial(options: {
   const { palette, shrineLightPos, moonDir } = options;
   const atm = atmosphereWaterParams(options.atmosphere ?? 'night');
 
-  const deepWater = new THREE.Color(palette.background).lerp(
-    new THREE.Color(palette.coolAmbient),
-    0.28
+  // Anchor boulevard floor around #1A222A with restrained steel-slate (#6E7B87) & verdigris (#4A7C7E) reflection tones
+  const deepWater = new THREE.Color('#1A222A').lerp(
+    new THREE.Color(palette.background),
+    0.22
   );
   const shallowWater = new THREE.Color(palette.coolAmbient).lerp(
-    new THREE.Color('#96F2FF'),
-    0.36
+    new THREE.Color('#8A99A6'),
+    0.25
   );
 
   return new THREE.ShaderMaterial({
@@ -320,14 +326,14 @@ export function createSanctuaryWaterMaterial(options: {
     depthWrite: true,
     uniforms: {
       uTime: { value: 0 },
-      uCamPos: { value: new THREE.Vector3(0, 3.8, 12.6) },
+      uCamPos: { value: new THREE.Vector3(0, 2.25, 7.85) },
       uDeepColor: { value: deepWater },
       uShallowColor: { value: shallowWater },
       uWarmColor: { value: new THREE.Color(palette.warmLight) },
       uWarmCoreColor: { value: new THREE.Color(palette.warmCore) },
       uCursorColor: { value: new THREE.Color(palette.cursorLight) },
-      uCursorPos: { value: new THREE.Vector3(0, 2.2, 3.2) },
-      uCursorIntensity: { value: 14 },
+      uCursorPos: { value: new THREE.Vector3(0, 1.8, 3.8) },
+      uCursorIntensity: { value: 4.5 },
       uMoonDir: { value: moonDir.clone().normalize() },
       uWetness: { value: atm.wetness },
       uRainIntensity: { value: atm.rainIntensity },
@@ -338,11 +344,11 @@ export function createSanctuaryWaterMaterial(options: {
       uShadowEnabled: { value: options.enableShadows === false ? 0.0 : 1.0 },
       uShadowStrength: { value: atm.shadowStrength },
       uAvatarPos: { value: new THREE.Vector3(0, 0.04, 4.15) },
-      uTorch0: { value: new THREE.Vector4(-3.4, 2.2, 2.8, 18) },
-      uTorch1: { value: new THREE.Vector4(3.4, 2.2, 2.8, 18) },
-      uTorch2: { value: new THREE.Vector4(-3.8, 2.8, -3.6, 20) },
-      uTorch3: { value: new THREE.Vector4(3.8, 2.8, -3.6, 20) },
-      uShrineLight: { value: new THREE.Vector4(shrineLightPos.x, shrineLightPos.y, shrineLightPos.z, 48) },
+      uTorch0: { value: new THREE.Vector4(-3.4, 2.2, 2.8, 6.5) },
+      uTorch1: { value: new THREE.Vector4(3.4, 2.2, 2.8, 6.5) },
+      uTorch2: { value: new THREE.Vector4(-3.8, 2.8, -3.6, 7.0) },
+      uTorch3: { value: new THREE.Vector4(3.8, 2.8, -3.6, 7.0) },
+      uShrineLight: { value: new THREE.Vector4(shrineLightPos.x, shrineLightPos.y, shrineLightPos.z, 12.0) },
     },
   });
 }

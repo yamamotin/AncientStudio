@@ -275,36 +275,34 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 pixelLitCol = smoothSceneCol + bloomSmooth * (0.48 * uBloomIntensity);
     float continuousLuma = clamp(pow(max(getLuma(pixelLitCol), 0.0), gammaExp), 0.0, 1.15);
 
-    // Single-pass GPU lighten block composition using gutter-free full-bleed block tiles
-    float blockPresence = smoothstep(0.08, 0.86, continuousLuma) * (isSky ? mix(0.22, 0.48, uDaylight) : 1.0);
-    float blockTier = floor(clamp((perceivedLuma - 0.06) / 0.86, 0.0, 0.999) * max(uBlockCount, 1.0));
+    // Single-pass GPU halftone stipple accent (clamped to stipple tiers 0..uBlockCount-2 so 100% solid rectangles never erase glyphs)
+    float maxStippleTiers = max(uBlockCount - 1.0, 1.0);
+    float blockPresence = smoothstep(0.14, 0.88, continuousLuma) * (isSky ? mix(0.16, 0.32, uDaylight) : 1.0);
+    float blockTier = floor(clamp((perceivedLuma - 0.10) / 0.86, 0.0, 0.999) * maxStippleTiers);
     float blockIndex = uRampCount + uStructuralCount + blockTier;
     float blockAtlasU = (blockIndex + safeGlyphUv.x) / uTotalGlyphs;
     float rawBlockMask = uBlockCount > 0.5 ? texture2D(tGlyphAtlas, vec2(blockAtlasU, safeGlyphUv.y)).r : 0.0;
-    float sharpBlockMask = smoothstep(0.36 - aaWidth, 0.36 + aaWidth, rawBlockMask);
+    float sharpBlockMask = smoothstep(0.38 - aaWidth, 0.38 + aaWidth, rawBlockMask);
 
-    float weightedBlockLayer = sharpBlockMask * blockPresence * uBlockBlendWeight * clamp(continuousLuma + 0.18, 0.25, 1.12);
-    float compositeMask = max(detailGlyphMask, clamp(weightedBlockLayer, 0.0, 0.88));
+    float weightedBlockLayer = sharpBlockMask * blockPresence * uBlockBlendWeight * 0.48;
+    float compositeMask = max(detailGlyphMask, clamp(weightedBlockLayer, 0.0, 0.22));
 
-    // 8. Color grading & continuous smooth backdrop (completely free of per-cell square borders!)
+    // 8. Pure-ASCII value modulation & restrained terminal substrate (zero solid light blowout)
     float rawLuma = max(getLuma(litCellColor), 0.0001);
-    vec3 normalizedHue = litCellColor / rawLuma;
-    float boostGain = mix(1.64, 1.38, uDaylight);
-    float boostedBrightness = mix(perceivedLuma, min(1.68, rawLuma * boostGain + 0.10), 0.78);
-    vec3 glyphColor = normalizedHue * boostedBrightness;
+    vec3 normalizedHue = mix(vec3(1.0), litCellColor / rawLuma, 0.82);
+    float boostGain = mix(1.42, 1.26, uDaylight);
+    float boostedBrightness = mix(perceivedLuma, min(1.22, rawLuma * boostGain + 0.07), 0.72);
+    vec3 glyphColor = min(normalizedHue * boostedBrightness, vec3(1.18, 1.20, 1.22));
 
-    float hotCore = smoothstep(0.76, 1.32, peakCh);
-    glyphColor = mix(glyphColor, vec3(1.42, 1.46, 1.52), hotCore * 0.30);
-    glyphColor = min(glyphColor, vec3(1.68, 1.62, 1.72));
+    vec3 blockTone = glyphColor * 0.72 + bloomSmooth * (0.08 * uBloomIntensity);
+    vec3 litForeground = mix(blockTone, glyphColor, clamp(detailGlyphMask * 1.18, 0.0, 1.0));
 
-    vec3 blockTone = glyphColor * 0.88 + bloomSmooth * (0.16 * uBloomIntensity);
-    vec3 litForeground = mix(blockTone, glyphColor, clamp(detailGlyphMask * 1.15, 0.0, 1.0));
-
-    // Continuous smooth backdrop (uses unquantized smoothSceneCol + bloomSmooth so zero grid squares appear!)
-    vec3 smoothBackdrop =
-      uBgColor +
-      bloomSmooth * (0.26 * uBloomIntensity) +
-      smoothSceneCol * (0.08 + uBlockBlendWeight * 0.08);
+    // Dark terminal substrate keeps high glyph-to-background contrast even at light cores and reflections
+    vec3 atmosphericMist = min(
+      bloomSmooth * (0.045 * uBloomIntensity) + smoothSceneCol * 0.025,
+      vec3(0.065)
+    );
+    vec3 smoothBackdrop = uBgColor + atmosphericMist;
 
     vec3 finalColor = mix(smoothBackdrop, litForeground, compositeMask);
 

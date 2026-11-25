@@ -440,6 +440,8 @@ h2 {
 
 .scene-stage[data-mode="engine"] {
   padding: 0;
+  cursor: pointer;
+  background: #0C1217;
 }
 
 .scene-fallback {

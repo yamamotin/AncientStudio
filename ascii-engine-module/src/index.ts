@@ -11,6 +11,7 @@ import {
 import { AnimationSystem } from './animation/AnimationSystem';
 import { EntityBlueprintRegistry } from './ecs/EntityBlueprint';
 import {
+  CameraFollowSystem,
   InputSystem,
   MovementRotationSystem,
   NeonPulseSystem,
@@ -19,11 +20,15 @@ import {
   SystemRunner,
   WindSystem,
 } from './ecs/SystemRunner';
-import { World } from './ecs/World';
+import {
+  type CameraFollowComponent,
+  type NavigationTargetComponent,
+  World,
+} from './ecs/World';
 import { PlaygroundEntityFactory } from './entities/PlaygroundEntityFactory';
 import { TuxEntityFactory } from './entities/TuxEntityFactory';
 import { KeyboardInput } from './input/KeyboardInput';
-import { PointerInput } from './input/PointerInput';
+import { PointerInput, type PointerTap } from './input/PointerInput';
 import { createGlyphAtlas } from './shaders/glyphAtlas';
 import {
   applyObjectOutline,
@@ -65,16 +70,19 @@ import type {
 export type {
   AtmosphereMode,
   BuiltMascotStage,
+  CameraFollowComponent,
   DeepPartial,
   EngineConfig,
   EngineLifecycleState,
   EngineStats,
   LifecycleCallbacks,
+  NavigationTargetComponent,
   ObjectOutlineHandle,
   ObjectOutlineOptions,
   OutlineColorInput,
   OutlineTargetSelector,
   PartialEngineConfig,
+  PointerTap,
   ResolutionProfile,
   ResolvedObjectOutlineState,
   ResolutionTier,
@@ -85,6 +93,7 @@ export type {
 export {
   applyObjectOutline,
   AsciiEngineCore,
+  CameraFollowSystem,
   clearObjectOutline,
   createGlyphAtlas,
   DEFAULT_ASCII_RAMP,

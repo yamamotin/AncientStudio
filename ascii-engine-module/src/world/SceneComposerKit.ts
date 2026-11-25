@@ -76,58 +76,63 @@ export class SceneDepthRig {
 
 export class SceneComposerKit {
   /**
-   * Creates a shared bank of palette-reactive PBR/emissive materials calibrated for ASCII contrast.
+   * Creates a shared bank of palette-reactive PBR/emissive materials calibrated for
+   * Cyber-Noir + Entropism ASCII value hierarchy (#2A3540 structures, #4A7C7E discreet accent,
+   * #6E7B87 / #8A99A6 desaturated steel-mist highlights — zero neon blowout).
    */
   public static createMaterialBank(palette: ThemePalette): NeonMaterialBank {
     const cyan = new THREE.MeshStandardMaterial({
       color: new THREE.Color(palette.coolAmbient),
       emissive: new THREE.Color(palette.coolAmbient),
-      emissiveIntensity: 2.7,
-      roughness: 0.14,
+      emissiveIntensity: 0.64,
+      roughness: 0.42,
+      metalness: 0.28,
       flatShading: true,
     });
 
     const magenta = new THREE.MeshStandardMaterial({
       color: new THREE.Color(palette.warmLight),
       emissive: new THREE.Color(palette.warmLight),
-      emissiveIntensity: 2.7,
-      roughness: 0.14,
+      emissiveIntensity: 0.68,
+      roughness: 0.42,
+      metalness: 0.24,
       flatShading: true,
     });
 
     const amber = new THREE.MeshStandardMaterial({
       color: new THREE.Color(palette.warmCore),
       emissive: new THREE.Color(palette.warmCore),
-      emissiveIntensity: 2.6,
-      roughness: 0.16,
+      emissiveIntensity: 0.62,
+      roughness: 0.38,
+      metalness: 0.32,
       flatShading: true,
     });
 
     const hullDark = new THREE.MeshStandardMaterial({
-      color: 0x101929,
-      roughness: 0.5,
-      metalness: 0.72,
+      color: 0x1d252d,
+      roughness: 0.78,
+      metalness: 0.24,
       flatShading: true,
     });
 
     const hullMid = new THREE.MeshStandardMaterial({
-      color: 0x19273d,
-      roughness: 0.54,
-      metalness: 0.64,
+      color: 0x2a3540,
+      roughness: 0.74,
+      metalness: 0.28,
       flatShading: true,
     });
 
     const poleMetal = new THREE.MeshStandardMaterial({
-      color: 0x182538,
-      roughness: 0.48,
-      metalness: 0.78,
+      color: 0x232c35,
+      roughness: 0.66,
+      metalness: 0.42,
       flatShading: true,
     });
 
     const cableMetal = new THREE.MeshStandardMaterial({
-      color: 0x263b59,
-      emissive: new THREE.Color(palette.coolAmbient).multiplyScalar(0.22),
-      roughness: 0.5,
+      color: 0x3b424c,
+      emissive: new THREE.Color(palette.coolAmbient).multiplyScalar(0.06),
+      roughness: 0.68,
       flatShading: true,
     });
 
@@ -146,7 +151,7 @@ export class SceneComposerKit {
         magenta.emissive.set(next.warmLight);
         amber.color.set(next.warmCore);
         amber.emissive.set(next.warmCore);
-        cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.22);
+        cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.06);
       },
       setAtmosphere(atmosphere: AtmosphereMode, next: ThemePalette) {
         cyan.color.set(next.coolAmbient);
@@ -157,44 +162,44 @@ export class SceneComposerKit {
         amber.emissive.set(next.warmCore);
 
         if (atmosphere === 'day') {
-          // Daytime sunlit steel & concrete facades with subtle architectural accent trim
-          cyan.emissiveIntensity = 1.15;
-          magenta.emissiveIntensity = 1.15;
-          amber.emissiveIntensity = 1.25;
-          hullDark.color.setHex(0x283a52);
-          hullDark.roughness = 0.62;
-          hullMid.color.setHex(0x3a5270);
-          hullMid.roughness = 0.65;
-          poleMetal.color.setHex(0x314660);
-          poleMetal.roughness = 0.56;
-          cableMetal.color.setHex(0x38506e);
-          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.08);
+          // Overcast industrial daylight: matte #2A3540 concrete & subdued low-power indicators
+          cyan.emissiveIntensity = 0.28;
+          magenta.emissiveIntensity = 0.32;
+          amber.emissiveIntensity = 0.30;
+          hullDark.color.setHex(0x1f2831);
+          hullDark.roughness = 0.80;
+          hullMid.color.setHex(0x2a3540);
+          hullMid.roughness = 0.76;
+          poleMetal.color.setHex(0x26303a);
+          poleMetal.roughness = 0.68;
+          cableMetal.color.setHex(0x3b424c);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.03);
         } else if (atmosphere === 'rain') {
-          // Storm-slicked wet metallic hulls & intense neon bloom
-          cyan.emissiveIntensity = 2.95;
-          magenta.emissiveIntensity = 2.95;
-          amber.emissiveIntensity = 2.85;
-          hullDark.color.setHex(0x0d1626);
-          hullDark.roughness = 0.34;
-          hullMid.color.setHex(0x16243b);
-          hullMid.roughness = 0.38;
-          poleMetal.color.setHex(0x152236);
-          poleMetal.roughness = 0.34;
-          cableMetal.color.setHex(0x223654);
-          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.26);
+          // Rain-darkened entropic concrete & restrained wet-noir beacon glow
+          cyan.emissiveIntensity = 0.78;
+          magenta.emissiveIntensity = 0.82;
+          amber.emissiveIntensity = 0.74;
+          hullDark.color.setHex(0x182027);
+          hullDark.roughness = 0.56;
+          hullMid.color.setHex(0x25303a);
+          hullMid.roughness = 0.58;
+          poleMetal.color.setHex(0x1f2831);
+          poleMetal.roughness = 0.50;
+          cableMetal.color.setHex(0x343c46);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.08);
         } else {
-          // Clear nocturnal avenue: deep crisp hulls & vibrant balanced neon
-          cyan.emissiveIntensity = 2.65;
-          magenta.emissiveIntensity = 2.65;
-          amber.emissiveIntensity = 2.55;
-          hullDark.color.setHex(0x101929);
-          hullDark.roughness = 0.5;
-          hullMid.color.setHex(0x19273d);
-          hullMid.roughness = 0.54;
-          poleMetal.color.setHex(0x182538);
-          poleMetal.roughness = 0.48;
-          cableMetal.color.setHex(0x263b59);
-          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.22);
+          // Nocturnal Cyber-Noir entropism: #2A3540 weathered hulls & controlled ASCII light modulation
+          cyan.emissiveIntensity = 0.64;
+          magenta.emissiveIntensity = 0.68;
+          amber.emissiveIntensity = 0.62;
+          hullDark.color.setHex(0x1d252d);
+          hullDark.roughness = 0.78;
+          hullMid.color.setHex(0x2a3540);
+          hullMid.roughness = 0.74;
+          poleMetal.color.setHex(0x232c35);
+          poleMetal.roughness = 0.66;
+          cableMetal.color.setHex(0x3b424c);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.06);
         }
       },
     };
@@ -265,10 +270,10 @@ export class SceneComposerKit {
     crown.receiveShadow = true;
     bGroup.add(crown);
 
-    // Rooftop glowing neon cornices ('_' horizontal silhouette lines)
+    // Weathered brutalist concrete cornices ('_' horizontal structural silhouette lines, zero neon bar blowout)
     const roofTrim = new THREE.Mesh(
       new THREE.BoxGeometry(spec.width * 1.04, 0.2, spec.depth * 1.04),
-      accentMat
+      bank.hullMid
     );
     roofTrim.position.y = spec.height + 0.06;
     bGroup.add(roofTrim);
@@ -279,26 +284,26 @@ export class SceneComposerKit {
         0.15,
         spec.depth * setback * 1.04
       ),
-      secondaryMat
+      bank.poleMetal
     );
     crownTrim.position.y = spec.height + crownH + 0.04;
     bGroup.add(crownTrim);
 
-    // 3. Vertical Corner Neon Light-Pipes ('|' vertical silhouette magnets)
+    // 3. Structural Corner Pilasters ('|' vertical entropic buttresses)
     for (const zCorner of [-1, 1]) {
       const edgePipe = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, spec.height * 0.92, 0.14),
-        zCorner > 0 ? accentMat : secondaryMat
+        new THREE.BoxGeometry(0.16, spec.height * 0.94, 0.16),
+        bank.poleMetal
       );
       edgePipe.position.set(
-        faceSignX * (spec.width * 0.5 + 0.04),
+        faceSignX * (spec.width * 0.5 + 0.03),
         spec.height * 0.48,
-        zCorner * (spec.depth * 0.5 + 0.04)
+        zCorner * (spec.depth * 0.5 + 0.03)
       );
       bGroup.add(edgePipe);
     }
 
-    // 4. Illuminated Multi-Floor Window Matrix (front + street-facing facades)
+    // 4. Sparse, Subdued Cyber-Noir Window Matrix (most windows shuttered/dark; lit panes use restrained value ramp)
     const floors = spec.floors ?? Math.max(4, Math.floor(spec.height / 1.8));
     const cols = 3;
     for (let f = 1; f <= floors; f++) {
@@ -308,54 +313,54 @@ export class SceneComposerKit {
       for (let c = 0; c < cols; c++) {
         const hash = Math.sin((spec.seedIndex + 1) * 37.7 + f * 13.3 + c * 7.1) * 43758.5453;
         const litRoll = hash - Math.floor(hash);
-        if (litRoll < 0.3) continue;
+        if (litRoll < 0.62) continue;
 
         const winMat =
-          litRoll > 0.82 ? secondaryMat : litRoll > 0.54 ? bank.amber : accentMat;
+          litRoll > 0.90 ? secondaryMat : litRoll > 0.76 ? bank.amber : accentMat;
 
         const colOffset = (c - (cols - 1) * 0.5) * (spec.width * 0.27);
         const frontWin = new THREE.Mesh(
-          new THREE.BoxGeometry(spec.width * 0.2, 0.25, 0.08),
+          new THREE.BoxGeometry(spec.width * 0.18, 0.22, 0.06),
           winMat
         );
-        frontWin.position.set(colOffset, fy, spec.depth * 0.5 + 0.05);
+        frontWin.position.set(colOffset, fy, spec.depth * 0.5 + 0.04);
         bGroup.add(frontWin);
 
         const sideOffset = (c - (cols - 1) * 0.5) * (spec.depth * 0.27);
         const sideWin = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, 0.25, spec.depth * 0.2),
+          new THREE.BoxGeometry(0.06, 0.22, spec.depth * 0.18),
           winMat
         );
-        sideWin.position.set(faceSignX * (spec.width * 0.5 + 0.05), fy, sideOffset);
+        sideWin.position.set(faceSignX * (spec.width * 0.5 + 0.04), fy, sideOffset);
         bGroup.add(sideWin);
       }
     }
 
-    // 5. Ground-Floor Storefront Canopy & Illuminated Arcade Glass
+    // 5. Ground-Floor Industrial Canopy & Recessed Shutter/Glass
     if (spec.hasStorefront) {
       const awning = new THREE.Mesh(
-        new THREE.BoxGeometry(0.88, 0.16, spec.depth * 0.86),
-        secondaryMat
+        new THREE.BoxGeometry(0.84, 0.16, spec.depth * 0.84),
+        bank.hullMid
       );
-      awning.position.set(faceSignX * (spec.width * 0.5 + 0.44), 1.38, 0);
+      awning.position.set(faceSignX * (spec.width * 0.5 + 0.42), 1.38, 0);
       awning.castShadow = true;
       awning.receiveShadow = true;
       bGroup.add(awning);
 
       const shopWindow = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 0.94, spec.depth * 0.74),
-        bank.amber
+        new THREE.BoxGeometry(0.08, 0.78, spec.depth * 0.58),
+        bank.cyan
       );
-      shopWindow.position.set(faceSignX * (spec.width * 0.5 + 0.06), 0.7, 0);
+      shopWindow.position.set(faceSignX * (spec.width * 0.5 + 0.05), 0.68, 0);
       bGroup.add(shopWindow);
     }
 
-    // 6. Cantilevered Street Signboards
+    // 6. Cantilevered Industrial Signboards
     if (spec.hasBillboard) {
       const signRig = this.composeNeonSignPanel(
         {
-          height: 3.3,
-          depthSpan: 1.02,
+          height: 3.1,
+          depthSpan: 0.94,
           inwardSign: faceSignX,
           primaryTone: secondaryTone,
           secondaryTone: 'amber',
@@ -370,7 +375,7 @@ export class SceneComposerKit {
       bGroup.add(signRig);
     }
 
-    // 7. Rooftop Spire & Aircraft Warning Beacon
+    // 7. Rooftop Spire & Discreet Warning Beacon
     if (spec.hasAntenna) {
       const spireH = 2.8 + (spec.seedIndex % 3) * 1.1;
       const spire = new THREE.Mesh(
@@ -380,7 +385,7 @@ export class SceneComposerKit {
       spire.position.y = spec.height + crownH + spireH * 0.5;
       bGroup.add(spire);
 
-      const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), bank.magenta);
+      const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), bank.magenta);
       tip.position.y = spec.height + crownH + spireH + 0.12;
       bGroup.add(tip);
     }
@@ -389,8 +394,8 @@ export class SceneComposerKit {
   }
 
   /**
-   * Composes a cantilevered vertical + horizontal cyberpunk neon sign assembly with divider bars
-   * that read as stylized street-sign lettering across both dense and compact ASCII grids.
+   * Composes an entropic industrial signboard chassis (#1D252D / #2A3540) with narrow recessed
+   * ASCII indicator strips so signs never turn into solid glowing blocks.
    */
   public static composeNeonSignPanel(
     spec: {
@@ -406,37 +411,40 @@ export class SceneComposerKit {
     const pMat = this.resolveToneMaterial(bank, spec.primaryTone);
     const sMat = this.resolveToneMaterial(bank, spec.secondaryTone);
 
-    const upperBracket = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.1, 0.12), bank.hullMid);
+    const upperBracket = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.1, 0.12), bank.poleMetal);
     upperBracket.position.set(spec.inwardSign * 0.38, spec.height * 0.32, 0);
     group.add(upperBracket);
 
-    const lowerBracket = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.1, 0.12), bank.hullMid);
+    const lowerBracket = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.1, 0.12), bank.poleMetal);
     lowerBracket.position.set(spec.inwardSign * 0.38, -spec.height * 0.28, 0);
     group.add(lowerBracket);
 
-    // Vertical neon blade sign
+    // Dark weathered signboard housing (#1D252D) with thin ASCII indicator bars
     const vSign = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, spec.height, spec.depthSpan),
-      pMat
+      new THREE.BoxGeometry(0.16, spec.height, spec.depthSpan),
+      bank.hullDark
     );
     vSign.position.set(spec.inwardSign * 0.7, 0, 0);
     vSign.castShadow = true;
     group.add(vSign);
 
-    // Dark horizontal glyph-divider slats so the sign reads as segmented neon typography rather than a flat blob
     for (let i = -1; i <= 1; i++) {
       const divider = new THREE.Mesh(
-        new THREE.BoxGeometry(0.22, 0.11, spec.depthSpan * 1.04),
-        bank.hullDark
+        new THREE.BoxGeometry(0.19, 0.12, spec.depthSpan * 0.82),
+        i === 0 ? sMat : pMat
       );
-      divider.position.set(spec.inwardSign * 0.7, i * (spec.height * 0.26), 0);
+      divider.position.set(spec.inwardSign * 0.7, i * (spec.height * 0.28), 0);
       group.add(divider);
     }
 
-    // Secondary horizontal sign plaque jutting toward the camera
-    const hPlaque = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.68, 0.16), sMat);
-    hPlaque.position.set(spec.inwardSign * 0.54, -spec.height * 0.58, spec.depthSpan * 0.65);
+    // Secondary horizontal steel plaque with narrow punctual indicator
+    const hPlaque = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.56, 0.14), bank.hullMid);
+    hPlaque.position.set(spec.inwardSign * 0.52, -spec.height * 0.58, spec.depthSpan * 0.62);
     group.add(hPlaque);
+
+    const hStrip = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.12, 0.17), pMat);
+    hStrip.position.set(spec.inwardSign * 0.52, -spec.height * 0.58, spec.depthSpan * 0.62);
+    group.add(hStrip);
 
     return group;
   }

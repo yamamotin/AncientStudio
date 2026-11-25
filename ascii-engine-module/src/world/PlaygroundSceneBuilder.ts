@@ -39,40 +39,42 @@ export interface BuiltPlaygroundScene {
     magenta: THREE.MeshStandardMaterial;
     amber: THREE.MeshStandardMaterial;
   };
+  waypointMarker: THREE.Mesh;
   shrineEntityId: EntityId;
   avatarEntityId: EntityId;
   terrainHeightAt: (x: number, z: number) => number;
 }
 
 /**
- * PlaygroundSceneBuilder: Composes the single unified Cyberpunk Boulevard (`[ ASCII REALMS // SCENE ]`)
+ * PlaygroundSceneBuilder: Composes the single unified Cyber-Noir + Entropism Boulevard (`[ ASCII REALMS // SCENE ]`)
  * supporting all three atmospheric states ("Dia" / `'day'`, "Noite" / `'night'`, "Com chuva" / `'rain'`)
- * with calibrated real-time PCF shadows across street, sidewalks, facades, props, and foreground avatar:
- *  - `DepthLayer_Foreground`: High-contrast Netrunner protagonist on crosswalk, street bollards & foreground lamps
- *  - `DepthLayer_Midground`: Streetlamps, wind-swaying banners, overhead catenary cables, sidewalk vending kiosks,
- *    cantilevered signage, multi-story street-wall buildings, elevated overpass, and Holo-Reactor portal
- *  - `DepthLayer_Background`: Perspective-converging arcology megastructures with window matrices & spires
- *  - `DepthLayer_Sky`: Solar/lunar focal disc, nocturnal searchlights, and starfield.
+ * with calibrated real-time PCF shadows, restrained ASCII-faithful lighting, `#0C1217` entropic sky,
+ * `#1A222A` ASCII ground, and `#2A3540` weathered structures:
+ *  - `DepthLayer_Foreground`: Techwear/Darkwear protagonist with mechanical arm, street bollards & foreground lamps
+ *  - `DepthLayer_Midground`: Streetlamps, wind-swaying placards, overhead catenary cables, sidewalk kiosks,
+ *    industrial signage, multi-story weathered brutalist buildings, elevated overpass, and horizon gyro-core
+ *  - `DepthLayer_Background`: Perspective-converging entropic arcology towers with sparse window matrices & spires
+ *  - `DepthLayer_Sky`: Veiled lunar/overcast disc, subtle mist shafts, and desaturated starfield.
  */
 export class PlaygroundSceneBuilder {
   public static terrainHeight(x: number, z: number): number {
-    const distPortal = Math.hypot(x, z + 4.6);
-    if (distPortal < 2.85) {
-      return 0.28;
+    const distPortal = Math.hypot(x, z + 10.4);
+    if (distPortal < 2.65) {
+      return 0.24;
     }
 
-    if (Math.abs(x) < 1.35 && Math.abs(z - 4.15) < 1.1) {
-      return 0.04;
-    }
-
-    if (Math.abs(x) >= 8.8 || z <= -10.8) {
-      return 0.34;
+    if (Math.abs(x) >= 8.8 || z <= -12.2) {
+      return 0.30;
     }
     if (Math.abs(x) >= 4.05) {
-      return 0.2;
+      return 0.16;
     }
 
     return -0.14;
+  }
+
+  public static walkableHeight(x: number, z: number, waterLevel = -0.06): number {
+    return Math.max(waterLevel + 0.04, PlaygroundSceneBuilder.terrainHeight(x, z));
   }
 
   public static build(
@@ -98,20 +100,20 @@ export class PlaygroundSceneBuilder {
       amber: materialBank.amber,
     };
 
-    // 1. Directional Sun/Moon/Storm Shadow Rig + Hemisphere Fill
+    // 1. Directional Cyber-Noir Shadow Rig + Restrained Hemisphere Fill
     const ambientHemi = new THREE.HemisphereLight(
       new THREE.Color(config.palette.coolAmbient),
-      new THREE.Color('#141A2E'),
-      1.24
+      new THREE.Color('#0C1217'),
+      0.86
     );
     scene.add(ambientHemi);
 
     const moonDirLight = new THREE.DirectionalLight(
-      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#E2F9FF'), 0.48),
-      1.95
+      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#B8C7D4'), 0.42),
+      1.68
     );
     moonDirLight.position.set(-13, 24, 10);
-    moonDirLight.target.position.set(0, 1.0, -1.5);
+    moonDirLight.target.position.set(0, 1.0, 2.0);
     scene.add(moonDirLight.target);
 
     moonDirLight.castShadow = config.enableShadows;
@@ -128,7 +130,7 @@ export class PlaygroundSceneBuilder {
     moonDirLight.shadow.radius = 1.55;
     scene.add(moonDirLight);
 
-    // 2. Sidewalks, Neon Curbs & Boulevard Foundation (receives real-time PCF shadows)
+    // 2. Sidewalks, Concrete Curbs & Boulevard Foundation (#1A222A / #2A3540)
     const foundationMaterial = this.buildUrbanStreetFoundation(
       depthRig.midground,
       mapDef,
@@ -138,8 +140,18 @@ export class PlaygroundSceneBuilder {
 
     // 3. Boulevard Street Surface (`PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48)`)
     const { waterMesh, waterMaterial } = this.buildReflectiveWetBoulevard(scene, mapDef, config);
+    waterMesh.userData.skipObjectOutline = true;
 
-    // 4. Streetlamps, Overhead Catenary Cables, Wind-Swaying Neon Signs & Sidewalk Kiosks
+    // Discreet #4A7C7E ASCII ground waypoint ring (visible only while navigating to a clicked/tapped target)
+    const waypointGeo = new THREE.RingGeometry(0.26, 0.36, 16);
+    waypointGeo.rotateX(-Math.PI / 2);
+    const waypointMarker = new THREE.Mesh(waypointGeo, materialBank.magenta);
+    waypointMarker.name = 'GroundWaypointReticle';
+    waypointMarker.visible = false;
+    waypointMarker.userData.skipObjectOutline = true;
+    depthRig.foreground.add(waypointMarker);
+
+    // 4. Streetlamps, Overhead Catenary Cables, Wind-Swaying Placards & Sidewalk Kiosks
     this.buildStreetCorridorProps(
       scene,
       depthRig,
@@ -149,15 +161,15 @@ export class PlaygroundSceneBuilder {
       materialBank
     );
 
-    // 5. Midground Holo-Portal Arch & Elevated Maglev Overpass
+    // 5. Midground Entropic Portal Arch & Elevated Transit Overpass (#2A3540)
     const [shrineX, shrineZ] = mapDef.shrineCenter;
     const shrineGroundY = this.terrainHeight(shrineX, shrineZ);
     this.buildCyberPortalAndOverpass(depthRig, shrineX, shrineGroundY, shrineZ, materialBank);
 
-    // 6. Layered Cyberpunk Cityscape (placed into Foreground / Midground / Background depth groups)
+    // 6. Layered Entropic Cityscape (Foreground / Midground / Background depth groups)
     this.buildCyberCityscape(depthRig, mapDef.buildings, materialBank);
 
-    // 7. Sky Layer: Horizon Solar/Synth Ring, Searchlights & Stars
+    // 7. Sky Layer: Veiled Lunar Disc, Subtle Mist Shafts & Desaturated Stars
     const skyRefs = this.buildCyberSkyBackdrop(depthRig.sky, materialBank);
 
     // 8. Spawn ECS Entities via Blueprint Registry with semantic DepthLayer tracking
@@ -200,23 +212,23 @@ export class PlaygroundSceneBuilder {
 
     const midCyanLight = new THREE.PointLight(
       new THREE.Color(config.palette.coolAmbient),
-      22.0,
-      24.0,
-      1.5
+      3.8,
+      20.0,
+      1.7
     );
     midCyanLight.position.set(-4.4, 3.2, -1.8);
     scene.add(midCyanLight);
     brazierLights.push(midCyanLight);
 
-    const midMagentaLight = new THREE.PointLight(
+    const midAccentLight = new THREE.PointLight(
       new THREE.Color(config.palette.warmLight),
-      22.0,
-      24.0,
-      1.5
+      3.8,
+      20.0,
+      1.7
     );
-    midMagentaLight.position.set(4.4, 3.2, -1.8);
-    scene.add(midMagentaLight);
-    brazierLights.push(midMagentaLight);
+    midAccentLight.position.set(4.4, 3.2, -1.8);
+    scene.add(midAccentLight);
+    brazierLights.push(midAccentLight);
 
     for (const droneSpec of mapDef.drones) {
       const layer = SceneDepthRig.classifyZ(droneSpec.origin[2]);
@@ -239,7 +251,7 @@ export class PlaygroundSceneBuilder {
     }
 
     const [ax, az] = mapDef.avatarSpawn;
-    const ay = Math.max(mapDef.waterLevel + 0.08, this.terrainHeight(ax, az));
+    const ay = PlaygroundSceneBuilder.walkableHeight(ax, az, mapDef.waterLevel);
     const avatarSpawn = blueprintRegistry.spawn(
       'cyber.netrunner-avatar',
       {
@@ -247,7 +259,7 @@ export class PlaygroundSceneBuilder {
         scene,
         parentGroup: depthRig.foreground,
         position: [ax, ay, az],
-        rotationY: 0.18,
+        rotationY: 0.12,
         scale: 1.12,
         layer: 'foreground',
       },
@@ -271,9 +283,11 @@ export class PlaygroundSceneBuilder {
       skyBeams: skyRefs.skyBeams,
       starPoints: skyRefs.starPoints,
       neonMaterials,
+      waypointMarker,
       shrineEntityId,
       avatarEntityId: avatarSpawn.entityId,
-      terrainHeightAt: PlaygroundSceneBuilder.terrainHeight,
+      terrainHeightAt: (x: number, z: number) =>
+        PlaygroundSceneBuilder.walkableHeight(x, z, mapDef.waterLevel),
     };
 
     this.applyAtmosphere(built, config);
@@ -305,91 +319,91 @@ export class PlaygroundSceneBuilder {
     built.torchLight.castShadow = config.enableShadows && atmosphere !== 'day';
 
     if (atmosphere === 'day') {
-      // Crisp sunlit afternoon across the urban canyon with high-contrast diagonal solar shadows
-      built.ambientHemi.color.set('#B6E4FF');
-      built.ambientHemi.groundColor.set('#3A4A62');
-      built.ambientHemi.intensity = 1.72;
+      // Overcast industrial Cyber-Noir daylight: crisp directional shadows over matte #2A3540 structures
+      built.ambientHemi.color.set('#8A99A6');
+      built.ambientHemi.groundColor.set('#1A222A');
+      built.ambientHemi.intensity = 0.92;
 
       built.moonDirLight.position.set(15, 27, 11);
-      built.moonDirLight.color.set('#FFF5DC');
-      built.moonDirLight.intensity = 3.05;
+      built.moonDirLight.color.set('#B4C2CE');
+      built.moonDirLight.intensity = 2.92;
       built.moonDirLight.shadow.radius = 1.15;
 
-      built.foundationMaterial.roughness = 0.62;
-      built.foundationMaterial.metalness = 0.32;
+      built.foundationMaterial.roughness = 0.76;
+      built.foundationMaterial.metalness = 0.24;
 
       built.torchLight.color.set(p.warmCore);
-      built.torchLight.intensity = 18.0;
+      built.torchLight.intensity = 3.2;
       built.brazierLights.forEach((bl, idx) => {
         bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
-        bl.intensity = 8.0;
+        bl.intensity = 1.8;
       });
 
       built.starPoints.visible = false;
       for (const beam of built.skyBeams) {
         beam.visible = false;
       }
-      built.skySunMesh.scale.setScalar(1.12);
+      built.skySunMesh.scale.setScalar(1.06);
     } else if (atmosphere === 'rain') {
-      // Stormy rain-drenched cyberpunk night: misty sky, veiled stars, diffused shadows & intense wet neon
+      // Stormy Cyber-Noir downpour: veiled stars, diffused wet pavement & restrained #4A7C7E / #6E7B87 reflections
       built.ambientHemi.color.set(p.coolAmbient);
-      built.ambientHemi.groundColor.set('#0E1626');
-      built.ambientHemi.intensity = 1.15;
+      built.ambientHemi.groundColor.set('#0C1217');
+      built.ambientHemi.intensity = 0.82;
 
       built.moonDirLight.position.set(-9, 25, 8);
-      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#C4F0FF'), 0.35);
-      built.moonDirLight.intensity = 1.65;
+      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#9AA9B6'), 0.35);
+      built.moonDirLight.intensity = 1.48;
       built.moonDirLight.shadow.radius = 2.35;
 
-      built.foundationMaterial.roughness = 0.24;
-      built.foundationMaterial.metalness = 0.72;
+      built.foundationMaterial.roughness = 0.44;
+      built.foundationMaterial.metalness = 0.42;
 
       built.torchLight.color.set(p.warmLight);
-      built.torchLight.intensity = 54.0;
+      built.torchLight.intensity = 7.6;
       built.brazierLights.forEach((bl, idx) => {
         bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
-        bl.intensity = 25.0;
+        bl.intensity = 4.4;
       });
 
       built.starPoints.visible = true;
-      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.16;
+      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.14;
       for (let i = 0; i < built.skyBeams.length; i++) {
         const beam = built.skyBeams[i]!;
         beam.visible = true;
         const bMat = beam.material as THREE.MeshBasicMaterial;
         bMat.color.set(i === 0 ? p.coolAmbient : p.warmLight);
-        bMat.opacity = 0.28;
+        bMat.opacity = 0.08;
       }
       built.skySunMesh.scale.setScalar(0.96);
     } else {
-      // Clear nocturnal cyberpunk avenue: crisp starlight, moonlight shadows & dry/lightly-damp pavement
+      // Nocturnal Cyber-Noir + Entropism: #0C1217 sky, #1A222A ground, #2A3540 structures & controlled ASCII lights
       built.ambientHemi.color.set(p.coolAmbient);
-      built.ambientHemi.groundColor.set('#141C30');
-      built.ambientHemi.intensity = 1.25;
+      built.ambientHemi.groundColor.set('#0C1217');
+      built.ambientHemi.intensity = 0.88;
 
       built.moonDirLight.position.set(-13, 24, 10);
-      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#E4FAFF'), 0.48);
-      built.moonDirLight.intensity = 1.95;
+      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#B8C7D4'), 0.42);
+      built.moonDirLight.intensity = 1.68;
       built.moonDirLight.shadow.radius = 1.55;
 
-      built.foundationMaterial.roughness = 0.44;
-      built.foundationMaterial.metalness = 0.56;
+      built.foundationMaterial.roughness = 0.68;
+      built.foundationMaterial.metalness = 0.30;
 
       built.torchLight.color.set(p.warmLight);
-      built.torchLight.intensity = 48.0;
+      built.torchLight.intensity = 6.8;
       built.brazierLights.forEach((bl, idx) => {
         bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
-        bl.intensity = 20.0;
+        bl.intensity = 3.6;
       });
 
       built.starPoints.visible = true;
-      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.9;
+      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.55;
       for (let i = 0; i < built.skyBeams.length; i++) {
         const beam = built.skyBeams[i]!;
         beam.visible = true;
         const bMat = beam.material as THREE.MeshBasicMaterial;
         bMat.color.set(i === 0 ? p.coolAmbient : p.warmLight);
-        bMat.opacity = 0.2;
+        bMat.opacity = 0.06;
       }
       built.skySunMesh.scale.setScalar(1.0);
     }
@@ -398,8 +412,8 @@ export class PlaygroundSceneBuilder {
 
     const u = built.waterMaterial.uniforms;
     const wp = atmosphereWaterParams(atmosphere);
-    if (u.uDeepColor) u.uDeepColor.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
-    if (u.uShallowColor) u.uShallowColor.value.set(p.coolAmbient).lerp(new THREE.Color('#8be4ff'), 0.34);
+    if (u.uDeepColor) u.uDeepColor.value.set('#1A222A').lerp(new THREE.Color(p.background), 0.22);
+    if (u.uShallowColor) u.uShallowColor.value.set(p.coolAmbient).lerp(new THREE.Color('#8A99A6'), 0.25);
     if (u.uWarmColor) u.uWarmColor.value.set(p.warmLight);
     if (u.uWarmCoreColor) u.uWarmCoreColor.value.set(p.warmCore);
     if (u.uCursorColor) u.uCursorColor.value.set(p.cursorLight);
@@ -428,10 +442,10 @@ export class PlaygroundSceneBuilder {
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
 
-    const roadBed = new THREE.Color('#10192B');
-    const sidewalkConcrete = new THREE.Color('#273852');
-    const terraceSteel = new THREE.Color('#1D2C42');
-    const tileHighlight = new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.45);
+    const roadBed = new THREE.Color('#1A222A');
+    const sidewalkConcrete = new THREE.Color('#2A3540');
+    const terraceSteel = new THREE.Color('#202933');
+    const tileHighlight = new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.28);
     const tmpColor = new THREE.Color();
 
     for (let i = 0; i < pos.count; i++) {
@@ -446,9 +460,9 @@ export class PlaygroundSceneBuilder {
         const onPaver =
           Math.abs((x % 1.5) + 1.5) % 1.5 < 0.12 || Math.abs((z % 1.5) + 1.5) % 1.5 < 0.12;
         if (onPaver && Math.abs(x) < 10.5) {
-          tmpColor.copy(sidewalkConcrete).lerp(tileHighlight, 0.52);
+          tmpColor.copy(sidewalkConcrete).lerp(tileHighlight, 0.35);
         } else {
-          tmpColor.copy(y > 0.25 ? terraceSteel : sidewalkConcrete);
+          tmpColor.copy(y > 0.22 ? terraceSteel : sidewalkConcrete);
         }
       }
 
@@ -462,23 +476,25 @@ export class PlaygroundSceneBuilder {
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.44,
-      metalness: 0.56,
+      roughness: 0.68,
+      metalness: 0.30,
       flatShading: true,
     });
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
+    mesh.userData.skipObjectOutline = true;
     targetGroup.add(mesh);
 
-    const leftCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), bank.cyan);
-    leftCurb.position.set(-4.02, 0.24, -2.5);
+    // Weathered #2A3540 concrete curbs (replaces legacy 28m glowing neon curb bars)
+    const leftCurb = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 28.0), bank.hullMid);
+    leftCurb.position.set(-4.02, 0.20, -2.5);
     leftCurb.castShadow = true;
     leftCurb.receiveShadow = true;
     targetGroup.add(leftCurb);
 
-    const rightCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), bank.magenta);
-    rightCurb.position.set(4.02, 0.24, -2.5);
+    const rightCurb = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 28.0), bank.hullMid);
+    rightCurb.position.set(4.02, 0.20, -2.5);
     rightCurb.castShadow = true;
     rightCurb.receiveShadow = true;
     targetGroup.add(rightCurb);
@@ -645,12 +661,12 @@ export class PlaygroundSceneBuilder {
     stepBase.receiveShadow = true;
     group.add(stepBase);
 
-    const stepNeonRing = new THREE.Mesh(
+    const stepConcreteRing = new THREE.Mesh(
       new THREE.CylinderGeometry(2.35, 2.42, 0.1, 8),
-      bank.amber
+      bank.hullMid
     );
-    stepNeonRing.position.y = 0.34;
-    group.add(stepNeonRing);
+    stepConcreteRing.position.y = 0.34;
+    group.add(stepConcreteRing);
 
     for (const side of [-1, 1]) {
       const tower = new THREE.Mesh(new THREE.BoxGeometry(0.76, 5.8, 0.78), bank.hullDark);
@@ -659,12 +675,12 @@ export class PlaygroundSceneBuilder {
       tower.receiveShadow = true;
       group.add(tower);
 
-      const vStrip = new THREE.Mesh(
+      const vPilaster = new THREE.Mesh(
         new THREE.BoxGeometry(0.14, 5.3, 0.84),
-        side < 0 ? bank.cyan : bank.magenta
+        bank.poleMetal
       );
-      vStrip.position.set(side * 2.1, 2.95, -0.2);
-      group.add(vStrip);
+      vPilaster.position.set(side * 2.1, 2.95, -0.2);
+      group.add(vPilaster);
     }
 
     const headerBeam = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.72, 0.96), bank.hullMid);
@@ -673,24 +689,26 @@ export class PlaygroundSceneBuilder {
     headerBeam.receiveShadow = true;
     group.add(headerBeam);
 
-    const headerNeon = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.16, 1.04), bank.cyan);
-    headerNeon.position.set(0, 6.0, -0.2);
-    group.add(headerNeon);
+    // Narrow discreet #4A7C7E architectural seam (punctual use, never blows out)
+    const headerSeam = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.09, 1.01), bank.magenta);
+    headerSeam.position.set(0, 6.0, -0.2);
+    group.add(headerSeam);
 
     depthRig.midground.add(group);
 
+    // Weathered #2A3540 brutalist transit overpass
     const overpass = new THREE.Group();
-    overpass.position.set(0, 6.8, -8.6);
+    overpass.position.set(0, 6.8, -12.6);
     const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(20.0, 0.62, 1.4), bank.hullMid);
     bridgeDeck.castShadow = true;
     bridgeDeck.receiveShadow = true;
     overpass.add(bridgeDeck);
 
-    const upperRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.14, 1.48), bank.amber);
+    const upperRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.14, 1.48), bank.poleMetal);
     upperRail.position.y = 0.36;
     overpass.add(upperRail);
 
-    const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.12, 1.48), bank.magenta);
+    const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.12, 1.48), bank.hullDark);
     lowerRail.position.y = -0.34;
     overpass.add(lowerRail);
     depthRig.midground.add(overpass);
@@ -738,12 +756,14 @@ export class PlaygroundSceneBuilder {
     skyBeams: THREE.Mesh[];
     starPoints: THREE.Points;
   } {
-    const skyHaloMesh = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.35, 32), bank.magenta);
-    skyHaloMesh.position.set(0, 13.8, -28.5);
+    const skyHaloMesh = new THREE.Mesh(new THREE.RingGeometry(2.9, 3.18, 28), bank.poleMetal);
+    skyHaloMesh.position.set(0, 14.2, -29.0);
+    skyHaloMesh.userData.skipObjectOutline = true;
     skyGroup.add(skyHaloMesh);
 
-    const skySunMesh = new THREE.Mesh(new THREE.CircleGeometry(3.25, 28), bank.amber);
-    skySunMesh.position.set(0, 13.8, -28.7);
+    const skySunMesh = new THREE.Mesh(new THREE.CircleGeometry(2.65, 24), bank.hullMid);
+    skySunMesh.position.set(0, 14.2, -29.2);
+    skySunMesh.userData.skipObjectOutline = true;
     skyGroup.add(skySunMesh);
 
     const skyBeams: THREE.Mesh[] = [];
@@ -751,21 +771,22 @@ export class PlaygroundSceneBuilder {
       const beamMat = new THREE.MeshBasicMaterial({
         color: sx < 0 ? bank.cyan.color : bank.magenta.color,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.06,
       });
-      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.14, 26, 6), beamMat);
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.12, 24, 6), beamMat);
       beam.position.set(sx, 15.0, -20.0);
       beam.rotation.z = sx < 0 ? -0.1 : 0.1;
+      beam.userData.skipObjectOutline = true;
       skyGroup.add(beam);
       skyBeams.push(beam);
     }
 
-    const starCount = 160;
+    const starCount = 140;
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
-    const cCyan = new THREE.Color('#8AF6FF');
-    const cMag = new THREE.Color('#FF7AD9');
-    const cAmb = new THREE.Color('#FFD97D');
+    const cSteel = new THREE.Color('#6E7B87');
+    const cMist = new THREE.Color('#8A99A6');
+    const cSlate = new THREE.Color('#3B424C');
 
     for (let i = 0; i < starCount; i++) {
       const h1 = Math.sin(i * 127.1) * 43758.5453;
@@ -777,7 +798,7 @@ export class PlaygroundSceneBuilder {
       positions[i * 3 + 1] = 8.2 + ry * 25;
       positions[i * 3 + 2] = -22 - ((i * 0.37) % 18);
 
-      const c = i % 5 === 0 ? cAmb : i % 3 === 0 ? cMag : cCyan;
+      const c = i % 5 === 0 ? cMist : i % 2 === 0 ? cSteel : cSlate;
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
@@ -788,14 +809,15 @@ export class PlaygroundSceneBuilder {
     starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const starMat = new THREE.PointsMaterial({
-      size: 0.38,
+      size: 0.32,
       vertexColors: true,
       fog: false,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.55,
     });
 
     const starPoints = new THREE.Points(starGeo, starMat);
+    starPoints.userData.skipObjectOutline = true;
     skyGroup.add(starPoints);
 
     return { skySunMesh, skyHaloMesh, skyBeams, starPoints };

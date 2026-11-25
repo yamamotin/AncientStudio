@@ -47,6 +47,9 @@ export interface RotationTargetComponent {
 export interface ArticulatedParts {
   leftWing?: THREE.Object3D;
   rightWing?: THREE.Object3D;
+  leftArm?: THREE.Object3D;
+  rightArm?: THREE.Object3D;
+  rightForearm?: THREE.Object3D;
   head?: THREE.Object3D;
   leftFoot?: THREE.Object3D;
   rightFoot?: THREE.Object3D;
@@ -67,7 +70,13 @@ export interface AnimationStateComponent {
   phase: number;
   /** Reaction energy [0..1] boosted by pointer movement or interaction */
   excitement: number;
-  /** Optional articulated sub-meshes (e.g. Tux wings/head/feet or holo-ring) */
+  /** True while entity is actively walking across the stage ground */
+  isMoving?: boolean;
+  /** Smoothly damped [0..1] blend weight from idle stance (0) to walk cycle (1) */
+  locomotionBlend?: number;
+  /** Integrated walk-stride cycle phase in radians */
+  stridePhase?: number;
+  /** Optional articulated sub-meshes (e.g. Tux wings/head/feet, Darkwear limbs/mechanical arm) */
   parts?: ArticulatedParts;
 }
 
@@ -151,6 +160,37 @@ export interface InputStateComponent {
   boundsRadius: number;
 }
 
+export interface NavigationTargetComponent {
+  /** Target world X coordinate on the ground plane */
+  targetX: number;
+  /** Target world Z coordinate on the ground plane */
+  targetZ: number;
+  /** Whether click/tap ground navigation is currently active */
+  active: boolean;
+  /** Ground walking speed in world units per second */
+  moveSpeed: number;
+  /** Arrival stop threshold in world units */
+  arrivalRadius: number;
+  /** Walkable stage bounds clamping */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface CameraFollowComponent {
+  /** Camera position offset relative to entity ground anchor */
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  /** Vertical look-at height above entity ground anchor (torso/chest center) */
+  lookAtOffsetY: number;
+  /** Exponential damping sharpness (1/s) keeping camera stably centered */
+  followSharpness: number;
+  /** Whether initial snap onto entity has completed */
+  initialized: boolean;
+}
+
 export interface ComponentMap {
   Transform: TransformComponent;
   Velocity: VelocityComponent;
@@ -163,6 +203,8 @@ export interface ComponentMap {
   DepthLayer: DepthLayerComponent;
   LifecycleTag: LifecycleTagComponent;
   InputState: InputStateComponent;
+  NavigationTarget: NavigationTargetComponent;
+  CameraFollow: CameraFollowComponent;
 }
 
 export type ComponentName = keyof ComponentMap;
@@ -182,6 +224,8 @@ export class World {
     DepthLayer: new Map(),
     LifecycleTag: new Map(),
     InputState: new Map(),
+    NavigationTarget: new Map(),
+    CameraFollow: new Map(),
   };
 
   public createEntity(): EntityId {

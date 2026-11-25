@@ -72,17 +72,17 @@ export interface PlaygroundMapDefinition {
 
 const CYBERPUNK_CITADEL_MAP: PlaygroundMapDefinition = {
   id: 'cyberpunk-citadel',
-  title: 'Neo-District 09 // Unified Cyberpunk Boulevard',
+  title: 'Sector 09 // Entropic Cyber-Noir Boulevard',
   themeStyle: 'cyberpunk',
   terrainSize: 60,
   terrainSegments: 64,
   waterSize: 68,
   waterLevel: -0.06,
   fogDensity: 0.017,
-  // Street-level perspective camera framing foreground streetlamps, central protagonist, and towering avenue canyon
-  cameraAnchor: [0.0, 3.35, 13.4],
-  cameraLookAt: [0.0, 2.55, -5.5],
-  shrineCenter: [0, -4.6],
+  // 106° FOV character-centered perspective framing the Techwear protagonist and entropic boulevard canyon
+  cameraAnchor: [0.0, 2.25, 7.85],
+  cameraLookAt: [0.0, 1.08, 4.15],
+  shrineCenter: [0, -10.4],
   avatarSpawn: [0.0, 4.15],
   buildings: [
     // === FOREGROUND CANYON FRAMING BUILDINGS (z: +3.5 .. +7.2) ===

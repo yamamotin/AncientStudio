@@ -5,6 +5,7 @@ import { EngineLoop } from './EngineLoop';
 import { LifecycleManager } from './LifecycleManager';
 import { computeAdaptiveResolution } from './ResolutionController';
 import {
+  CameraFollowSystem,
   InputSystem,
   MovementRotationSystem,
   NeonPulseSystem,
@@ -109,6 +110,7 @@ export class AsciiEngineCore {
     const baseDefaults =
       initialConfig?.mode === 'mascot'
         ? mergeEngineConfig(DEFAULT_ENGINE_CONFIG, {
+            fov: 38,
             bloomIntensity: 0.08,
             dofStrength: 0.0,
             blockBlendWeight: 0.0,
@@ -258,10 +260,11 @@ export class AsciiEngineCore {
     this.scene = built.scene;
     this.primaryEntityId = built.avatarEntityId;
 
-    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 46;
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 106;
     const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.5, 110);
     camera.position.set(...mapDef.cameraAnchor);
     camera.lookAt(...mapDef.cameraLookAt);
+    camera.updateMatrixWorld();
     this.camera = camera;
     this.lastAutoPlaygroundFov = typeof this.config.fov === 'number' ? null : initialFov;
 
@@ -271,7 +274,7 @@ export class AsciiEngineCore {
       baseCameraPos: mapDef.cameraAnchor,
       lookAtTarget: mapDef.cameraLookAt,
       particleOrigin: mapDef.shrineCenter,
-      particleCount: 240,
+      particleCount: 200,
     });
 
     const windSys = new WindSystem(this.config.windStrength);
@@ -279,13 +282,17 @@ export class AsciiEngineCore {
 
     // Deterministic priority-sorted ECS pipeline
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
+      .addSystem(new InputSystem(pointerInput, keyboardInput, camera), 10)
       .addSystem(new PatrolSystem(), 15)
-      .addSystem(new MovementRotationSystem(built.terrainHeightAt), 20)
+      .addSystem(new MovementRotationSystem(built.terrainHeightAt, built.waypointMarker), 20)
       .addSystem(windSys, 25)
       .addSystem(new AnimationSystem(), 30)
       .addSystem(new NeonPulseSystem(), 35)
+      .addSystem(new CameraFollowSystem(camera), 38)
       .addSystem(new RenderSyncSystem(), 40);
+
+    // Snap camera & renderable transforms to centered avatar before first frame
+    systemRunner.run(ecsWorld, { dt: 0, elapsed: 0 });
   }
 
   private initMascotStage(
@@ -801,8 +808,7 @@ export class AsciiEngineCore {
 
     const aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
     this.camera.aspect = aspect;
-    // Preserve explicit custom FOV (e.g. 106°) when configured via `config.fov` or mutated on `camera.fov`;
-    // otherwise apply responsive default playground FOV
+    // Preserve explicit custom FOV (default 106° in playground) when configured via `config.fov` or mutated on `camera.fov`
     if (typeof this.config.fov === 'number') {
       this.camera.fov = this.config.fov;
       this.lastAutoPlaygroundFov = null;
@@ -811,7 +817,7 @@ export class AsciiEngineCore {
         this.lastAutoPlaygroundFov !== null &&
         Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
       if (!wasCustomizedExternally) {
-        const autoFov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+        const autoFov = 106;
         this.camera.fov = autoFov;
         this.lastAutoPlaygroundFov = autoFov;
       }
