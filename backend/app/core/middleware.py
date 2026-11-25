@@ -16,7 +16,8 @@ from app.core.security import (
     sha256_hex,
 )
 from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.types import ASGIApp
 
 _EXEMPT_RATE_LIMIT_PATHS = frozenset({"/api/v1/health", "/api/v1/build"})
 
@@ -94,12 +95,22 @@ def _apply_quota_headers(headers: dict[str, str], evaluation: ScopedQuotaEvaluat
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Active HTTP middleware enforcing per-scope/IP rate quotas on ``/api/*`` routes."""
 
-    def __init__(self, app, *, limiter: ScopedRateLimiter, enabled: bool = True) -> None:  # type: ignore[no-untyped-def]
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        limiter: ScopedRateLimiter,
+        enabled: bool = True,
+    ) -> None:
         super().__init__(app)
         self._limiter = limiter
         self._enabled = enabled
 
-    async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[no-untyped-def]
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
         path = request.url.path
         if not self._enabled or not path.startswith("/api/") or path in _EXEMPT_RATE_LIMIT_PATHS:
             return await call_next(request)
@@ -142,7 +153,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Attach hardened OWASP baseline HTTP headers while preserving static preview embedding."""
 
-    async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[no-untyped-def]
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
         response = await call_next(request)
         headers = response.headers
         headers.setdefault("X-Content-Type-Options", "nosniff")
