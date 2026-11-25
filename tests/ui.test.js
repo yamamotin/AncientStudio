@@ -17,6 +17,10 @@ const css = read('assets/css/style.css');
 const i18n = read('assets/js/i18n.js');
 const pt = JSON.parse(read('assets/i18n/pt-br.json'));
 const en = JSON.parse(read('assets/i18n/en.json'));
+const heroSection = html.slice(
+  html.indexOf('<section id="top"'),
+  html.indexOf('<!-- 2. CI/CD PIPELINE SIMULATOR -->')
+);
 const stackSection = html.slice(
   html.indexOf('<section id="stack"'),
   html.indexOf('<!-- 6. INTERACTIVE CONSOLE -->')
@@ -64,19 +68,19 @@ test('uploaded portrait is a local, responsive asset with bilingual alt text', (
     'loading="lazy"'
   ]);
   assert.ok(pt['hero.portraitAlt'] && en['hero.portraitAlt'], 'portrait alt is translated');
-  includesAll(html, ['class="hero-name" aria-hidden="true">ERON YAMAMOTO</p>']);
+  assert.doesNotMatch(heroSection, /ERON YAMAMOTO/, 'no duplicate plain-text name above the ASCII banner');
   includesAll(css, [
-    '.hero-name',
     '.hero-portrait',
     'aspect-ratio: 3 / 4',
     'object-fit: cover',
     'grid-template-columns: clamp(8rem, 18vw, 11rem) minmax(0, 1fr)',
-    'grid-row: 3 / span 4'
+    'grid-row: 2 / span 4',
+    'margin: var(--space-5) 0 0'
   ]);
   assert.doesNotMatch(css, /\.hero-portrait\s*\{[^}]*float:/s);
   assert.ok(
-    css.indexOf('.hero-name') < css.indexOf('.banner-frame'),
-    'name is rendered before the portrait anchor'
+    heroSection.indexOf('class="banner-frame"') < heroSection.indexOf('class="hero-portrait"'),
+    'ASCII banner is the only visible name heading before the portrait'
   );
 });
 
@@ -124,21 +128,22 @@ test('scene modes replace the old preset selector with day, night and rain', () 
   includesAll(main, ['data-scene-mode', 'scene.setPreset(activeMode)', 'aria-pressed']);
 });
 
-test('page brightness defaults to 110% and updates live', () => {
+test('page brightness defaults to 130%, allows up to 150%, and updates live', () => {
   assert.doesNotMatch(html, /contrast-control|contrast\.label|--page-contrast/i);
   includesAll(html, [
     'id="brightness-control"',
     'type="range"',
     'min="100"',
-    'max="130"',
+    'max="150"',
     'step="5"',
-    'value="110"',
+    'value="130"',
     'id="brightness-value"',
     'data-i18n-attr="aria-label:brightness.label"'
   ]);
+  assert.match(html, /<output id="brightness-value" for="brightness-control">130%<\/output>/);
   assert.ok(pt['brightness.label'] && en['brightness.label'], 'brightness label is translated');
   includesAll(css, [
-    '--page-brightness: 1.1',
+    '--page-brightness: 1.3',
     'brightness(var(--page-brightness))',
     '.brightness-control input[type="range"]'
   ]);
