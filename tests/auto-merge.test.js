@@ -70,6 +70,25 @@ test('agent pipeline deletes the merged branch and dispatches both deploys', () 
   ]);
 });
 
+test('permanent order is merge, resolve conflicts, delete branch, redeploy', () => {
+  includesAll(helper, [
+    'PERMANENT_ORDER="merge,resolve-conflicts,delete-branch,redeploy"',
+    'PHASE 1/3 — MERGE',
+    'PHASE 2/3 — DELETE BRANCH',
+    'PHASE 3/3 — REDEPLOY',
+    'delete_merged_branch "$head_ref"',
+    'redeploy "$merged_main"'
+  ]);
+
+  const markers = [
+    'PHASE 1/3 — MERGE',
+    'PHASE 2/3 — DELETE BRANCH',
+    'PHASE 3/3 — REDEPLOY'
+  ].map((marker) => helper.indexOf(marker));
+  assert.ok(markers[0] >= 0 && markers[0] < markers[1] && markers[1] < markers[2], 'phase order');
+  assert.match(docs, /Ordem permanente:.*merge.*resolve-conflicts.*delete-branch.*redeploy/s);
+});
+
 test('Pages workflow uses official actions with explicit permissions and environment', () => {
   includesAll(pages, [
     'pages: write',

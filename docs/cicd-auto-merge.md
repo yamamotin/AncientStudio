@@ -12,7 +12,9 @@ Os workflows continuam disparando automaticamente:
 | `pr-tests.yml` | `pull_request`, `push` em `main`, `workflow_dispatch` |
 | `auto-merge.yml` | `workflow_run` completando nos três workflows de teste + `workflow_dispatch` |
 
-`auto-merge.yml` chama `scripts/auto-merge-verified.sh`, que executa o fluxo completo:
+`auto-merge.yml` chama `scripts/auto-merge-verified.sh`, que executa o fluxo completo.
+
+**Ordem permanente:** `merge` (com `resolve-conflicts` dentro desta fase) → `delete-branch` → `redeploy`. Isso vale para toda atividade pronta e não deve ser invertido: o pinguim/layout e quaisquer outros arquivos só são publicados depois que o merge existe, a branch foi limpa e os dois deploys foram disparados novamente.
 
 1. encontra o PR aberto contra `main` pelo SHA exato do commit;
 2. ignora PRs de fork, drafts e commits que mudaram depois do check;
