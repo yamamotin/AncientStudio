@@ -8,3 +8,10 @@ __pycache__
 **/dist-demo
 **/.vite
 _site
+*.blend
+*.blend1
+*.fbx
+*.obj
+*.orig.glb
+*.raw.glb
+*.uncompressed.glb

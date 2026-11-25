@@ -368,8 +368,13 @@ class PortfolioHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
 
+class PortfolioHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 64
+    daemon_threads = True
+
+
 def create_server(host=HOST, port=PORT):
-    return ThreadingHTTPServer((host, port), PortfolioHandler)
+    return PortfolioHTTPServer((host, port), PortfolioHandler)
 
 
 def main():

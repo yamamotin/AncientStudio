@@ -48,6 +48,16 @@ import {
 } from './world/MascotStageBuilder';
 import { PlaygroundSceneBuilder } from './world/PlaygroundSceneBuilder';
 import { SceneComposerKit, SceneDepthRig } from './world/SceneComposerKit';
+import {
+  DEFAULT_DRACO_DECODER_PATH,
+  DEFAULT_SCENE_GLB_URL,
+  type LoadedSceneGlbAsset,
+  REQUIRED_SCENE_NLA_TRACKS,
+  REQUIRED_SCENE_ROOT_NODES,
+  SceneGlbLoader,
+  type SceneGlbLoaderOptions,
+  type SceneGlbLoadMetrics,
+} from './world/SceneGlbLoader';
 import type {
   AtmosphereMode,
   DeepPartial,
@@ -76,6 +86,7 @@ export type {
   EngineLifecycleState,
   EngineStats,
   LifecycleCallbacks,
+  LoadedSceneGlbAsset,
   NavigationTargetComponent,
   ObjectOutlineHandle,
   ObjectOutlineOptions,
@@ -86,6 +97,8 @@ export type {
   ResolutionProfile,
   ResolvedObjectOutlineState,
   ResolutionTier,
+  SceneGlbLoaderOptions,
+  SceneGlbLoadMetrics,
   SceneMode,
   ThemePalette,
 };
@@ -97,14 +110,18 @@ export {
   clearObjectOutline,
   createGlyphAtlas,
   DEFAULT_ASCII_RAMP,
+  DEFAULT_DRACO_DECODER_PATH,
   DEFAULT_ENGINE_CONFIG,
   DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
   DEFAULT_PALETTE,
+  DEFAULT_SCENE_GLB_URL,
   EngineLoop,
   ensureWeldedOutlineNormals,
   getObjectOutlineState,
   LifecycleManager,
   OUTLINE_SHELL_NAME,
+  REQUIRED_SCENE_NLA_TRACKS,
+  REQUIRED_SCENE_ROOT_NODES,
   computeAdaptiveResolution,
   detectResolutionTier,
   ResolutionTransitionController,
@@ -125,6 +142,7 @@ export {
   PlaygroundSceneBuilder,
   SceneComposerKit,
   SceneDepthRig,
+  SceneGlbLoader,
   TuxEntityFactory,
   PlaygroundEntityFactory,
   PointerInput,
