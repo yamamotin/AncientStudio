@@ -928,12 +928,35 @@ test('neofetch mascot stage builds minimalist #13222E backdrop + #1D2B36 floor w
   const coatLuma = 0.2126 * coatCol.r + 0.7152 * coatCol.g + 0.0722 * coatCol.b;
   assert.ok(coatLuma < bgLuma && bgLuma < flLuma, 'Color-theory value order holds: Tux coat < #13222E backdrop < #1D2B36 floor');
 
-  // 3. Balanced studio lighting, soft floor shadow, and controlled diffused reflection
+  // 3. Smooth facet-free Tux geometry & non-intersecting belly envelope (zero hard facets or Z-fighting blotches)
+  const tuxMeshes = tuxRoot.children.filter((c) => c.isMesh);
+  const bellyMesh = tuxMeshes[1];
+  assert.equal(torsoMesh.material.flatShading, false, 'Torso uses smooth normal shading (no hard facets)');
+  assert.equal(bellyMesh.material.flatShading, false, 'Belly uses smooth normal shading (no hard facets)');
+  const torsoFrontZ = torsoMesh.position.z + torsoMesh.geometry.parameters.radius * torsoMesh.scale.z;
+  const bellyFrontZ = bellyMesh.position.z + bellyMesh.geometry.parameters.radius * bellyMesh.scale.z;
+  assert.ok(bellyFrontZ > torsoFrontZ + 0.04, 'Belly apex sits cleanly proud of torso front to eliminate blotchy Z-cutouts');
+
+  // 4. Full-viewport ASCII floor & backdrop composite + balanced key/fill/rim lights, soft shadow & diffused reflection
+  const asciiShaderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  includesAll(asciiShaderSrc, [
+    'uMascotStudio',
+    'mascotGlyphMask',
+    'mascotCompositeMask',
+    'floorWeave',
+    'cellSubstrate',
+    'glyphInk',
+    'depthEdgeMag'
+  ]);
   assert.equal(stage.keyLight.castShadow, true, 'Main key light casts soft floor shadow');
+  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light prevents belly blotches');
   assert.ok(stage.rimLight && stage.rimLight.intensity > 0 && stage.rimLight.intensity < 1.5, 'Discreet rim light separates dark edges');
   includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
-  // 4. Adapter + CSS keep exact palette, shadows enabled, and pointer-inert stage
+  // 5. Adapter + CSS keep exact palette, shadows enabled, and pointer-inert stage
   includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'enableShadows: true']);
   includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
 
