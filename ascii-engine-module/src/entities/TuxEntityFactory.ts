@@ -175,6 +175,8 @@ export class TuxEntityFactory {
         flatShading: true,
       });
       const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.16, 12), plinthMat);
+      plinth.name = 'TuxShowcasePlinth';
+      plinth.userData.isShowcasePedestal = true;
       plinth.position.set(0, -0.06, 0.08);
       plinth.receiveShadow = true;
       rootGroup.add(plinth);

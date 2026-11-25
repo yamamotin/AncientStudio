@@ -25,6 +25,14 @@ import { TuxEntityFactory } from './entities/TuxEntityFactory';
 import { KeyboardInput } from './input/KeyboardInput';
 import { PointerInput } from './input/PointerInput';
 import { createGlyphAtlas } from './shaders/glyphAtlas';
+import {
+  applyObjectOutline,
+  clearObjectOutline,
+  DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
+  ensureWeldedOutlineNormals,
+  getObjectOutlineState,
+  OUTLINE_SHELL_NAME,
+} from './shaders/objectOutline';
 import { VfxController } from './vfx/VfxController';
 import { MapLoader } from './world/MapLoader';
 import { PlaygroundSceneBuilder } from './world/PlaygroundSceneBuilder';
@@ -36,8 +44,13 @@ import type {
   EngineLifecycleState,
   EngineStats,
   LifecycleCallbacks,
+  ObjectOutlineHandle,
+  ObjectOutlineOptions,
+  OutlineColorInput,
+  OutlineTargetSelector,
   PartialEngineConfig,
   ResolutionProfile,
+  ResolvedObjectOutlineState,
   ResolutionTier,
   SceneMode,
   ThemePalette,
@@ -50,21 +63,32 @@ export type {
   EngineLifecycleState,
   EngineStats,
   LifecycleCallbacks,
+  ObjectOutlineHandle,
+  ObjectOutlineOptions,
+  OutlineColorInput,
+  OutlineTargetSelector,
   PartialEngineConfig,
   ResolutionProfile,
+  ResolvedObjectOutlineState,
   ResolutionTier,
   SceneMode,
   ThemePalette,
 };
 
 export {
+  applyObjectOutline,
   AsciiEngineCore,
+  clearObjectOutline,
   createGlyphAtlas,
   DEFAULT_ASCII_RAMP,
   DEFAULT_ENGINE_CONFIG,
+  DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
   DEFAULT_PALETTE,
   EngineLoop,
+  ensureWeldedOutlineNormals,
+  getObjectOutlineState,
   LifecycleManager,
+  OUTLINE_SHELL_NAME,
   computeAdaptiveResolution,
   detectResolutionTier,
   ResolutionTransitionController,
@@ -162,6 +186,34 @@ export class AsciiSceneEngine {
   /** Returns current `{ yaw, pitch }` in radians of the primary entity (e.g. Tux in mascot mode). */
   public getPrimaryEntityAngles(): { yaw: number; pitch: number } | null {
     return this.core.getPrimaryEntityAngles();
+  }
+
+  /**
+   * Applies or updates a configurable silhouette outline on a specific target object on demand
+   * (`THREE.Object3D`, `'primary'`, object name in scene, or ECS `EntityId`), accepting
+   * `thickness`/`width`, `enabled`/`visible`, `intensity`, `opacity`, and an optional `highlightColor`/`color`.
+   */
+  public setObjectOutline(
+    target: OutlineTargetSelector,
+    options?: ObjectOutlineOptions
+  ): ObjectOutlineHandle | null {
+    return this.core.setObjectOutline(target, options);
+  }
+
+  /**
+   * Removes and disposes the outline from a specific target (or all outlined targets when omitted).
+   */
+  public clearObjectOutline(target?: OutlineTargetSelector): number {
+    return this.core.clearObjectOutline(target);
+  }
+
+  /**
+   * Reads the active outline configuration snapshot for a specific target, or `null` if none is set.
+   */
+  public getObjectOutlineState(
+    target: OutlineTargetSelector
+  ): ResolvedObjectOutlineState | null {
+    return this.core.getObjectOutlineState(target);
   }
 }
 
