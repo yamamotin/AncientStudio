@@ -161,6 +161,11 @@ resolve_branch() {
 resolve_attempts=0
 ready_attempts=0
 while :; do
+  if [ "$(pr_field '.state')" = "MERGED" ]; then
+    log "PR #$PR_NUMBER is already merged; another helper run owns cleanup/deploy."
+    exit 0
+  fi
+
   head_sha=$(pr_field '.head.sha')
   head_ref=$(pr_field '.head.ref')
 

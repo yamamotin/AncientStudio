@@ -32,6 +32,7 @@ test('auto-merge has explicit write permissions and no approval step', () => {
     'contents: write',
     'pull-requests: write',
     'checks: read',
+    'actions: write',
     'scripts/auto-merge-verified.sh'
   ]);
   assert.doesNotMatch(workflow, /pr review\s+.*approve|gh pr review/i);
@@ -64,7 +65,8 @@ test('agent pipeline deletes the merged branch and dispatches both deploys', () 
     '--ref main',
     '-f sha=',
     'Merge already in progress',
-    'skipping cleanup and deploys'
+    'skipping cleanup and deploys',
+    'already merged'
   ]);
 });
 

@@ -29,7 +29,9 @@ Não há aprovação automática: o GitHub impede aprovar o próprio PR (`Review
 
 GitHub **não inicia novos workflow runs** para eventos gerados pelo `GITHUB_TOKEN` (a exceção é `workflow_dispatch`/`repository_dispatch`). Assim, quando o auto-merge mesclava um PR, o push resultante em `main` não disparava `pages.yml` nem o job de deploy da Vercel: o Pages ficou preso em `df9cb70` enquanto a Vercel, que usa webhook Git próprio, já estava em `9e22e14`.
 
-A correção é o passo 8 acima: depois de mesclar e apagar a branch, o helper dispara explicitamente os dois workflows de deploy pelo SHA do merge. Ambos aceitam o input `sha` e fazem checkout/commit exato, então não há corrida com um push posterior.
+A correção é o passo 8 acima: depois de mesclar e apagar a branch, o helper dispara explicitamente os dois workflows de deploy pelo SHA do merge. Ambos aceitam o input `sha` e fazem checkout/commit exato, então não há corrida com um push posterior. O `auto-merge.yml` concede `actions: write` ao `GITHUB_TOKEN`, sem o qual `gh workflow run` falha com 403 após o merge.
+
+Se duas execuções do helper observarem o mesmo PR, a que perder a corrida vê o estado `MERGED` e sai sem duplicar limpeza ou deploy.
 
 A Vercel também é publicada pelo GitHub Action `ci-cd.yml` quando `VERCEL_TOKEN`, `VERCEL_ORG_ID` e `VERCEL_PROJECT_ID` existem; sem esses secrets, o job registra `notice` e a integração Git nativa da Vercel continua fazendo o deploy.
 
