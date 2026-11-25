@@ -4,8 +4,8 @@ Motor gráfico **3D ASCII em tempo real** (WebGL2 + Three.js + Post-Processing G
 
 O pacote entrega dois modos nativos (`mode: 'playground' | 'mascot'`) sobre o mesmo núcleo determinístico:
 
-- **Cyberpunk Neo-Sector Boulevard (`mode: 'playground'`)**: avenida urbana tridimensional unificada (`cyberpunk-citadel`) organizada em 4 planos semânticos de profundidade (`foreground`, `midground`, `background`, `sky` via `SceneDepthRig`), com edifícios escalonados, viaduto elevado, portal *holo-reactor*, postes com cabos catenários e placas suspensas animadas por vento (`WindSystem`), *hover-spinners* autônomos em patrulha (`PatrolSystem`), protagonista *Netrunner* em primeiro plano, asfalto reflexivo (`waterShader.ts`) e três atmosferas coesas no mesmo cenário: **`day`** (*Dia*), **`night`** (*Noite*) e **`rain`** (*Com chuva*, com precipitação ASCII e poças reflexivas).
-- **Estúdio Minimalista Linux Tux 3D (`mode: 'mascot'`)**: mascote Tux articulado e sem facetas duras (`TuxEntityFactory`, com `includeShowcaseRig: false` por padrão no palco do mascote; o pedestal `TuxShowcasePlinth` permanece opcional via `includeShowcaseRig: true`) sobre o palco minimalista `MascotStageBuilder` — fundo contínuo `#13222E` (`MASCOT_BACKDROP_HEX`) + piso horizontal `#1D2B36` (`MASCOT_FLOOR_HEX`), iluminação de estúdio equilibrada (*key*, *fill*, *hemi* e duplo *rim* discreto), sombra suave PCF + *contact AO* e reflexo difuso sincronizado em `yaw`, 100% quantizados em ASCII (`uMascotStudio`) e totalmente inertes a mouse/toque.
+- **Cyber Noir + Entropism Boulevard (`mode: 'playground'`)**: avenida urbana entrópica unificada (`cyberpunk-citadel`) sob estética **Cyber Noir + Entropism + Techwear/Darkwear** — céu entrópico `#0C1217`, piso ASCII `#1A222A` (`waterShader.ts`), estruturas/ruínas brutalistas `#2A3540`, protagonista *Techwear/Darkwear* (`#14171C` / `#3B424C`) com **braço cibernético mecânico articulado** (`#6E7B87` / `#8A99A6`, sem espada ou arma luminosa) e acento pontual discreto `#4A7C7E`. Opera com **FOV de `106°`**, câmera centrada que acompanha suavemente o personagem (`CameraFollowSystem`), locomoção por clique/toque no chão (`NavigationTargetComponent` + raycast de solo em `InputSystem`), ciclo de caminhada orgânico guiado por `deltaTime` (`AnimationSystem`) e três atmosferas coesas sem luzes estouradas: **`day`** (*Dia*), **`night`** (*Noite*) e **`rain`** (*Com chuva*).
+- **Estúdio Minimalista Linux Tux 3D (`mode: 'mascot'`)**: mascote Tux articulado e sem facetas duras (`TuxEntityFactory`, com `includeShowcaseRig: false` por padrão no palco do mascote; o pedestal `TuxShowcasePlinth` permanece opcional via `includeShowcaseRig: true`) sobre o palco minimalista `MascotStageBuilder` — fundo contínuo `#13222E` (`MASCOT_BACKDROP_HEX`) + piso horizontal `#1D2B36` (`MASCOT_FLOOR_HEX`), iluminação de estúdio equilibrada (*key*, *fill*, *hemi* e duplo *rim* discreto), sombra suave PCF + *contact AO* e reflexo difuso sincronizado em `yaw`, 100% quantizados em ASCII puro e totalmente inertes a mouse/toque (`fov: 38°`).
 - **Atlas tipográfico proporcional `5:8` sem linhas de grade**: células monoespaçadas (`0.625`, `40×64` @ 1x e `60×96` @ HiDPI) renderizadas em Canvas 2D (`glyphAtlas.ts`) com rampa de luminância calibrada, glifos estruturais direcionais (`/ \ | _ [ ]`) selecionados via Sobel (profundidade + luminância), guarda exata de meio-texel (`0.55 / uAtlasTileSize`) **sem divisórias/emendas entre células** e *blend* GPU `max()` (~35% `blockBlendWeight`) com blocos `░▒▓█` *full-bleed*.
 - **Iluminação calibrada, Sombras PCF 5-tap, ASCII Bloom & DoF**: *shadow mapping* `PCFSoftShadowMap` em tempo real no asfalto e no piso do estúdio; *bright-pass* + *Kawase/Gaussian blur* separável antes da quantização ASCII; e linearização do `DepthTexture` para profundidade de campo suave.
 - **Resolução Adaptativa HiDPI (`ResolutionController.ts`)**: teto de `devicePixelRatio` (`<= 2.0` em desktop, `<= 1.5` em mobile *coarse pointer*), tetos anti-ruído de colunas (`36..190` no `playground`, `24..78` no `mascot`) e transições exponenciais suaves de densidade de célula ao redimensionar ou alternar *fullscreen*, estabilizando em pixels inteiros exatos.
@@ -71,10 +71,10 @@ Toda nova implementação, cena, entidade, sistema, *shader* ou refatoração de
 
 ### 1. Arquitetura Modular Inspirada em ECS Enxuto (Separação de Responsabilidades)
 
-- **Componentes exclusivamente de dados/estado (`src/ecs/World.ts`)**: componentes (`Transform`, `Velocity`, `RotationTarget`, `AnimationState`, `Renderable`, `NeonBeacon`, `PatrolPath`, `WindSway`, `DepthLayer`, `LifecycleTag`, `InputState` e futuros) devem conter apenas estado plano/estruturado — nunca métodos de negócio, *listeners* de DOM ou chamadas diretas ao renderizador.
+- **Componentes exclusivamente de dados/estado (`src/ecs/World.ts`)**: componentes (`Transform`, `Velocity`, `RotationTarget`, `AnimationState`, `Renderable`, `NeonBeacon`, `PatrolPath`, `WindSway`, `DepthLayer`, `LifecycleTag`, `InputState`, `NavigationTarget`, `CameraFollow` e futuros) devem conter apenas estado plano/estruturado — nunca métodos de negócio, *listeners* de DOM ou chamadas diretas ao renderizador.
 - **Sistemas focados e ordenados deterministicamente (`SystemRunner.ts` / `AnimationSystem.ts`)**: cada sistema cumpre uma única responsabilidade sobre consultas `world.query(...)`, respeitando a ordem explícita de prioridades:
-  - `mode: 'playground'`: `InputSystem (10)` → `PatrolSystem (15)` → `MovementRotationSystem (20)` → `WindSystem (25)` → `AnimationSystem (30)` → `NeonPulseSystem (35)` → `RenderSyncSystem (40)`.
-  - `mode: 'mascot'`: apenas `MovementRotationSystem (20)` → `AnimationSystem (30)` → `RenderSyncSystem (40)` (sem `InputSystem`, `PatrolSystem`, `WindSystem` ou `NeonPulseSystem`).
+  - `mode: 'playground'`: `InputSystem (10)` → `PatrolSystem (15)` → `MovementRotationSystem (20)` → `WindSystem (25)` → `AnimationSystem (30)` → `NeonPulseSystem (35)` → `CameraFollowSystem (38)` → `RenderSyncSystem (40)`.
+  - `mode: 'mascot'`: apenas `MovementRotationSystem (20)` → `AnimationSystem (30)` → `RenderSyncSystem (40)` (sem `InputSystem`, `PatrolSystem`, `WindSystem`, `NeonPulseSystem` ou `CameraFollowSystem`).
 - **Builders, Factories e Blueprints quando aplicável (`src/world/`, `src/entities/`, `EntityBlueprint.ts`)**: construção de hierarquias `THREE.Object3D`, iluminação de palco e registro inicial de componentes ficam isolados em `*EntityFactory`, `*SceneBuilder`, `SceneComposerKit` e `EntityBlueprintRegistry`.
 - **Proibição de acoplamento no renderizador ASCII**: nunca embutir lógica de input, animação de personagens/objetos ou controle de câmera dentro de `AsciiPostProcessor` ou dos *shaders* GLSL (`asciiShader.ts`, `glyphAtlas.ts`). O pipeline ASCII consome exclusivamente os *render targets* (`tScene`, `tDepth`, `tBloom`) e *uniforms* declarativos de configuração.
 - **Sem *over-engineering* de motor AAA**: manter o ECS enxuto baseado em `Map<EntityId, Component>`, evitando *containers* de injeção/reflexão, compiladores de arquétipos por *bitmask*, motores de física pesados ou abstrações especulativas sem uso real nas cenas do módulo.
@@ -89,14 +89,15 @@ Toda nova implementação, cena, entidade, sistema, *shader* ou refatoração de
 
 ### 3. Paletas Controladas, Sóbrias e Sem Excesso de Luzes Saturadas
 
-- **Bases escuras, dessaturadas e hierarquia de luminância**: fundos, pisos e volumes estruturais devem partir de tons escuros e de baixa saturação (ardósia, petróleo, obsidiana, aço noturno) com separação clara de valor para sustentar a leitura dos glifos — exemplarmente a escada tonal de estúdio do mascote: pelagem dorsal do Tux (`#0B1017`) < fundo `MASCOT_BACKDROP_HEX` (`#13222E`) < piso `MASCOT_FLOOR_HEX` (`#1D2B36`), e os cascos arquitetônicos escuros do `playground` (`#05060D`, `#101929`, `#19273D`).
-- **Acentos contidos e iluminação equilibrada**: evitar saturação neon excessiva, excesso de `PointLight`s simultâneas ou `bloomIntensity`/`emissiveIntensity` estourados que saturem a luminância em `1.0` e colapsem toda a área em caracteres sólidos uniformes. Priorizar esquema equilibrado de *key light* suave + *fill* controlado + *rim light* discreto para recorte de silhueta.
+- **Bases escuras, dessaturadas e hierarquia de luminância**: fundos, pisos e volumes estruturais devem partir de tons escuros e de baixa saturação (ardósia, petróleo, obsidiana, aço entrópico) com separação clara de valor para sustentar a leitura dos glifos — exemplarmente a escada tonal de estúdio do mascote: pelagem dorsal do Tux (`#0B1017`) < fundo `MASCOT_BACKDROP_HEX` (`#13222E`) < piso `MASCOT_FLOOR_HEX` (`#1D2B36`), e a paleta **Cyber Noir + Entropism** do `playground`: céu/fundo entrópico `#0C1217`, piso ASCII `#1A222A`, estruturas/ruínas `#2A3540`, personagem *Techwear/Darkwear* `#14171C`/`#3B424C`, braço mecânico `#6E7B87`/`#8A99A6` e acento pontual discreto `#4A7C7E`.
+- **Acentos contidos e iluminação exclusivamente ASCII**: evitar saturação neon excessiva, excesso de `PointLight`s simultâneas ou `bloomIntensity`/`emissiveIntensity` estourados que saturem a luminância em `1.0` e colapsem toda a área em caracteres sólidos uniformes (`blockTier` nunca emite bloco 100% sólido `█`). Priorizar esquema equilibrado de *key light* suave + *fill* controlado + *rim light* discreto para recorte de silhueta.
 - **Reuso de materiais reativos à paleta**: compartilhar materiais via bancos centralizados (`NeonMaterialBank` em `SceneComposerKit` ou *uniforms* de estágio), evitando duplicar instâncias de `Material`/`ShaderMaterial` por malha.
 
 ### 4. Regras de Câmera e Isolamento de Interação por Modo
 
-- **`mode: 'mascot'` (`#penguin-stage`)**: palco estritamente contemplativo e 100% inerte a ponteiro/toque/teclado — nunca anexar `PointerInput` ou `KeyboardInput`, manter `cursorLight` zerada (`intensity = 0`) e zero partículas (`particleCount = 0`), travar posição/alvo da câmera e restringir qualquer rotação externa ao eixo horizontal (`yaw`), sem inclinação (`pitch`) nem telemetria reativa a cursor.
+- **`mode: 'mascot'` (`#penguin-stage`)**: palco estritamente contemplativo (`fov: 38°`) e 100% inerte a ponteiro/toque/teclado — nunca anexar `PointerInput` ou `KeyboardInput`, manter `cursorLight` zerada (`intensity = 0`) e zero partículas (`particleCount = 0`), travar posição/alvo da câmera e restringir qualquer rotação externa ao eixo horizontal (`yaw`), sem inclinação (`pitch`) nem telemetria reativa a cursor.
 - **`mode: 'playground'` (`#ascii-scene`)**:
+  - Câmera em **FOV de `106°`**, centrada e acompanhando suavemente o protagonista via `CameraFollowSystem`, com locomoção por clique/toque no solo (`PointerInput.consumeTap()` + raycast de solo em `InputSystem` + `NavigationTargetComponent`) e ciclo de caminhada guiado por `deltaTime` que retorna de forma limpa ao repouso ao atingir o destino.
   - Todo *listener* de mouse/toque deve ser passivo (`{ passive: true }`) com `touch-action: pan-y` no container, **nunca** bloqueando a rolagem vertical da página.
   - `KeyboardInput` deve permanecer desabilitado por padrão (`enableKeyboard: false`); quando habilitado explicitamente, exige foco ativo em `focusTarget`, ignora `<input>`, `<textarea>`, `<select>` e `[contenteditable]` e jamais intercepta atalhos com `Ctrl`/`Cmd`/`Alt`.
   - Preservar `config.fov` explícito em redimensionamentos e respeitar os *guardrails* adaptativos de `ResolutionController` (DPR e limites de colunas) para evitar poeira subpixel em telas 4K ou ilegibilidade em telas móveis.
@@ -138,7 +139,7 @@ npm run build:demo
 
 ## Uso da Facade (`AsciiSceneEngine`)
 
-### 1. Cenário Cyberpunk com Atmosferas (`day` | `night` | `rain`)
+### 1. Cenário Cyber Noir + Entropism com Atmosferas (`day` | `night` | `rain`)
 
 ```ts
 import { AsciiSceneEngine } from '@ancientstudio/ascii-engine-module';
@@ -147,18 +148,19 @@ const stageEl = document.getElementById('ascii-scene')!;
 
 const engine = new AsciiSceneEngine(stageEl, {
   mode: 'playground',
+  fov: 106,
   atmosphere: 'night',
   autoResponsiveDensity: true,
-  blockBlendWeight: 0.35,
-  bloomIntensity: 1.42,
-  dofStrength: 0.34,
+  blockBlendWeight: 0.18,
+  bloomIntensity: 0.24,
+  dofStrength: 0.20,
   windStrength: 0.62,
 });
 
 engine.mount();
 
 // Troca de atmosfera em tempo real mantendo o mesmo cenário (Dia / Noite / Com chuva)
-engine.updateConfig({ atmosphere: 'rain', windStrength: 1.52, bloomIntensity: 1.72 });
+engine.updateConfig({ atmosphere: 'rain', windStrength: 1.45, bloomIntensity: 0.28 });
 ```
 
 ### 2. Contorno de Silhueta por Objeto sob Demanda (`setObjectOutline`)

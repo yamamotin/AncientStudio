@@ -46,7 +46,7 @@ test('playground exposes exactly three scene modes', () => {
     'atmosphere: atmosphere',
     'blockBlendWeight: preset.blockBlendWeight',
     'windStrength: preset.windStrength',
-    'blockBlendWeight: 0.28',
+    'blockBlendWeight: 0.0',
     'cellSize: 8',
     'touchstart',
     'touchmove'
@@ -923,43 +923,346 @@ test('neofetch mascot stage builds minimalist #13222E backdrop + #1D2B36 floor w
   assert.equal('#' + flCol.getHexString().toUpperCase(), '#1D2B36');
   const bgLuma = 0.2126 * bgCol.r + 0.7152 * bgCol.g + 0.0722 * bgCol.b;
   const flLuma = 0.2126 * flCol.r + 0.7152 * flCol.g + 0.0722 * flCol.b;
-  const torsoMesh = tuxRoot.children.find((c) => c.isMesh);
-  const coatCol = torsoMesh.material.color;
+  const torsoMesh = tuxRoot.getObjectByName('TuxTorso');
+  const headMesh = tuxRoot.getObjectByName('TuxHead');
+  assert.ok(torsoMesh && headMesh, 'Tux exposes unified TuxTorso and smooth TuxHead');
+  const coatCol = headMesh.material.color;
   const coatLuma = 0.2126 * coatCol.r + 0.7152 * coatCol.g + 0.0722 * coatCol.b;
   assert.ok(coatLuma < bgLuma && bgLuma < flLuma, 'Color-theory value order holds: Tux coat < #13222E backdrop < #1D2B36 floor');
 
-  // 3. Smooth facet-free Tux geometry & non-intersecting belly envelope (zero hard facets or Z-fighting blotches)
-  const tuxMeshes = tuxRoot.children.filter((c) => c.isMesh);
-  const bellyMesh = tuxMeshes[1];
-  assert.equal(torsoMesh.material.flatShading, false, 'Torso uses smooth normal shading (no hard facets)');
-  assert.equal(bellyMesh.material.flatShading, false, 'Belly uses smooth normal shading (no hard facets)');
-  const torsoFrontZ = torsoMesh.position.z + torsoMesh.geometry.parameters.radius * torsoMesh.scale.z;
-  const bellyFrontZ = bellyMesh.position.z + bellyMesh.geometry.parameters.radius * bellyMesh.scale.z;
-  assert.ok(bellyFrontZ > torsoFrontZ + 0.04, 'Belly apex sits cleanly proud of torso front to eliminate blotchy Z-cutouts');
+  // 3. Pure-ASCII unified smooth Tux body: single vertex-colored torso (zero intersecting belly sphere, zero flatShading, zero self-shadow blotches)
+  assert.equal(torsoMesh.material.vertexColors, true, 'Unified torso uses smooth vertex-colored plumage instead of intersecting belly mesh');
+  assert.ok(torsoMesh.geometry.getAttribute('color'), 'Torso geometry carries smooth per-vertex plumage colors');
+  const directRootMeshes = tuxRoot.children.filter((c) => c.isMesh);
+  assert.equal(directRootMeshes.length, 2, 'Root holds only unified TuxTorso + smooth tail (no intersecting belly sphere)');
+  tuxRoot.traverse((obj) => {
+    if (obj.isMesh) {
+      assert.equal(Boolean(obj.material.flatShading), false, `Mesh ${obj.name || 'part'} uses smooth shading (zero hard facets)`);
+      assert.equal(obj.receiveShadow, false, `Tux mesh ${obj.name || 'part'} disables self-shadowing to prevent belly blotches`);
+    }
+  });
 
-  // 4. Full-viewport ASCII floor & backdrop composite + balanced key/fill/rim lights, soft shadow & diffused reflection
+  // 4. Single unified pure-ASCII shader pipeline (parallel non-ASCII uMascotStudio / surfaceSrgb / solid block overrides removed)
   const asciiShaderSrc = readFileSync(
     path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
     'utf8'
   );
-  includesAll(asciiShaderSrc, [
-    'uMascotStudio',
-    'mascotGlyphMask',
-    'mascotCompositeMask',
-    'floorWeave',
-    'cellSubstrate',
-    'glyphInk',
-    'depthEdgeMag'
-  ]);
+  const tuxFactorySrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/entities/TuxEntityFactory.ts'),
+    'utf8'
+  );
+  assert.doesNotMatch(
+    asciiShaderSrc,
+    /uMascotStudio|mascotBlockMask|mascotCompositeMask|surfaceSrgb|cellSubstrate|linearToSrgb/,
+    'Removed parallel non-ASCII override pass and raw pixel/block bleed from asciiShader.ts'
+  );
+  assert.doesNotMatch(
+    tuxFactorySrc,
+    /flatShading:\s*true|facePatch/,
+    'Removed hard-faceted materials and overlapping facePatch spheres from TuxEntityFactory.ts'
+  );
   assert.equal(stage.keyLight.castShadow, true, 'Main key light casts soft floor shadow');
-  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light prevents belly blotches');
+  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light keeps belly illumination smooth');
   assert.ok(stage.rimLight && stage.rimLight.intensity > 0 && stage.rimLight.intensity < 1.5, 'Discreet rim light separates dark edges');
   includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
-  // 5. Adapter + CSS keep exact palette, shadows enabled, and pointer-inert stage
-  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'enableShadows: true']);
+  // 5. Adapter + CSS keep exact palette, pure-ASCII zero block fill (blockBlendWeight: 0.0), shadows enabled, and pointer-inert stage
+  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'blockBlendWeight: 0.0', 'enableShadows: true']);
   includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
 
   ecs.clear(true);
   pkg.LifecycleManager.disposeObject3D(stage.scene);
 });
+
+test('ASCII REALMS scene enforces Cyber Noir + Entropism palette, pure-ASCII light/reflection modulation, and Techwear avatar with mechanical arm (no sword)', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const asciiShaderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const waterShaderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
+    'utf8'
+  );
+  const avatarFactorySrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/entities/PlaygroundEntityFactory.ts'),
+    'utf8'
+  );
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+
+  // 1. Contained Cyber Noir + Entropism palette in engine defaults and portfolio adapter
+  assert.equal(pkg.DEFAULT_PALETTE.background, '#0C1217', 'Entropic sky/background is #0C1217');
+  assert.equal(pkg.DEFAULT_PALETTE.warmLight, '#4A7C7E', 'Discreet punctual accent is #4A7C7E');
+  assert.equal(pkg.DEFAULT_PALETTE.warmCore, '#8A99A6', 'Mechanical highlight / steel-mist core is #8A99A6');
+  assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87', 'Cold steel ambient is #6E7B87');
+  assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540', 'Structures/ruins tone is #2A3540');
+  assert.ok(pkg.DEFAULT_ENGINE_CONFIG.bloomIntensity <= 0.30, 'Bloom stays restrained so highlights remain ASCII glyphs');
+  assert.doesNotMatch(
+    adapter,
+    /#FF2A85|#FFC145|#00F0FF|#FF1E75|#64F5FF/i,
+    'Exaggerated neon pink/yellow/cyan presets removed from portfolio adapter'
+  );
+  includesAll(adapter, ["background: '#0C1217'", "warmLight: '#4A7C7E'", "warmCore: '#8A99A6'", "foliageAccent: '#2A3540'"]);
+
+  // 2. Pure-ASCII light, floor (#1A222A), structure (#2A3540), and reflection clamping in shaders & scene builder
+  assert.doesNotMatch(asciiShaderSrc, /b\s*==\s*3/, '100% solid block fill (█) is never emitted on highlights');
+  includesAll(waterShaderSrc, ['#1A222A', '#0C1217', 'vec3(0.28, 0.32, 0.35)']);
+
+  const ecsWorld = new pkg.World();
+  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  assert.equal('#' + built.scene.background.getHexString().toUpperCase(), '#0C1217', 'Scene sky matches #0C1217');
+  assert.equal('#' + built.scene.fog.color.getHexString().toUpperCase(), '#0C1217', 'Scene fog matches #0C1217');
+  assert.ok(
+    built.materialBank.cyan.emissiveIntensity < 1.0 &&
+      built.materialBank.magenta.emissiveIntensity < 1.0 &&
+      built.materialBank.amber.emissiveIntensity < 1.0,
+    'Emissive materials stay below blowout threshold (< 1.0) so ASCII glyph strokes remain legible'
+  );
+
+  // 3. Techwear / Darkwear protagonist (#14171C, #3B424C) with integrated Cybernetic Mechanical Arm (#6E7B87, #8A99A6) and zero glowing sword
+  assert.doesNotMatch(
+    avatarFactorySrc,
+    /bladeCore|plasma sword|katana/i,
+    'Glowing sword / luminous blade weapon completely removed from protagonist blueprint'
+  );
+  const avatarMeshComp = ecsWorld.getComponent(built.avatarEntityId, 'Renderable');
+  const avatarAnimComp = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
+  assert.ok(avatarMeshComp && avatarAnimComp, 'Protagonist entity carries Renderable and AnimationState components');
+
+  const mechArm = avatarMeshComp.object3D.getObjectByName('AvatarMechanicalArm');
+  const mechForearm = avatarMeshComp.object3D.getObjectByName('AvatarMechanicalForearm');
+  assert.ok(mechArm && mechForearm, 'Protagonist features articulated Cybernetic Mechanical Arm and Forearm');
+  assert.equal(avatarAnimComp.parts.rightArm, mechArm, 'Mechanical arm is wired to AnimationStateComponent.parts.rightArm');
+  assert.equal(avatarAnimComp.parts.rightForearm, mechForearm, 'Mechanical forearm is wired to AnimationStateComponent.parts.rightForearm');
+  assert.ok(avatarAnimComp.parts.leftArm && avatarAnimComp.parts.leftFoot && avatarAnimComp.parts.rightFoot);
+
+  const hexSet = new Set();
+  avatarMeshComp.object3D.traverse((node) => {
+    if (node.isMesh && node.material && node.material.color) {
+      hexSet.add('#' + node.material.color.getHexString().toUpperCase());
+    }
+  });
+  assert.ok(hexSet.has('#14171C') && hexSet.has('#3B424C'), 'Avatar garments use Techwear/Darkwear #14171C and #3B424C');
+  assert.ok(hexSet.has('#6E7B87') && hexSet.has('#8A99A6'), 'Mechanical arm uses #6E7B87 and #8A99A6');
+  assert.ok(hexSet.has('#4A7C7E'), 'Avatar includes discreet #4A7C7E punctual accent');
+
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+
+test('ASCII REALMS scene runs 106-degree FOV character-centered camera, click/tap ground navigation, dt walk-to-idle stride cycle, and leak-free input teardown', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const vm = require('node:vm');
+  let nowMs = 1000;
+  class MockHTMLElement {}
+  const sandbox = {
+    window: {},
+    self: {},
+    Date: { now: () => nowMs },
+    HTMLElement: MockHTMLElement,
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => nowMs }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+
+  // 1. FOV = 106° in playground mode while mascot mode keeps 38°
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.fov, 106, 'Default scene camera FOV is 106 degrees');
+  includesAll(adapter, ['fov: 106']);
+
+  const ecsWorld = new pkg.World();
+  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  // Mock DOM container with listener tracking for PointerInput
+  const listeners = new Map();
+  const mockElement = {
+    style: {},
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    removeEventListener(type, fn) {
+      if (listeners.get(type) === fn) listeners.delete(type);
+    },
+    getBoundingClientRect() {
+      return { left: 0, top: 0, width: 1000, height: 600 };
+    }
+  };
+
+  const pointerInput = new pkg.PointerInput(mockElement);
+  pointerInput.attach();
+  assert.ok(
+    listeners.has('pointerdown') && listeners.has('pointerup') && listeners.has('touchstart') && listeners.has('touchend'),
+    'PointerInput attaches passive click and touch tap listeners'
+  );
+
+  const keyboardStub = { sampleAxes: () => ({ moveX: 0, moveZ: 0 }) };
+  // Use the real Three.js PerspectiveCamera instance format via cloning / extracting constructor from scene lights' shadow camera or camera-compatible rig
+  // Construct a real PerspectiveCamera from built.moonDirLight's Three.js runtime via Object3D matrix math:
+  // Even cleaner: instantiate AsciiEngineCore camera behavior using a Three.js PerspectiveCamera from MapLoader/SceneBuilder!
+  // Let's verify via AsciiEngineCore's exported SystemRunner + a Three.js camera created by cloning shadow camera or minimal PerspectiveCamera:
+  const coreProbeContainer = Object.assign(new MockHTMLElement(), {
+    clientWidth: 1000,
+    clientHeight: 600,
+    style: {},
+    appendChild() {},
+    removeChild() {},
+    addEventListener() {},
+    removeEventListener() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 })
+  });
+  const mascotCore = new pkg.AsciiSceneEngine(coreProbeContainer, { mode: 'mascot' });
+  const playgroundCore = new pkg.AsciiSceneEngine(coreProbeContainer, { mode: 'playground' });
+  assert.equal(mascotCore.getConfig().fov, 38, 'Mascot stage preserves 38-degree studio FOV');
+  assert.equal(playgroundCore.getConfig().fov, 106, 'Playground scene defaults to 106-degree FOV');
+
+  // Build real PerspectiveCamera with FOV = 106 matching AsciiEngineCore.initPlaygroundStage
+  const THREE_NS = Object.getPrototypeOf(built.scene);
+  void THREE_NS;
+  // Create a lightweight camera matching Three.js PerspectiveCamera projection + matrixWorldInverse for raycast & NDC centering verification
+  const fovRad = (106 * Math.PI) / 180;
+  const aspect = 1000 / 600;
+  const tanHalfFov = Math.tan(fovRad / 2);
+  const camera = built.moonDirLight.shadow.camera.clone();
+  camera.fov = 106;
+  camera.aspect = aspect;
+  camera.isPerspectiveCamera = true;
+  camera.updateProjectionMatrix = function () {
+    const near = 0.1;
+    const far = 120;
+    const top = near * Math.tan((this.fov * Math.PI) / 360);
+    const height = 2 * top;
+    const width = this.aspect * height;
+    this.projectionMatrix.makePerspective(-width / 2, width / 2, top, -top, near, far);
+    this.projectionMatrixInverse.copy(this.projectionMatrix).invert();
+  };
+  camera.updateProjectionMatrix();
+  camera.position.set(0, 3.25, 1.45);
+
+  const runner = new pkg.SystemRunner()
+    .addSystem(new pkg.InputSystem(pointerInput, keyboardStub, camera), 10)
+    .addSystem(new pkg.MovementRotationSystem(built.terrainHeightAt, built.waypointMarker), 20)
+    .addSystem(new pkg.WindSystem(), 25)
+    .addSystem(new pkg.AnimationSystem(), 30)
+    .addSystem(new pkg.CameraFollowSystem(camera), 38)
+    .addSystem(new pkg.RenderSyncSystem(), 40);
+
+  // Initial snap (dt = 0) centers camera on protagonist
+  runner.run(ecsWorld, { elapsed: 0, dt: 0, pointerX: 0, pointerY: 0, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
+  camera.updateMatrixWorld(true);
+
+  const avatarTransform = ecsWorld.getComponent(built.avatarEntityId, 'Transform');
+  const avatarNav = ecsWorld.getComponent(built.avatarEntityId, 'NavigationTarget');
+  const avatarAnim = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
+  const avatarVel = ecsWorld.getComponent(built.avatarEntityId, 'Velocity');
+  const startZ = avatarTransform.z;
+
+  const chestPoint = camera.position.clone().set(avatarTransform.x, avatarAnim.baseY + 1.08, avatarTransform.z).project(camera);
+  assert.ok(
+    Math.abs(chestPoint.x) < 1e-4 && Math.abs(chestPoint.y) < 1e-4 && tanHalfFov > 1.3,
+    '106-degree FOV camera starts strictly centered on protagonist chest anchor'
+  );
+
+  // 2. Drag gesture (> 14px) is ignored (does NOT trigger navigation)
+  listeners.get('pointerdown')({ pointerId: 1, button: 0, clientX: 200, clientY: 200 });
+  listeners.get('pointermove')({ pointerId: 1, clientX: 245, clientY: 235 });
+  listeners.get('pointerup')({ pointerId: 1, clientX: 245, clientY: 235 });
+  assert.equal(pointerInput.consumeTap(), null, 'Scroll/drag > 14px does not trigger false ground tap');
+
+  // 3. Clean click on lower-forward boulevard projects onto ground plane and activates locomotion
+  listeners.get('pointerdown')({ pointerId: 2, button: 0, clientX: 620, clientY: 430 });
+  listeners.get('pointerup')({ pointerId: 2, clientX: 621, clientY: 430 });
+
+  runner.run(ecsWorld, { elapsed: 0.05, dt: 0.05, pointerX: 0.24, pointerY: -0.43, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
+  assert.equal(avatarNav.active, true, 'Ground click activates NavigationTargetComponent');
+  assert.equal(built.waypointMarker.visible, true, 'Discreet #4A7C7E waypoint marker appears while moving');
+  assert.equal(avatarAnim.isMoving, true, 'AnimationComponent enters walking state');
+
+  const targetX = avatarNav.targetX;
+  const targetZ = avatarNav.targetZ;
+  assert.ok(Math.hypot(targetX - avatarTransform.x, targetZ - startZ) > 0.3, 'Raycast selects distinct ground destination');
+
+  // Step forward in dt increments: verify stride animation & centered camera tracking during walk
+  let maxStrideAngle = 0;
+  let maxMechArmSwing = 0;
+  for (let step = 1; step <= 80 && avatarNav.active; step += 1) {
+    runner.run(ecsWorld, {
+      elapsed: 0.05 + step * 0.05,
+      dt: 0.05,
+      pointerX: 0,
+      pointerY: 0,
+      playableMoveX: 0,
+      playableMoveZ: 0,
+      windStrength: 0.5
+    });
+    maxStrideAngle = Math.max(maxStrideAngle, Math.abs(avatarAnim.parts.leftFoot.rotation.x));
+    maxMechArmSwing = Math.max(maxMechArmSwing, Math.abs(avatarAnim.parts.rightArm.rotation.x));
+  }
+
+  assert.ok(maxStrideAngle > 0.15, 'Legs articulate through natural stride cycle during walking');
+  assert.ok(maxMechArmSwing > 0.10, 'Cybernetic mechanical arm counter-swings naturally during walking');
+  assert.equal(avatarNav.active, false, 'Avatar reaches destination and clears active navigation');
+  assert.equal(built.waypointMarker.visible, false, 'Waypoint marker hides cleanly on arrival');
+  assert.equal(avatarVel.vx, 0);
+  assert.equal(avatarVel.vz, 0);
+  assert.ok(
+    Math.hypot(avatarTransform.x - targetX, avatarTransform.z - targetZ) < 1e-4,
+    'Avatar snaps cleanly to ground target without jitter or overshoot'
+  );
+
+  // Settle to idle over 0.6s and verify camera remains centered on new position + limbs return to rest
+  for (let step = 1; step <= 15; step += 1) {
+    runner.run(ecsWorld, {
+      elapsed: 5.0 + step * 0.05,
+      dt: 0.05,
+      pointerX: 0,
+      pointerY: 0,
+      playableMoveX: 0,
+      playableMoveZ: 0,
+      windStrength: 0.5
+    });
+  }
+  camera.updateMatrixWorld(true);
+  const arrivedNdc = camera.position.clone().set(avatarTransform.x, avatarAnim.baseY + 1.08, avatarTransform.z).project(camera);
+  assert.ok(
+    Math.abs(arrivedNdc.x) < 1e-3 && Math.abs(arrivedNdc.y) < 1e-3,
+    'Camera accompanies avatar and settles strictly centered at new ground coordinates'
+  );
+  assert.equal(avatarAnim.isMoving, false, 'Avatar returns to idle state after arrival');
+  assert.ok(avatarAnim.locomotionBlend < 0.02, 'Locomotion stride blend decays smoothly back to idle');
+
+  // 4. Touch tap (`touchstart` -> `touchend`) also triggers ground navigation cleanly
+  nowMs += 500;
+  listeners.get('touchstart')({ touches: [{ clientX: 400, clientY: 420 }] });
+  listeners.get('touchend')({ changedTouches: [{ clientX: 401, clientY: 420 }] });
+  runner.run(ecsWorld, { elapsed: 6.0, dt: 0.05, pointerX: -0.2, pointerY: -0.4, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
+  assert.equal(avatarNav.active, true, 'Touch tap activates ground navigation on mobile devices');
+
+  // 5. Leak-free listener teardown
+  pointerInput.detach();
+  assert.equal(listeners.size, 0, 'PointerInput.detach() removes 100% of DOM event listeners');
+
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+

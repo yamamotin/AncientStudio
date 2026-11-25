@@ -15,9 +15,9 @@ import type { EngineConfig, ResolutionProfile } from '../types';
 /**
  * Self-contained WebGL multi-pass post-processor:
  *  Pass 1: 3D Scene -> Offscreen RGBA HalfFloat RenderTarget + DepthTexture
- *  Pass 2: Bright-pass extraction & downsample (1/3 desktop, 1/4 mobile)
+ *  Pass 2: Bright-pass extraction & downsample (1/3 desktop, 1/4 mobile; skipped when bloomIntensity <= 0.001)
  *  Pass 3 & 4: Separable wide Gaussian/Kawase blur (H + V) so neon light bleeds across neighboring ASCII cells
- *  Pass 5: High-Resolution Adaptive ASCII Composite (center-anchored smooth cell-size transition + 5-tap sub-cell supersampling + DoF + Sobel structural glyphs)
+ *  Pass 5: Single Unified High-Resolution Adaptive ASCII Composite (center-anchored smooth cell-size transition + 5-tap sub-cell supersampling + DoF + Sobel structural glyphs)
  */
 export class AsciiPostProcessor {
   private readonly quadScene: THREE.Scene;
@@ -114,7 +114,8 @@ export class AsciiPostProcessor {
       },
     });
 
-    const bgColor = new THREE.Color(config.palette.background);
+    const bgColor = new THREE.Color();
+    this.syncSubstrateColor(config, bgColor);
 
     this.compositeMaterial = new THREE.ShaderMaterial({
       vertexShader: FULLSCREEN_VERTEX_SHADER,
@@ -145,7 +146,6 @@ export class AsciiPostProcessor {
         uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
-        uMascotStudio: { value: config.mode === 'mascot' ? 1.0 : 0.0 },
         uBgColor: { value: bgColor },
         uTime: { value: 0 },
       },
@@ -259,10 +259,21 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
     this.compositeMaterial.uniforms.uBlockBlendWeight.value = config.blockBlendWeight;
     this.compositeMaterial.uniforms.uDaylight.value = config.atmosphere === 'day' ? 1.0 : 0.0;
-    this.compositeMaterial.uniforms.uMascotStudio.value = config.mode === 'mascot' ? 1.0 : 0.0;
-    this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
+    this.syncSubstrateColor(config, this.compositeMaterial.uniforms.uBgColor.value);
 
     return this.applyResolutionProfile(profile, config, false);
+  }
+
+  /**
+   * Resolves the terminal cell substrate color written directly to the sRGB backbuffer:
+   * - Playground preserves `#0C1217` entropic night sky/substrate hue at 88% dark substrate value.
+   * - Mascot preserves sRGB hue proportions of `#13222E` at 72% dark-substrate value (`#0E1821`)
+   *   so ASCII glyphs on Tux, floor (`#1D2B36`), and backdrop (`#13222E`) share one unified pass.
+   */
+  private syncSubstrateColor(config: EngineConfig, target: THREE.Color): void {
+    target.set(config.palette.background);
+    target.convertLinearToSRGB();
+    target.multiplyScalar(config.mode === 'mascot' ? 0.72 : 0.88);
   }
 
   private rebuildGlyphAtlas(config: EngineConfig, tileSize: number): void {
@@ -311,23 +322,26 @@ export class AsciiPostProcessor {
     const drawCalls = renderer.info.render.calls;
     const triangles = renderer.info.render.triangles;
 
-    // Pass 2: Bright-pass extraction & downsample into bloomTargetA
-    this.quadMesh.material = this.downsampleMaterial;
-    renderer.setRenderTarget(this.bloomTargetA);
-    renderer.render(this.quadScene, this.quadCamera);
+    if (this.compositeMaterial.uniforms.uBloomIntensity.value > 0.001) {
+      // Pass 2: Bright-pass extraction & downsample into bloomTargetA
+      this.quadMesh.material = this.downsampleMaterial;
+      renderer.setRenderTarget(this.bloomTargetA);
+      renderer.render(this.quadScene, this.quadCamera);
 
-    // Pass 3: Horizontal wide blur (bloomTargetA -> bloomTargetB)
-    this.quadMesh.material = this.blurMaterial;
-    this.blurMaterial.uniforms.tInput.value = this.bloomTargetA.texture;
-    this.blurMaterial.uniforms.uDirection.value.set(1.35, 0.0);
-    renderer.setRenderTarget(this.bloomTargetB);
-    renderer.render(this.quadScene, this.quadCamera);
+      // Pass 3: Horizontal wide blur (bloomTargetA -> bloomTargetB)
+      this.quadMesh.material = this.blurMaterial;
+      this.blurMaterial.uniforms.tInput.value = this.bloomTargetA.texture;
+      this.blurMaterial.uniforms.uDirection.value.set(1.35, 0.0);
+      renderer.setRenderTarget(this.bloomTargetB);
+      renderer.render(this.quadScene, this.quadCamera);
 
-    // Pass 4: Vertical wide blur (bloomTargetB -> bloomTargetA)
-    this.blurMaterial.uniforms.tInput.value = this.bloomTargetB.texture;
-    this.blurMaterial.uniforms.uDirection.value.set(0.0, 1.35);
-    renderer.setRenderTarget(this.bloomTargetA);
-    renderer.render(this.quadScene, this.quadCamera);
+      // Pass 4: Vertical wide blur (bloomTargetB -> bloomTargetA)
+      this.quadMesh.material = this.blurMaterial;
+      this.blurMaterial.uniforms.tInput.value = this.bloomTargetB.texture;
+      this.blurMaterial.uniforms.uDirection.value.set(0.0, 1.35);
+      renderer.setRenderTarget(this.bloomTargetA);
+      renderer.render(this.quadScene, this.quadCamera);
+    }
 
     // Pass 5: Final ASCII composite to canvas backbuffer
     this.quadMesh.material = this.compositeMaterial;

@@ -56,29 +56,35 @@ only when ready.
 ## Playground systems
 
 `[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
-the unified Cyberpunk Neo-Sector boulevard (`MapLoader` + `PlaygroundSceneBuilder`
-+ `PlaygroundEntityFactory`), elevated overpass, layered urban facades, holo-reactor
-portal, overhead catenary cables and suspended street signs animated by `WindSystem`,
-autonomous hover-spinners (`PatrolSystem`), foreground Netrunner protagonist,
-5-tap PCF street shadows, ~35% GPU `max()` lighten block-detail blend, `5:8`
-grid-free glyph cells, cursor light and smooth HiDPI resolution scaling. The
-adapter maps the three UI buttons to `atmosphere` + palette/weather state on that
-single scene: `day`, `night` and `rain` (`rain` enables ASCII precipitation and
-stronger wind). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records
-the engine-side tools added on that date.
+the unified **Cyber Noir + Entropism** boulevard (`MapLoader` +
+`PlaygroundSceneBuilder` + `PlaygroundEntityFactory`): `#0C1217` entropic sky,
+`#1A222A` weathered ASCII floor, `#2A3540` brutalist structures/ruins,
+Techwear/Darkwear protagonist (`#14171C` / `#3B424C`) with an articulated
+cybernetic mechanical arm (`#6E7B87` / `#8A99A6`, zero glowing sword/weapon), and
+discreet `#4A7C7E` punctual accents. The camera uses a `106°` FOV centered on and
+accompanying the protagonist (`CameraFollowSystem`), while clicking or tapping on
+the ground projects onto the walkable surface (`InputSystem` +
+`NavigationTargetComponent`) and drives a smooth `deltaTime` walk cycle
+(`AnimationSystem`) that settles back to idle on arrival. All lights, emissives
+and planar reflections modulate brightness strictly through `5:8` ASCII glyph
+density without solid-block blowouts. The adapter maps the three UI buttons to
+`day`, `night` and `rain` on that single scene.
+[`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier
+engine-side tools added on that date.
 
-`[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` using
-`MascotStageBuilder` (`#13222E` backdrop + `#1D2B36` floor with soft PCF/contact
-shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
-(`includeShowcaseRig: false`, fully quantized in ASCII via `uMascotStudio`). While
-the engine is still loading, or if it fails, `assets/js/neofetch.js` shows a cute
-**static** ASCII penguin placeholder (eyes, beak and webbed feet) that is never
-animated. As soon as `data-mode="engine"` / `tp:scene-mode` reports the live
-scene, the placeholder is hidden by CSS and no fallback loop touches the 3D
-mascot. The active penguin spins only on the horizontal axis (`yaw`),
-continuously, with no pitch and no pointer, mouse or touch response; the stage is
-`pointer-events: none`. Text content is limited to the seven specified stack rows.
-The page does **not** yet call the engine outline API on the penguin.
+`[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (`fov: 38°`)
+using `MascotStageBuilder` (`#13222E` backdrop + `#1D2B36` floor with soft
+PCF/contact shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
+(`includeShowcaseRig: false`, unified smooth vertex-colored torso quantized
+strictly through pure ASCII glyphs with `blockBlendWeight: 0.0`). While the engine
+is still loading, or if it fails, `assets/js/neofetch.js` shows a cute **static**
+ASCII penguin placeholder (eyes, beak and webbed feet) that is never animated. As
+soon as `data-mode="engine"` / `tp:scene-mode` reports the live scene, the
+placeholder is hidden by CSS and no fallback loop touches the 3D mascot. The
+active penguin spins only on the horizontal axis (`yaw`), continuously, with no
+pitch and no pointer, mouse or touch response; the stage is `pointer-events: none`.
+Text content is limited to the seven specified stack rows. The page does **not**
+yet call the engine outline API on the penguin.
 
 Mandatory architectural, stylistic (full-scene ASCII coherence, sober/desaturated
 base palettes and value hierarchy), interaction and lifecycle (`deltaTime`,

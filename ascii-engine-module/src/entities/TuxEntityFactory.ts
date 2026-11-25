@@ -4,7 +4,7 @@ import type { EntityId, World } from '../ecs/World';
 export interface TuxSpawnOptions {
   position?: [number, number, number];
   scale?: number;
-  /** High-contrast Neofetch showcase lighting rig attached to Tux */
+  /** Optional smooth circular plinth (disabled on the minimalist Neofetch mascot stage) */
   includeShowcaseRig?: boolean;
   /** Optional vertical idle bob amplitude override (smaller keeps feet grounded on floor) */
   bobAmplitude?: number;
@@ -13,14 +13,66 @@ export interface TuxSpawnOptions {
   boundsRadius?: number;
 }
 
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
 /**
- * TuxEntityFactory: Builds an articulated, high-contrast 3D Linux Tux penguin entity
- * calibrated against classic ASCII Tux silhouette contrast:
- * - Deep charcoal-obsidian dorsal coat & flippers (renders densestructural edges `/`, `\`, `|`, `#`, `M`)
- * - Crisp snow-white chest & face mask (renders clean high-luminance `@`, `#`, `B`, `R`, `Y` contrast)
- * - Vivid golden-amber triangular beak & webbed feet
- * - Distinct expressive eyes with dark pupils & specular catchlights
- * - Articulated wing pivots, head pivot, and foot pivots animated via `AnimationSystem`
+ * Builds a single continuous, C-infinity smooth pear-shaped penguin torso (`64x48` segments)
+ * with anti-aliased vertex-color plumage (snow-white oval chest/belly smoothly feathered into
+ * deep charcoal-obsidian coat). Using one unified smooth surface eliminates intersecting-sphere
+ * creases, polygon Z-fighting cutouts, and normal discontinuities across all 360 degrees of spin.
+ */
+function createUnifiedTuxTorsoGeometry(
+  coatColor: THREE.Color,
+  bellyColor: THREE.Color
+): THREE.BufferGeometry {
+  const radius = 0.76;
+  const geo = new THREE.SphereGeometry(radius, 64, 48);
+  const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+  const count = posAttr.count;
+  const colors = new Float32Array(count * 3);
+  const mixed = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const x = posAttr.getX(i);
+    const y = posAttr.getY(i);
+    const z = posAttr.getZ(i);
+
+    const ny = y / radius;
+    const pearWidth = 1.0 - 0.19 * ny;
+    const pearDepth = 1.0 - 0.13 * ny;
+
+    const px = x * 0.92 * pearWidth;
+    const py = y * 1.18;
+    const pz = z * 0.82 * pearDepth;
+    posAttr.setXYZ(i, px, py, pz);
+
+    const bibU = px / 0.46;
+    const bibV = (py + 0.05) / 0.65;
+    const bibDist = Math.hypot(bibU, bibV);
+    const frontGate = smoothstep(0.08, 0.28, pz / 0.62);
+    const bellyWeight = (1.0 - smoothstep(0.86, 1.02, bibDist)) * frontGate;
+
+    mixed.lerpColors(coatColor, bellyColor, bellyWeight);
+    colors[i * 3] = mixed.r;
+    colors[i * 3 + 1] = mixed.g;
+    colors[i * 3 + 2] = mixed.b;
+  }
+
+  posAttr.needsUpdate = true;
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * TuxEntityFactory: Builds an articulated, pure-ASCII-calibrated 3D Linux Tux penguin entity:
+ * - Single unified smooth pear-shaped body with vertex-colored snow-white belly & charcoal coat
+ * - Sleek smooth head with crisp non-overlapping sclera/pupil eyes and sculpted two-part amber beak
+ * - Smooth rounded flipper wings, webbed feet, and stubby tail (`flatShading: false`, no self-shadow blotches)
+ * - Articulated wing, head, and foot pivots driven by `AnimationSystem`
  */
 export class TuxEntityFactory {
   public static spawn(
@@ -34,153 +86,159 @@ export class TuxEntityFactory {
     const rootGroup = new THREE.Group();
     rootGroup.name = 'TuxMascotRoot';
 
-    // Smooth, facet-free materials calibrated for balanced ASCII contrast against #13222E & #1D2B36
+    const coatColor = new THREE.Color(0x080d14);
+    const bellyColor = new THREE.Color(0xf4faff);
+
     const obsidianCoat = new THREE.MeshStandardMaterial({
-      color: 0x0b1017,
-      emissive: 0x030508,
-      emissiveIntensity: 1.0,
-      roughness: 0.62,
-      metalness: 0.08,
+      color: coatColor,
+      roughness: 0.64,
+      metalness: 0.04,
       flatShading: false,
     });
 
-    const brightBelly = new THREE.MeshStandardMaterial({
-      color: 0xeef6fc,
-      emissive: 0xd6eaf8,
-      emissiveIntensity: 0.28,
-      roughness: 0.56,
+    const torsoPlumage = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      roughness: 0.64,
       metalness: 0.0,
       flatShading: false,
     });
 
     const amberBeakFeet = new THREE.MeshStandardMaterial({
       color: 0xff9f1c,
-      emissive: 0xe06d00,
-      emissiveIntensity: 0.24,
+      emissive: 0x3b1900,
+      emissiveIntensity: 0.34,
       roughness: 0.52,
-      metalness: 0.04,
+      metalness: 0.0,
       flatShading: false,
     });
 
-    const eyeSclera = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const eyePupil = new THREE.MeshBasicMaterial({ color: 0x050608 });
+    const eyeSclera = new THREE.MeshBasicMaterial({ color: 0xf6fbff });
+    const eyePupil = new THREE.MeshBasicMaterial({ color: 0x05080c });
 
-    // 1. Smooth Pear-shaped Penguin Torso (36x28 segments, smooth vertex normals — zero hard facets)
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.75, 36, 28), obsidianCoat);
+    // 1. Unified Smooth Pear-Shaped Torso + Snow-White Belly Plumage (zero intersecting meshes or self-shadows)
+    const torso = new THREE.Mesh(
+      createUnifiedTuxTorsoGeometry(coatColor, bellyColor),
+      torsoPlumage
+    );
+    torso.name = 'TuxTorso';
     torso.position.set(0, 0.86, 0);
-    torso.scale.set(0.92, 1.18, 0.80);
     torso.castShadow = true;
-    torso.receiveShadow = true;
+    torso.receiveShadow = false;
+    torso.userData.coatColor = coatColor.clone();
+    torso.userData.bellyColor = bellyColor.clone();
     rootGroup.add(torso);
 
-    // 2. Smooth Snow-White Belly Patch (+0.071 cleanly proud of torso front to prevent Z-intersection blotches)
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.58, 36, 28), brightBelly);
-    belly.position.set(0, 0.79, 0.23);
-    belly.scale.set(0.84, 1.12, 0.76);
-    rootGroup.add(belly);
-
-    // 3. Articulated Smooth Head Pivot
+    // 2. Articulated Smooth Head Pivot
     const headPivot = new THREE.Group();
-    headPivot.position.set(0, 1.72, 0.04);
+    headPivot.name = 'TuxHeadPivot';
+    headPivot.position.set(0, 1.72, 0.03);
 
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.48, 32, 24), obsidianCoat);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.48, 48, 36), obsidianCoat);
+    skull.name = 'TuxHead';
     skull.scale.set(0.98, 0.95, 0.90);
     skull.castShadow = true;
+    skull.receiveShadow = false;
     headPivot.add(skull);
 
-    // Smooth white cheek/eye patches proud of skull front so facial mask never clips or blotches
-    const facePatchL = new THREE.Mesh(new THREE.SphereGeometry(0.21, 24, 20), brightBelly);
-    facePatchL.position.set(-0.135, 0.015, 0.25);
-    facePatchL.scale.set(0.86, 1.04, 1.05);
-    headPivot.add(facePatchL);
-
-    const facePatchR = new THREE.Mesh(new THREE.SphereGeometry(0.21, 24, 20), brightBelly);
-    facePatchR.position.set(0.135, 0.015, 0.25);
-    facePatchR.scale.set(0.86, 1.04, 1.05);
-    headPivot.add(facePatchR);
-
-    // Expressive Sclera + Pupils cleanly proud of facial patches
+    // Expressive non-overlapping oval eyes cleanly proud of skull front
     for (const side of [-1, 1]) {
-      const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.105, 18, 14), eyeSclera);
-      sclera.position.set(side * 0.15, 0.09, 0.43);
-      sclera.scale.set(0.92, 1.12, 0.52);
+      const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.132, 24, 18), eyeSclera);
+      sclera.position.set(side * 0.162, 0.095, 0.405);
+      sclera.scale.set(0.96, 1.16, 0.58);
       headPivot.add(sclera);
 
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.054, 14, 12), eyePupil);
-      pupil.position.set(side * 0.145, 0.09, 0.475);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.048, 18, 14), eyePupil);
+      pupil.position.set(side * 0.152, 0.095, 0.472);
+      pupil.scale.set(0.92, 0.96, 0.55);
       headPivot.add(pupil);
     }
 
-    // Smooth rounded sculpted Tux Beak
-    const upperBeak = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.42, 24), amberBeakFeet);
-    upperBeak.rotation.x = Math.PI * 0.52;
-    upperBeak.scale.set(1.22, 1.0, 0.58);
-    upperBeak.position.set(0, -0.07, 0.55);
+    // Smooth rounded two-part golden-amber duck-bill beak (zero hard cone facets)
+    const upperBeak = new THREE.Mesh(new THREE.SphereGeometry(0.21, 32, 24), amberBeakFeet);
+    upperBeak.name = 'TuxUpperBeak';
+    upperBeak.scale.set(1.16, 0.42, 1.24);
+    upperBeak.position.set(0, -0.055, 0.43);
+    upperBeak.rotation.x = 0.08;
     upperBeak.castShadow = true;
+    upperBeak.receiveShadow = false;
     headPivot.add(upperBeak);
+
+    const lowerBeak = new THREE.Mesh(new THREE.SphereGeometry(0.17, 28, 20), amberBeakFeet);
+    lowerBeak.name = 'TuxLowerBeak';
+    lowerBeak.scale.set(1.02, 0.30, 1.02);
+    lowerBeak.position.set(0, -0.115, 0.40);
+    lowerBeak.rotation.x = 0.16;
+    lowerBeak.castShadow = true;
+    lowerBeak.receiveShadow = false;
+    headPivot.add(lowerBeak);
 
     rootGroup.add(headPivot);
 
-    // 4. Articulated Left & Right Flipper Wings (smooth rounded cones)
+    // 3. Articulated Smooth Rounded Flipper Wings
     const leftWingPivot = new THREE.Group();
-    leftWingPivot.position.set(-0.66, 1.32, 0.02);
+    leftWingPivot.position.set(-0.65, 1.32, 0.02);
     leftWingPivot.rotation.z = 0.28;
-    const leftWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 24), obsidianCoat);
-    leftWingMesh.position.set(-0.08, -0.42, 0);
-    leftWingMesh.scale.set(0.55, 1.0, 1.28);
-    leftWingMesh.rotation.z = Math.PI;
+    const leftWingMesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 32, 24), obsidianCoat);
+    leftWingMesh.position.set(-0.06, -0.38, 0);
+    leftWingMesh.scale.set(0.42, 2.05, 0.96);
     leftWingMesh.castShadow = true;
+    leftWingMesh.receiveShadow = false;
     leftWingPivot.add(leftWingMesh);
     rootGroup.add(leftWingPivot);
 
     const rightWingPivot = new THREE.Group();
-    rightWingPivot.position.set(0.66, 1.32, 0.02);
+    rightWingPivot.position.set(0.65, 1.32, 0.02);
     rightWingPivot.rotation.z = -0.28;
-    const rightWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 24), obsidianCoat);
-    rightWingMesh.position.set(0.08, -0.42, 0);
-    rightWingMesh.scale.set(0.55, 1.0, 1.28);
-    rightWingMesh.rotation.z = Math.PI;
+    const rightWingMesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 32, 24), obsidianCoat);
+    rightWingMesh.position.set(0.06, -0.38, 0);
+    rightWingMesh.scale.set(0.42, 2.05, 0.96);
     rightWingMesh.castShadow = true;
+    rightWingMesh.receiveShadow = false;
     rightWingPivot.add(rightWingMesh);
     rootGroup.add(rightWingPivot);
 
-    // 5. Seated Smooth Webbed Feet
+    // 4. Seated Smooth Webbed Feet
     const leftFootPivot = new THREE.Group();
     leftFootPivot.position.set(-0.34, 0.08, 0.34);
     leftFootPivot.rotation.y = 0.26;
-    const leftFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 18), amberBeakFeet);
-    leftFootMesh.scale.set(0.82, 0.30, 1.18);
+    const leftFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 28, 20), amberBeakFeet);
+    leftFootMesh.scale.set(0.84, 0.30, 1.18);
     leftFootMesh.position.set(0, 0.01, 0.12);
     leftFootMesh.castShadow = true;
+    leftFootMesh.receiveShadow = false;
     leftFootPivot.add(leftFootMesh);
     rootGroup.add(leftFootPivot);
 
     const rightFootPivot = new THREE.Group();
     rightFootPivot.position.set(0.34, 0.08, 0.34);
     rightFootPivot.rotation.y = -0.26;
-    const rightFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 18), amberBeakFeet);
-    rightFootMesh.scale.set(0.82, 0.30, 1.18);
+    const rightFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 28, 20), amberBeakFeet);
+    rightFootMesh.scale.set(0.84, 0.30, 1.18);
     rightFootMesh.position.set(0, 0.01, 0.12);
     rightFootMesh.castShadow = true;
+    rightFootMesh.receiveShadow = false;
     rightFootPivot.add(rightFootMesh);
     rootGroup.add(rightFootPivot);
 
-    // 6. Smooth Stubby Tail
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.34, 18), obsidianCoat);
-    tail.position.set(0, 0.22, -0.64);
-    tail.rotation.x = -Math.PI * 0.42;
+    // 5. Smooth Rounded Stubby Tail
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.17, 24, 18), obsidianCoat);
+    tail.position.set(0, 0.22, -0.60);
+    tail.scale.set(0.85, 0.72, 1.35);
+    tail.rotation.x = -0.24;
     tail.castShadow = true;
+    tail.receiveShadow = false;
     rootGroup.add(tail);
 
-    // Optional Neofetch pedestal & rim/key light rig for crystal-clear silhouette separation
+    // Optional smooth circular plinth (excluded by default on the minimalist Neofetch mascot stage)
     if (options?.includeShowcaseRig) {
       const plinthMat = new THREE.MeshStandardMaterial({
         color: 0x1b3344,
-        roughness: 0.85,
-        metalness: 0.15,
-        flatShading: true,
+        roughness: 0.82,
+        metalness: 0.08,
+        flatShading: false,
       });
-      const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.16, 12), plinthMat);
+      const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.16, 32), plinthMat);
       plinth.name = 'TuxShowcasePlinth';
       plinth.userData.isShowcasePedestal = true;
       plinth.position.set(0, -0.06, 0.08);
