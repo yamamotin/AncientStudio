@@ -17,8 +17,9 @@ new AsciiSceneEngine(container, config) // facade from ascii-engine-module/src/i
 
 `window.ASCIIRealms` exposes `AsciiSceneEngine`, `THREE`, `DEFAULT_ENGINE_CONFIG`,
 `DEFAULT_PALETTE`, `DEFAULT_ASCII_RAMP`, scene composition tools
-(`SceneComposerKit`, `SceneDepthRig`, `EntityBlueprintRegistry`, `World`,
-`SystemRunner`) and standalone per-object outline helpers (`applyObjectOutline`,
+(`SceneComposerKit`, `SceneDepthRig`, `MascotStageBuilder`, `MASCOT_BACKDROP_HEX`,
+`MASCOT_FLOOR_HEX`, `EntityBlueprintRegistry`, `World`, `SystemRunner`) and
+standalone per-object outline helpers (`applyObjectOutline`,
 `clearObjectOutline`, `getObjectOutlineState`, `DEFAULT_OUTLINE_HIGHLIGHT_COLOR`).
 The adapter also tolerates older namespace-style engines (`mount`/`create`/`Engine`)
 so the static site continues to work if the bundle is replaced by another
@@ -56,8 +57,9 @@ only when ready.
 
 `[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
 the unified Cyberpunk Neo-Sector boulevard (`MapLoader` + `PlaygroundSceneBuilder`
-+ `PlaygroundEntityFactory`), elevated maglev viaduct and train, neon towers and
-holograms, cyber-trees animated by `WindSystem`, patrolling drones/hover-vehicles,
++ `PlaygroundEntityFactory`), elevated overpass, layered urban facades, holo-reactor
+portal, overhead catenary cables and suspended street signs animated by `WindSystem`,
+autonomous hover-spinners (`PatrolSystem`), foreground Netrunner protagonist,
 5-tap PCF street shadows, ~35% GPU `max()` lighten block-detail blend, `5:8`
 grid-free glyph cells, cursor light and smooth HiDPI resolution scaling. The
 adapter maps the three UI buttons to `atmosphere` + palette/weather state on that
@@ -65,16 +67,24 @@ single scene: `day`, `night` and `rain` (`rain` enables ASCII precipitation and
 stronger wind). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records
 the engine-side tools added on that date.
 
-`[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (built by
-`TuxEntityFactory` with `TuxShowcasePlinth`). While the engine is still loading,
-or if it fails, `assets/js/neofetch.js` shows a cute **static** ASCII penguin
-placeholder (eyes, beak and webbed feet) that is never animated. As soon as
-`data-mode="engine"` / `tp:scene-mode` reports the live scene, the placeholder
-is hidden by CSS and no fallback loop touches the 3D mascot. The active penguin
-spins only on the horizontal axis (`yaw`), continuously, with no pitch and no
-pointer, mouse or touch response; the stage is `pointer-events: none`. Text
-content is limited to the seven specified stack rows. The page does **not** yet
-call the engine outline API on the penguin.
+`[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` using
+`MascotStageBuilder` (`#13222E` backdrop + `#1D2B36` floor with soft PCF/contact
+shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
+(`includeShowcaseRig: false`, fully quantized in ASCII via `uMascotStudio`). While
+the engine is still loading, or if it fails, `assets/js/neofetch.js` shows a cute
+**static** ASCII penguin placeholder (eyes, beak and webbed feet) that is never
+animated. As soon as `data-mode="engine"` / `tp:scene-mode` reports the live
+scene, the placeholder is hidden by CSS and no fallback loop touches the 3D
+mascot. The active penguin spins only on the horizontal axis (`yaw`),
+continuously, with no pitch and no pointer, mouse or touch response; the stage is
+`pointer-events: none`. Text content is limited to the seven specified stack rows.
+The page does **not** yet call the engine outline API on the penguin.
+
+Mandatory architectural, stylistic (full-scene ASCII coherence, sober/desaturated
+base palettes and value hierarchy), interaction and lifecycle (`deltaTime`,
+listener cleanup and `.dispose()`) rules for any new `ascii-engine-module`
+implementation are consolidated in
+[`ascii-engine-module/README.md`](../ascii-engine-module/README.md).
 
 ## Per-object outline API (engine side, not yet consumed by the UI)
 
