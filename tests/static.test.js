@@ -39,7 +39,7 @@ test('required sections and real identity are present', () => {
     '>[ curriculo-pt-br ]</a>',
     '>[ curriculo-en ]</a>',
     'id="contact-button"',
-    'href="https://www.linkedin.com/in/eron-yamamoto-bb3384156"'
+    'href="https://www.linkedin.com/in/eron-yamamoto/"'
   ]);
 });
 

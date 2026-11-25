@@ -112,7 +112,7 @@ nenhum código de contorno foi adicionado ao frontend.
 - Rótulos padronizados no formato `[ termo ]`, sem `--` ou `github` colado:
   `pt-br` usa `[ contato ]` e `[ curriculo-* ]`; `en` usa `[ contact ]` e
   `[ resume-* ]`. Dicionários standalone e embutidos permanecem idênticos.
-- LinkedIn corrigido para `https://www.linkedin.com/in/eron-yamamoto-bb3384156`,
+- LinkedIn corrigido para `https://www.linkedin.com/in/eron-yamamoto/`,
   inclusive no comando `contact` do console.
 - Contato continua sendo um `<a>` acessível: em mobile abre `mailto:`, em
   desktop/telas não-mobile direciona para
