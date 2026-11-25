@@ -5,6 +5,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: "Exact commit to build/deploy (defaults to the event SHA)"
+        required: false
+        type: string
+
+# Agent merges use GITHUB_TOKEN; the resulting push does not trigger workflows.
+# The auto-merge helper dispatches this workflow explicitly with the merged SHA.
+env:
+  DEPLOY_SHA: ${{ inputs.sha || github.sha }}
 
 permissions:
   contents: read
@@ -22,6 +32,8 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -42,14 +54,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
       - uses: docker/setup-buildx-action@v3
       - name: Build backend image
-        run: docker build -f infra/docker/Dockerfile -t ancientstudio-backend:${{ github.sha }} .
+        run: docker build -f infra/docker/Dockerfile -t ancientstudio-backend:${{ env.DEPLOY_SHA }} .
 
   deploy:
     name: Deploy to Vercel
     needs: docker-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -60,6 +76,8 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
       - name: Skip when Vercel secrets are not configured
         if: env.VERCEL_TOKEN == '' || env.VERCEL_ORG_ID == '' || env.VERCEL_PROJECT_ID == ''
         run: echo "::notice::Vercel secrets not configured; deployment skipped."
