@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Full agent pipeline for a green PR:
-#   checks -> conflict resolution -> merge -> delete branch -> dispatch deploys.
+# Full agent pipeline for a green PR. Permanent order:
+#   merge (resolving conflicts when needed) -> delete branch -> redeploy.
+# Conflict resolution is part of the MERGE phase: GitHub cannot merge a dirty PR,
+# so `update-branch` runs before the merge call and the checks are re-evaluated.
 # No PR approval is attempted: GitHub rejects self-approval, and this repository
 # does not require reviews to merge.
 set -euo pipefail
@@ -15,6 +17,7 @@ MAX_RESOLVE_ATTEMPTS="${MAX_RESOLVE_ATTEMPTS:-3}"
 MAX_READY_ATTEMPTS="${MAX_READY_ATTEMPTS:-20}"
 PROTECTED_BRANCHES="${PROTECTED_BRANCHES:-main,dev/portfolio,dev/engine}"
 DEPLOY_WORKFLOWS="${DEPLOY_WORKFLOWS:-pages.yml,ci-cd.yml}"
+PERMANENT_ORDER="merge,resolve-conflicts,delete-branch,redeploy"
 
 export GH_REPO="$REPO"
 export GH_PROMPT_DISABLED=1
@@ -26,6 +29,7 @@ fi
 export GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
 
 log() { printf '%s\n' "$*"; }
+log "Pipeline order: $PERMANENT_ORDER"
 pr_field() { gh api "repos/$REPO/pulls/$PR_NUMBER" --jq "$1"; }
 main_sha() { gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha'; }
 
@@ -141,8 +145,8 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# 2) Resolve a conflicting PR by merging main into the PR branch via the
-#    official "update branch" API (no local rewrite of user changes).
+# PHASE 1/3 — MERGE. Conflicts are resolved inside this phase via the official
+# "update branch" API (no local rewrite of user changes), then the PR is merged.
 # ---------------------------------------------------------------------------
 resolve_branch() {
   local expected="$1"
@@ -220,9 +224,7 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3) Merge, delete the PR branch, then dispatch both deploy workflows.
-#    GITHUB_TOKEN merges do NOT emit push workflow runs, so workflow_dispatch
-#    is required to guarantee Pages and Vercel pipelines execute.
+# PHASE 1/3 — MERGE (conflicts already resolved above when present).
 # ---------------------------------------------------------------------------
 old_main=$(main_sha)
 if ! gh pr merge "$PR_NUMBER" --merge; then
@@ -249,20 +251,36 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 log "main=$merged_main"
 
-if is_protected "$head_ref"; then
-  log "Protected branch '$head_ref' kept."
-elif gh api -X DELETE "repos/$REPO/git/refs/heads/$head_ref" >/dev/null 2>&1; then
-  log "Deleted merged branch '$head_ref'."
-else
-  log "Merged branch '$head_ref' was already deleted or could not be removed."
-fi
-
-for workflow in $(printf '%s' "$DEPLOY_WORKFLOWS" | tr ',' ' '); do
-  [ -n "$workflow" ] || continue
-  if gh workflow run "$workflow" --ref main -f sha="$merged_main" >/dev/null; then
-    log "Dispatched $workflow for $merged_main."
+# ---------------------------------------------------------------------------
+# PHASE 2/3 — DELETE BRANCH (never delete protected/persistent branches).
+# ---------------------------------------------------------------------------
+delete_merged_branch() {
+  local branch="$1"
+  if is_protected "$branch"; then
+    log "Protected branch '$branch' kept."
+  elif gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" >/dev/null 2>&1; then
+    log "Deleted merged branch '$branch'."
   else
-    echo "::error::Failed to dispatch $workflow for $merged_main." >&2
-    exit 1
+    log "Merged branch '$branch' was already deleted or could not be removed."
   fi
-done
+}
+delete_merged_branch "$head_ref"
+
+# ---------------------------------------------------------------------------
+# PHASE 3/3 — REDEPLOY. GITHUB_TOKEN merges emit no push runs, so both deploy
+# workflows are dispatched explicitly with the exact merged main SHA.
+# ---------------------------------------------------------------------------
+redeploy() {
+  local sha="$1"
+  local workflow
+  for workflow in $(printf '%s' "$DEPLOY_WORKFLOWS" | tr ',' ' '); do
+    [ -n "$workflow" ] || continue
+    if gh workflow run "$workflow" --ref main -f sha="$sha" >/dev/null; then
+      log "Dispatched $workflow for $sha."
+    else
+      echo "::error::Failed to dispatch $workflow for $sha." >&2
+      exit 1
+    fi
+  done
+}
+redeploy "$merged_main"
