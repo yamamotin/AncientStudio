@@ -1,10 +1,11 @@
-"""Schemas for the Fintech/Fiscal gateway."""
+"""Schemas for the API Gateway / BFF and Fiscal Gateway domain."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
 
+from app.queue.models import QueueMetrics
 from pydantic import BaseModel, Field
 
 
@@ -40,3 +41,25 @@ class InvoiceOut(BaseModel):
     net: float
     validated_at: datetime
     checks: list[str]
+
+
+class CacheTelemetryOut(BaseModel):
+    hits: int
+    misses: int
+    sets: int
+    evictions: int
+    size: int
+
+
+class GatewayCapabilitiesOut(BaseModel):
+    """BFF capability and architecture manifest for observability and frontend discovery."""
+
+    service: str
+    version: str
+    environment: str
+    python_runtime: str
+    architecture: Literal["modular-monolith-event-driven"]
+    domains: list[str]
+    worker_topics: list[str]
+    cache: CacheTelemetryOut
+    queue: QueueMetrics

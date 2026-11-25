@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from app.config import Settings, get_settings
+from app.core.config import Settings, get_settings
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 

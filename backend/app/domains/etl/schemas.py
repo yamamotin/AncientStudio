@@ -1,4 +1,4 @@
-"""Schemas for the ETL/dados API."""
+"""Schemas for the ETL / Financial Ledger domain."""
 
 from __future__ import annotations
 

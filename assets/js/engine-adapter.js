@@ -1,10 +1,10 @@
 /* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
    Connects:
    1. `#ascii-scene` -> Unified Cyberpunk Boulevard scenario (`mode: 'playground'`)
-      with 3 cohesive atmosphere states: "Noite" (`night`), "Dia" (`day`), and "Com chuva" (`rain`)
+      with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Com chuva")
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
-   Zero framework dependencies. The playground keeps scroll-safe passive pointer/touch input;
-   the mascot has no pointer/touch interaction and spins horizontally via a single RAF loop. */
+   Zero framework dependencies. The playground keeps scroll-safe passive pointer input;
+   the mascot has no pointer interaction and spins on its own via a single RAF loop. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -12,9 +12,11 @@ window.TP = window.TP || {};
 
   var controllers = [];
 
+  // The UI exposes one scene with exactly three modes: day, night and rain.
+  var DEFAULT_MODE = 'night';
+  var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
     night: {
-      atmosphere: 'night',
       palette: {
         background: '#05070F',
         warmLight: '#FF2A85',
@@ -31,7 +33,6 @@ window.TP = window.TP || {};
       parallaxIntensity: 1.6
     },
     day: {
-      atmosphere: 'day',
       palette: {
         background: '#1E3F66',
         warmLight: '#FF8A3D',
@@ -48,7 +49,6 @@ window.TP = window.TP || {};
       parallaxIntensity: 1.4
     },
     rain: {
-      atmosphere: 'rain',
       palette: {
         background: '#04060D',
         warmLight: '#FF1E75',
@@ -66,19 +66,12 @@ window.TP = window.TP || {};
     }
   };
 
-  var CYCLE_ORDER = ['night', 'day', 'rain'];
-
-  function normalizePresetName(name) {
-    if (name === 'day' || name === 'night' || name === 'rain') return name;
-    if (name === 'storm') return 'rain';
-    return 'night';
-  }
-
   function configFor(name) {
-    var key = normalizePresetName(name);
-    var preset = PRESETS[key] || PRESETS.night;
+    var mode = SCENE_MODES.indexOf(name) >= 0 ? name : DEFAULT_MODE;
+    var preset = PRESETS[mode] || PRESETS[DEFAULT_MODE];
+    var atmosphere = mode !== 'rain' ? mode : 'rain';
     return {
-      atmosphere: preset.atmosphere,
+      atmosphere: atmosphere,
       palette: Object.assign({}, preset.palette),
       bloomIntensity: preset.bloomIntensity,
       dofStrength: preset.dofStrength,
@@ -143,10 +136,10 @@ window.TP = window.TP || {};
       engine: null,
       instance: null,
       mode: 'fallback',
-      preset: normalizePresetName((options && options.preset) || 'night'),
+      preset: SCENE_MODES.indexOf((options && options.preset) || '') >= 0
+        ? (options && options.preset)
+        : DEFAULT_MODE,
       paused: false,
-      cycleTimer: null,
-      cycleIndex: 0,
       orbitTimer: null,
       lastUserPointer: 0,
       mascotSpinGroup: null,
@@ -232,29 +225,6 @@ window.TP = window.TP || {};
       state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
     }
 
-    function stopCycle() {
-      if (state.cycleTimer) window.clearInterval(state.cycleTimer);
-      state.cycleTimer = null;
-    }
-
-    function setCycle(enabled) {
-      stopCycle();
-      if (!enabled || state.mode !== 'engine' || isMascot) return;
-      var currentIdx = CYCLE_ORDER.indexOf(state.preset);
-      state.cycleIndex = currentIdx >= 0 ? currentIdx : 0;
-
-      state.cycleTimer = window.setInterval(function () {
-        if (state.paused) return;
-        state.cycleIndex = (state.cycleIndex + 1) % CYCLE_ORDER.length;
-        var nextMode = CYCLE_ORDER[state.cycleIndex];
-        setPreset(nextMode);
-        var selectEl = document.getElementById('scene-preset');
-        if (selectEl && selectEl.value !== nextMode) {
-          selectEl.value = nextMode;
-        }
-      }, 6500);
-    }
-
     function stopOrbit() {
       if (state.orbitTimer) window.clearInterval(state.orbitTimer);
       state.orbitTimer = null;
@@ -291,9 +261,10 @@ window.TP = window.TP || {};
     }
 
     function setPreset(name) {
-      state.preset = normalizePresetName(name);
+      var mode = SCENE_MODES.indexOf(name) >= 0 ? name : DEFAULT_MODE;
+      state.preset = mode;
       if (!isMascot) {
-        applyConfig(configFor(state.preset));
+        applyConfig(configFor(mode));
       }
     }
 
@@ -392,7 +363,6 @@ window.TP = window.TP || {};
     }
 
     function destroy() {
-      stopCycle();
       stopOrbit();
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
@@ -443,7 +413,6 @@ window.TP = window.TP || {};
       mount: mount,
       setPaused: setPaused,
       setPreset: setPreset,
-      setCycle: setCycle,
       setAutoOrbit: setAutoOrbit,
       setPlayableKeyboard: function (enabled) {
         if (state.instance && typeof state.instance.setPlayableKeyboardEnabled === 'function') {

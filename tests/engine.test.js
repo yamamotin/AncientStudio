@@ -38,8 +38,20 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
   includesAll(pointerInput, ['pointerdown', 'pointermove', 'pointerup', '{ passive: true }']);
 });
 
-test('playground presets cover unified scenario modes (Noite, Dia, Com chuva)', () => {
-  includesAll(adapter, ['night', 'day', 'rain', 'atmosphere', "CYCLE_ORDER = ['night', 'day', 'rain']"]);
+test('playground exposes exactly three scene modes', () => {
+  includesAll(adapter, [
+    'DEFAULT_MODE = \'night\'',
+    'SCENE_MODES = [\'day\', \'night\', \'rain\']',
+    "mode !== 'rain'",
+    'atmosphere: atmosphere',
+    'blockBlendWeight: preset.blockBlendWeight',
+    'windStrength: preset.windStrength',
+    'blockBlendWeight: 0.28',
+    'cellSize: 8',
+    'touchstart',
+    'touchmove'
+  ]);
+  assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette/);
 });
 
 test('neofetch penguin auto-rotates without mouse or touch interaction', () => {
@@ -586,11 +598,11 @@ test('single scenario supports Dia/Noite/Com chuva modes, calibrated PCF street 
     'Unused legacy island noise module removed'
   );
   includesAll(html, [
-    '<option value="night" data-i18n="scene.modeNight">Noite</option>',
-    '<option value="day" data-i18n="scene.modeDay">Dia</option>',
-    '<option value="rain" data-i18n="scene.modeRain">Com chuva</option>'
+    'data-scene-mode="day"',
+    'data-scene-mode="night"',
+    'data-scene-mode="rain"'
   ]);
-  assert.doesNotMatch(html, /<option value="sanctuary">|<option value="emerald">/);
+  assert.doesNotMatch(html, /value="sanctuary"|value="emerald"/);
 
   // 2. Shader verification: street shader samples real-time directional PCF shadow map; ASCII shader eliminates grid seams
   includesAll(waterShader, [

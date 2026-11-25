@@ -46,13 +46,11 @@
   "api.offline": "// backend indisponível: {detail}",
   "scene.hint": "Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.",
   "scene.aria": "Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.",
-  "scene.presetLabel": "Preset da cena",
+  "scene.presetLabel": "Modos do cenário",
   "scene.presetHelp": "// mouse/toque rotacionam a câmera; scroll continua livre",
   "scene.fallbackHelp": "// controles ativam quando o motor estiver disponível",
   "scene.pause": "[ pause ]",
   "scene.resume": "[ resume ]",
-  "scene.cycleOff": "[ cycle: off ]",
-  "scene.cycleOn": "[ cycle: on ]",
   "specs.user": "User",
   "specs.os": "OS",
   "specs.languages": "Languages",
@@ -77,7 +75,8 @@
   "scene.exitFullscreen": "[ sair da tela cheia ]",
   "scene.fullscreenAria": "Ampliar a seção ASCII REALMS",
   "scene.exitFullscreenAria": "Restaurar a seção ASCII REALMS",
-  "scene.modeNight": "Noite",
-  "scene.modeDay": "Dia",
-  "scene.modeRain": "Com chuva"
+  "scene.day": "[ Dia ]",
+  "scene.night": "[ Noite ]",
+  "scene.rain": "[ Com chuva ]",
+  "contrast.label": "Contraste da página"
 }
