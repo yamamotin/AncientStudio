@@ -11,18 +11,23 @@ AncientStudio/
 ├── index.html                         # SPA estática, atributos data-i18n
 ├── assets/
 │   ├── css/style.css
+│   ├── img/eron-portrait-ascii.png    # retrato ASCII do hero à esquerda
 │   ├── js/
 │   │   ├── core.js                    # helpers, prefers-reduced-motion
 │   │   ├── i18n.js                    # pt-br → en, sem rebuild
 │   │   ├── api-client.js              # chamadas reais ao backend
-│   │   ├── main.js                    # composição da UI
+│   │   ├── main.js                    # composição da UI e controle de brilho
+│   │   ├── neofetch.js                # palco Tux 3D + fallback raycaster ASCII
 │   │   ├── pipeline.js / api.js / console.js
-│   │   └── engine-adapter.js          # [agente 3D]
+│   │   ├── engine-adapter.js          # ponte para modos day / night / rain e mascot
+│   │   └── ascii-engine.bundle.js     # bundle IIFE gerado por ascii-engine-module
 │   ├── i18n/
 │   │   ├── pt-br.json                 # idioma primário
 │   │   └── en.json                    # inglês internacional
 │   ├── cv/                            # PDFs originais autorizados
 │   └── fonts/                         # JetBrains Mono self-hosted
+│
+├── ascii-engine-module/               # pacote TypeScript/WebGL2 3D ASCII + ECS [agente 3D]
 │
 ├── backend/                           # FastAPI monólito modular (implementado)
 │   ├── app/
@@ -49,13 +54,22 @@ AncientStudio/
 │   └── README.md
 │
 ├── .github/workflows/
-│   ├── ci-cd.yml                      # ruff, pytest, docker build, deploy
-│   ├── pages.yml                      # deploy estático + parity check
-│   └── pr-tests.yml                   # testes estáticos do frontend
+│   ├── auto-merge.yml                 # merge verificado -> delete-branch -> redeploy
+│   ├── ci.yml                         # matriz completa (Node, engine TS, ruff + pytest)
+│   ├── ci-cd.yml                      # ruff, pytest, docker build, deploy Vercel
+│   ├── pages.yml                      # deploy estático GitHub Pages + parity check
+│   └── pr-tests.yml                   # testes estáticos e contratos do frontend/engine
+│
+├── scripts/
+│   ├── auto-merge-verified.sh         # helper de merge, resolução de conflito e redeploy
+│   └── verify-pages-parity.sh         # validação de paridade de SHA (Pages vs Vercel)
 │
 ├── docs/
 │   ├── architecture.md                # este documento
-│   └── engine-integration.md          # [agente 3D]
+│   ├── changelog-2026-11-25.md        # consolidação das entregas de 2026-11-25
+│   ├── cicd-auto-merge.md             # fluxo de auto-merge e configurações do GitHub
+│   ├── engine-integration.md          # contrato de integração do motor 3D [agente 3D]
+│   └── pages-recovery.md              # diagnóstico e recuperação do GitHub Pages
 │
 ├── docker-compose.yml                 # api + n8n com credenciais obrigatórias
 ├── .env.example
