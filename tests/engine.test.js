@@ -42,10 +42,29 @@ test('playground presets cover day/night and weather lighting', () => {
   includesAll(adapter, ['sanctuary', 'dawn', 'day', 'storm', 'emerald']);
 });
 
-test('neofetch penguin tracks mouse pointer in both WebGL2 and fallback raycaster', () => {
+test('neofetch penguin auto-rotates without mouse or touch interaction', () => {
   const neofetch = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
-  includesAll(adapter, ['updatePenguinFromPointer', 'penguinTargetYaw', 'penguinTargetPitch', 'getScene']);
-  includesAll(neofetch, ['renderPenguinAscii', 'pointermove', 'targetYaw', 'targetPitch', 'penguin-stage']);
+
+  // Fallback: continuous RAF yaw driven by elapsed time, not by pointer state.
+  includesAll(neofetch, [
+    'AUTO_SPIN_RAD_PER_SEC',
+    'state.yaw += delta * AUTO_SPIN_RAD_PER_SEC',
+    'renderPenguinAscii',
+    'penguin-stage'
+  ]);
+  assert.doesNotMatch(neofetch, /pointermove|pointerdown|updateFromClientPoint/);
+
+  // Engine: pointer events are captured before the core listeners see them,
+  // and one integration-only group rotates the Tux root each frame.
+  includesAll(adapter, [
+    'TuxMascotRoot',
+    'TuxAutoSpin',
+    'stopImmediatePropagation',
+    'data-pointer-locked',
+    'data-auto-spin',
+    'getScene'
+  ]);
+  assert.doesNotMatch(adapter, /updatePenguinFromPointer|penguinTargetYaw|windowPointerListener/);
 });
 
 test('modular engine architecture exposes ECS, Lifecycle, World, Entities, VFX, and Input modules', () => {

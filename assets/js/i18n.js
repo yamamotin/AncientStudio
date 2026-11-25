@@ -60,8 +60,8 @@ window.TP = window.TP || {};
     "scene.resume": "[ resume ]",
     "scene.cycleOff": "[ cycle: off ]",
     "scene.cycleOn": "[ cycle: on ]",
-    "stack.penguinAria": "Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.",
-    "stack.penguinHint": "// mouse ou toque para girar",
+    "stack.penguinAria": "Pinguim ASCII 3D girando automaticamente, sem controle por mouse ou toque.",
+    "stack.penguinHint": "// giro automático · mouse e toque não alteram a cena",
     "specs.user": "User",
     "specs.os": "OS",
     "specs.languages": "Languages",
@@ -81,7 +81,11 @@ window.TP = window.TP || {};
     "console.githubTodo": "[ TODO ] GitHub ainda não informado pelo Eron.",
     "console.githubDetail": "Envie o username para adicionar o link real aqui.",
     "footer.note": "// no trackers · no analytics · self-hosted fonts",
-    "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água"
+    "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água",
+    "scene.fullscreen": "[ tela cheia ]",
+    "scene.exitFullscreen": "[ sair da tela cheia ]",
+    "scene.fullscreenAria": "Ampliar a seção ASCII REALMS",
+    "scene.exitFullscreenAria": "Restaurar a seção ASCII REALMS"
   },
   "en": {
     "skip": "Skip to content",
@@ -137,8 +141,8 @@ window.TP = window.TP || {};
     "scene.resume": "[ resume ]",
     "scene.cycleOff": "[ cycle: off ]",
     "scene.cycleOn": "[ cycle: on ]",
-    "stack.penguinAria": "Interactive 3D ASCII penguin. Drag with mouse or touch to rotate.",
-    "stack.penguinHint": "// mouse or touch to rotate",
+    "stack.penguinAria": "3D ASCII penguin rotating automatically, with no mouse or touch control.",
+    "stack.penguinHint": "// auto-rotate · mouse and touch do not affect the scene",
     "specs.user": "User",
     "specs.os": "OS",
     "specs.languages": "Languages",
@@ -158,7 +162,11 @@ window.TP = window.TP || {};
     "console.githubTodo": "[ TODO ] GitHub username not provided by Eron yet.",
     "console.githubDetail": "Send the username to add the real link here.",
     "footer.note": "// no trackers · no analytics · self-hosted fonts",
-    "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections"
+    "scene.engineHelp": "// WebGL2 3D engine online · mouse/touch control camera and water reflections",
+    "scene.fullscreen": "[ fullscreen ]",
+    "scene.exitFullscreen": "[ exit fullscreen ]",
+    "scene.fullscreenAria": "Expand the ASCII REALMS section",
+    "scene.exitFullscreenAria": "Restore the ASCII REALMS section"
   }
 };
   var STORAGE_KEY = 'ancientstudio.lang';

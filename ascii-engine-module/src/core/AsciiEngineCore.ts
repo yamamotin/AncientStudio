@@ -582,6 +582,11 @@ export class AsciiEngineCore {
 
     const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const coarse = this.isCoarsePointerDevice();
+    const cssFullscreen =
+      typeof document !== 'undefined' &&
+      Boolean(
+        this.container.closest?.('[data-fullscreen-view="true"], .is-scene-fullscreen')
+      );
 
     const profile = computeAdaptiveResolution({
       cssWidth,
@@ -589,7 +594,7 @@ export class AsciiEngineCore {
       devicePixelRatio: rawDpr,
       config: this.config,
       isCoarsePointer: coarse,
-      isFullscreen: this.isFullscreenActive,
+      isFullscreen: this.isFullscreenActive || cssFullscreen,
     });
 
     // Skip duplicate no-op resize ticks if physical resolution and grid are already identical
@@ -620,7 +625,7 @@ export class AsciiEngineCore {
     this.camera.aspect = aspect;
     // Slightly widen FOV on narrow portrait viewports or expand vista cleanly on ultrawide/fullscreen
     if (this.config.mode === 'playground') {
-      this.camera.fov = aspect < 1.0 ? 54 : this.isFullscreenActive ? 44 : 46;
+      this.camera.fov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
     }
     this.camera.updateProjectionMatrix();
 

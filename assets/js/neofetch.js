@@ -1,4 +1,4 @@
-/* Interactive 3D ASCII Tux penguin fallback & instant boot stage for [ STACK // NEOFETCH ].
+/* Auto-rotating 3D ASCII Tux fallback for [ STACK // NEOFETCH ].
    - Targets `#penguin-stage` and `.penguin-fallback` (with backward compatibility for `.neofetch .ascii-logo`)
    - Adaptive grid resolution (`computeFallbackGrid`): scales ASCII columns/rows & font-size based on
      actual `#penguin-stage` container bounds & device profile (mobile vs desktop/HD) in parity with
@@ -6,8 +6,8 @@
    - Renders a high-contrast 3D raycast Tux silhouette inspired by classic dense ASCII Tux art:
      dense dark dorsal coat (`M`, `W`, `#`, `@`), bright clean white belly (` `, `.`, `:`),
      defined eyes, sculpted beak, flippers, and webbed feet.
-   - Tracks mouse & touch (`pointermove` / `pointerdown`) passively (`{ passive: true }`) without blocking page scroll.
-   - Automatically yields its `requestAnimationFrame` loop as soon as `#penguin-stage[data-mode="engine"]` mounts! */
+   - No pointer/touch interaction: the fallback spins on its own and yields its
+     `requestAnimationFrame` loop as soon as the WebGL2 engine mounts. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -41,6 +41,8 @@ window.TP = window.TP || {};
     { cx: 0.0, cy: -0.94, cz: -0.58, rx: 0.18, ry: 0.14, rz: 0.22, mat: 0 }
   ];
 
+  var AUTO_SPIN_RAD_PER_SEC = 0.55;
+
   var state = {
     frameEl: null,
     logoEl: null,
@@ -48,11 +50,9 @@ window.TP = window.TP || {};
     cols: 34,
     rows: 20,
     fontPx: 9.5,
-    targetYaw: 0.14,
-    targetPitch: 0,
     yaw: 0.14,
     pitch: 0,
-    pointerActive: false,
+    spinLast: 0,
     visible: true,
     engineActive: false,
     resizeObserver: null,
@@ -261,38 +261,17 @@ window.TP = window.TP || {};
     return lines.join('\n');
   }
 
-  function updateFromClientPoint(clientX, clientY) {
-    if (!state.frameEl) return;
-    var rect = state.frameEl.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    var centerX = rect.left + rect.width * 0.5;
-    var centerY = rect.top + rect.height * 0.5;
-
-    var halfSpanX = Math.max(160, window.innerWidth * 0.38);
-    var halfSpanY = Math.max(140, window.innerHeight * 0.38);
-
-    var nx = Math.max(-1, Math.min(1, (clientX - centerX) / halfSpanX));
-    var ny = Math.max(-1, Math.min(1, (clientY - centerY) / halfSpanY));
-
-    state.targetYaw = nx * 1.25;
-    state.targetPitch = ny * 0.44;
-    state.pointerActive = true;
-  }
-
   function tick(now) {
     state.rafId = null;
     if (!state.visible || !state.logoEl || state.engineActive) return;
 
     var tSec = (now || 0) * 0.001;
-    var idleYaw = Math.sin(tSec * 0.85) * 0.28;
-    var idlePitch = Math.cos(tSec * 0.65) * 0.06;
+    var delta = state.spinLast ? Math.min(0.05, tSec - state.spinLast) : 0;
+    state.spinLast = tSec;
 
-    var desiredYaw = state.pointerActive ? state.targetYaw : idleYaw;
-    var desiredPitch = state.pointerActive ? state.targetPitch : idlePitch;
-
-    state.yaw += (desiredYaw - state.yaw) * 0.14;
-    state.pitch += (desiredPitch - state.pitch) * 0.14;
+    // Continuous, pointer-independent yaw. Pitch stays a gentle breathing bob.
+    state.yaw += delta * AUTO_SPIN_RAD_PER_SEC;
+    state.pitch = Math.sin(tSec * 0.65) * 0.06;
 
     var ascii = renderPenguinAscii(state.yaw, state.pitch, tSec);
     if (ascii !== state.lastRenderedText) {
@@ -312,6 +291,7 @@ window.TP = window.TP || {};
 
   function startLoop() {
     if (state.rafId === null && state.visible && !state.engineActive) {
+      state.spinLast = 0;
       state.rafId = window.requestAnimationFrame(tick);
     }
   }
@@ -337,6 +317,7 @@ window.TP = window.TP || {};
     state.frameEl = frameEl;
     state.angleBadgeEl = document.getElementById('neofetch-penguin-telemetry');
     frameEl.setAttribute('data-penguin-ready', 'true');
+    frameEl.setAttribute('data-auto-spin', 'true');
 
     var initialRect = frameEl.getBoundingClientRect();
     applyAdaptiveGrid(initialRect.width, initialRect.height);
@@ -366,28 +347,11 @@ window.TP = window.TP || {};
 
     state.logoEl.textContent = renderPenguinAscii(0.14, -0.04, 0);
 
+    // Reduced-motion users get a static Tux; no pointer listeners are installed
+    // in either mode, so mouse/touch never changes the penguin angle.
     if (TP.utils && TP.utils.reducedMotion) {
-      window.addEventListener('pointermove', function (ev) {
-        if (state.engineActive) return;
-        updateFromClientPoint(ev.clientX, ev.clientY);
-        state.yaw = state.targetYaw;
-        state.pitch = state.targetPitch;
-        state.logoEl.textContent = renderPenguinAscii(state.yaw, state.pitch, 0);
-      }, { passive: true });
       return;
     }
-
-    window.addEventListener('pointermove', function (ev) {
-      updateFromClientPoint(ev.clientX, ev.clientY);
-    }, { passive: true });
-
-    frameEl.addEventListener('pointerdown', function (ev) {
-      updateFromClientPoint(ev.clientX, ev.clientY);
-    }, { passive: true });
-
-    document.addEventListener('mouseleave', function () {
-      state.pointerActive = false;
-    });
 
     if (window.IntersectionObserver) {
       var io = new IntersectionObserver(function (entries) {
@@ -410,9 +374,7 @@ window.TP = window.TP || {};
     init: init,
     computeFallbackGrid: computeFallbackGrid,
     setAngles: function (yawRad, pitchRad) {
-      state.pointerActive = true;
-      state.targetYaw = yawRad;
-      state.targetPitch = pitchRad;
+      // Programmatic positioning only (used by automated checks); no pointer event is bound.
       state.yaw = yawRad;
       state.pitch = pitchRad;
       if (state.logoEl && !state.engineActive) {
@@ -423,11 +385,9 @@ window.TP = window.TP || {};
       return {
         yaw: state.yaw,
         pitch: state.pitch,
-        targetYaw: state.targetYaw,
-        targetPitch: state.targetPitch,
         cols: state.cols,
         rows: state.rows,
-        pointerActive: state.pointerActive,
+        autoSpin: true,
         engineActive: state.engineActive
       };
     }
