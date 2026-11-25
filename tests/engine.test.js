@@ -267,3 +267,122 @@ test('adaptive resolution & shader pipeline enforce DPR caps, subpixel guardrail
   const compactFallback = nfSandbox.TP.neofetch.computeFallbackGrid(220, 180);
   assert.ok(desktopFallback.cols > compactFallback.cols, 'Fallback raycaster scales Tux grid density with stage width');
 });
+
+test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & smooth resolution transitions work end-to-end', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+
+  // 1. Deterministic priority ordering & removal in SystemRunner
+  const runner = new pkg.SystemRunner();
+  runner
+    .addSystem(new pkg.RenderSyncSystem(), 40)
+    .addSystem(new pkg.PatrolSystem(), 15)
+    .addSystem(new pkg.NeonPulseSystem(), 35)
+    .addSystem(new pkg.AnimationSystem(), 30);
+
+  const names = runner.getSystemNames();
+  assert.equal(names[0], 'PatrolSystem');
+  assert.equal(names[1], 'AnimationSystem');
+  assert.equal(names[2], 'NeonPulseSystem');
+  assert.equal(names[3], 'RenderSyncSystem');
+  assert.equal(runner.removeSystem('NeonPulseSystem'), true);
+  assert.equal(runner.getSystemNames().length, 3);
+
+  // 2. Cyberpunk scene construction + ECS entity components + GPU disposal on World.destroyEntity / clear
+  const ecsWorld = new pkg.World();
+  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
+  assert.equal(cyberMap.id, 'cyberpunk-citadel');
+  assert.equal(cyberMap.themeStyle, 'cyberpunk');
+  assert.ok(cyberMap.buildings.length >= 10, 'Cyberpunk skyline includes urban megastructures');
+  assert.ok(cyberMap.drones.length >= 2, 'Cyberpunk skyline includes aerial hover-spinners');
+
+  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+  assert.ok(built.scene.fog, 'Cyberpunk scene includes depth fog');
+  assert.ok(ecsWorld.getEntityCount() >= 6, 'Spawns holo-reactor, neon pylons, hover-drones, and cyber-netrunner');
+
+  const droneEntities = ecsWorld.query('Transform', 'PatrolPath', 'NeonBeacon');
+  assert.ok(droneEntities.length >= 2, 'Hover-drones carry Transform + PatrolPath + NeonBeacon components');
+
+  const droneId = droneEntities[0];
+  const beforeX = ecsWorld.getComponent(droneId, 'Transform').x;
+
+  const fullRunner = new pkg.SystemRunner()
+    .addSystem(new pkg.PatrolSystem(), 15)
+    .addSystem(new pkg.MovementRotationSystem(built.terrainHeightAt), 20)
+    .addSystem(new pkg.AnimationSystem(), 30)
+    .addSystem(new pkg.NeonPulseSystem(), 35)
+    .addSystem(new pkg.RenderSyncSystem(), 40);
+
+  fullRunner.run(ecsWorld, { dt: 0.05, elapsed: 1.25 });
+  const afterX = ecsWorld.getComponent(droneId, 'Transform').x;
+  assert.notEqual(beforeX, afterX, 'PatrolSystem moves hover-drone along cyberpunk skyline corridor');
+
+  // Verify clean WebGL resource disposal & scene detachment when destroying an ECS entity
+  const countBeforeDestroy = ecsWorld.getEntityCount();
+  const droneRenderable = ecsWorld.getComponent(droneId, 'Renderable');
+  assert.ok(droneRenderable.object3D.parent === built.scene, 'Drone mesh attached to scene');
+  assert.equal(ecsWorld.destroyEntity(droneId, true), true);
+  assert.equal(ecsWorld.getEntityCount(), countBeforeDestroy - 1);
+  assert.equal(droneRenderable.object3D.parent, null, 'destroyEntity detaches and disposes Object3D');
+
+  ecsWorld.clear(true);
+  assert.equal(ecsWorld.getEntityCount(), 0, 'World.clear disposes all remaining entities');
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+  assert.equal(built.scene.children.length, 0);
+
+  // 3. Smooth resolution & fullscreen cell-density transition controller
+  const transition = new pkg.ResolutionTransitionController(14.0);
+  const compactProfile = pkg.computeAdaptiveResolution({
+    cssWidth: 620,
+    cssHeight: 360,
+    devicePixelRatio: 1.5,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false,
+    isFullscreen: false
+  });
+  const fullscreenProfile = pkg.computeAdaptiveResolution({
+    cssWidth: 1920,
+    cssHeight: 1080,
+    devicePixelRatio: 2.0,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false,
+    isFullscreen: true
+  });
+
+  transition.setTarget(compactProfile, true);
+  const initialSnap = transition.step(0);
+  assert.equal(initialSnap.isTransitioning, false);
+  assert.equal(initialSnap.cellH, compactProfile.cellPhysH);
+
+  // Expand to fullscreen -> smooth intermediate interpolation followed by exact integer snap
+  transition.setTarget(fullscreenProfile, false);
+  const midStep = transition.step(0.016);
+  assert.equal(midStep.isTransitioning, true, 'Fullscreen expansion interpolates smoothly without abrupt jump');
+  assert.ok(
+    midStep.cellH > Math.min(compactProfile.cellPhysH, fullscreenProfile.cellPhysH) &&
+      midStep.cellH < Math.max(compactProfile.cellPhysH, fullscreenProfile.cellPhysH),
+    'Intermediate frame smoothly blends physical cell height'
+  );
+
+  // Advance ~0.8s so exponential damping settles and snaps cleanly to exact integer grid
+  let settled = midStep;
+  for (let i = 0; i < 50; i += 1) {
+    settled = transition.step(0.02);
+  }
+  assert.equal(settled.isTransitioning, false, 'Transition settles cleanly with zero residual drift');
+  assert.equal(settled.cellW, fullscreenProfile.cellPhysW);
+  assert.equal(settled.cellH, fullscreenProfile.cellPhysH);
+});

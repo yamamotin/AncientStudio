@@ -3,9 +3,9 @@ import type { PointerSnapshot } from '../input/PointerInput';
 import type { EngineConfig, ThemePalette } from '../types';
 
 /**
- * VfxController: Lightweight environmental visual effects, camera parallax,
- * interactive cursor lantern light, and rising ember / firefly particles.
- * Zero per-frame allocations.
+ * VfxController: Cyberpunk environmental visual effects, smooth camera parallax,
+ * interactive cursor spotlight, rising data/ember sparks, and digital neon rain streaks.
+ * Zero per-frame heap allocations.
  */
 
 interface ParticleSeed {
@@ -14,6 +14,9 @@ interface ParticleSeed {
   speedY: number;
   maxY: number;
   minY: number;
+  isRain: boolean;
+  rainX: number;
+  rainZ: number;
 }
 
 export class VfxController {
@@ -25,8 +28,9 @@ export class VfxController {
   private readonly cursorLight: THREE.PointLight;
   private particles: THREE.Points | null = null;
   private particlePositions: Float32Array | null = null;
+  private particleColors: Float32Array | null = null;
   private particleSeeds: ParticleSeed[] = [];
-  private centerOffset: [number, number] = [0, -1.8];
+  private centerOffset: [number, number] = [0, -2.2];
 
   constructor(options: {
     scene: THREE.Scene;
@@ -43,17 +47,18 @@ export class VfxController {
       this.centerOffset = options.particleOrigin;
     }
 
-    // Interactive cursor lantern light
+    // Interactive cursor cyber-spotlight
     this.cursorLight = new THREE.PointLight(
       new THREE.Color(options.config.palette.cursorLight),
-      options.config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 8.5),
-      this.mode === 'mascot' ? 10.0 : 14.0,
-      1.6
+      options.config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 10.5),
+      this.mode === 'mascot' ? 10.0 : 16.0,
+      1.55
     );
-    this.cursorLight.position.set(0, 2.2, 3.2);
+    this.cursorLight.position.set(0, 2.4, 3.2);
     options.scene.add(this.cursorLight);
 
-    const count = options.particleCount ?? (this.mode === 'mascot' ? 18 : 68);
+    // Playground combines rising holo-sparks + falling cyberpunk neon rain droplets
+    const count = options.particleCount ?? (this.mode === 'mascot' ? 16 : 168);
     if (count > 0) {
       this.buildParticles(options.scene, options.config.palette, count);
     }
@@ -61,51 +66,75 @@ export class VfxController {
 
   private buildParticles(scene: THREE.Scene, palette: ThemePalette, count: number): void {
     this.particlePositions = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
+    this.particleColors = new Float32Array(count * 3);
 
-    const warm = new THREE.Color(palette.warmCore);
-    const cyan = new THREE.Color(palette.cursorLight);
+    const cCyan = new THREE.Color(palette.coolAmbient);
+    const cMagenta = new THREE.Color(palette.warmLight);
+    const cAmber = new THREE.Color(palette.warmCore);
 
     for (let i = 0; i < count; i++) {
-      const isEmber = i < count * 0.55;
+      // In playground mode, 68% of particles are fast-falling cyberpunk neon rain streaks; 32% are rising holo-sparks
+      const isRain = this.mode === 'playground' && i >= Math.floor(count * 0.32);
+
+      const h1 = Math.sin(i * 91.3 + 1.7) * 43758.5453;
+      const h2 = Math.sin(i * 217.9 + 5.3) * 43758.5453;
+      const r1 = h1 - Math.floor(h1);
+      const r2 = h2 - Math.floor(h2);
+
       const radius =
         this.mode === 'mascot'
           ? 0.9 + ((i * 1.37) % 1.4)
-          : isEmber
-            ? 0.4 + ((i * 1.618) % 2.8)
-            : 2.5 + ((i * 2.414) % 9.5);
+          : 0.6 + r1 * 5.8;
       const angle = i * 2.39996;
-      const minY = this.mode === 'mascot' ? -0.2 : isEmber ? 0.6 : 0.0;
-      const maxY = this.mode === 'mascot' ? 2.4 : isEmber ? 6.5 : 4.2;
-      const y = minY + ((i * 0.73) % (maxY - minY));
+
+      const minY = this.mode === 'mascot' ? -0.2 : isRain ? -0.6 : 0.4;
+      const maxY = this.mode === 'mascot' ? 2.4 : isRain ? 15.5 : 7.5;
+      const rainX = (r1 - 0.5) * 26.0;
+      const rainZ = (r2 - 0.5) * 22.0 - 2.0;
+
+      const speedY = isRain
+        ? -(9.5 + (i % 6) * 1.65)
+        : 0.48 + (i % 5) * 0.14;
+
+      const y = minY + r2 * (maxY - minY);
 
       this.particleSeeds.push({
         baseRadius: radius,
         angleOffset: angle,
-        speedY: isEmber ? 0.45 + (i % 5) * 0.12 : 0.14 + (i % 4) * 0.05,
+        speedY,
         minY,
         maxY,
+        isRain,
+        rainX,
+        rainZ,
       });
 
-      this.particlePositions[i * 3] = Math.cos(angle) * radius + this.centerOffset[0];
+      this.particlePositions[i * 3] = isRain ? rainX : Math.cos(angle) * radius + this.centerOffset[0];
       this.particlePositions[i * 3 + 1] = y;
-      this.particlePositions[i * 3 + 2] = Math.sin(angle) * radius + this.centerOffset[1];
+      this.particlePositions[i * 3 + 2] = isRain ? rainZ : Math.sin(angle) * radius + this.centerOffset[1];
 
-      const c = isEmber ? warm : cyan;
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      const c = isRain
+        ? i % 5 === 0
+          ? cMagenta
+          : cCyan
+        : i % 2 === 0
+          ? cAmber
+          : cMagenta;
+
+      this.particleColors[i * 3] = c.r;
+      this.particleColors[i * 3 + 1] = c.g;
+      this.particleColors[i * 3 + 2] = c.b;
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.particlePositions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.particleColors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: this.mode === 'mascot' ? 0.12 : 0.28,
+      size: this.mode === 'mascot' ? 0.12 : 0.24,
       vertexColors: true,
       transparent: true,
-      opacity: this.mode === 'mascot' ? 0.65 : 0.92,
+      opacity: this.mode === 'mascot' ? 0.65 : 0.9,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -130,7 +159,6 @@ export class VfxController {
     // 1. Camera Parallax + Subtle Breathing Sway
     const amp = config.parallaxIntensity;
     if (this.mode === 'mascot') {
-      // Subtle micro-framing parallax so Tux himself does the dramatic rotation
       const breathY = Math.sin(elapsed * 0.85) * 0.04;
       camera.position.set(
         this.baseCameraPos.x + this.smoothedPointer.x * amp * 0.25,
@@ -139,46 +167,56 @@ export class VfxController {
       );
       camera.lookAt(this.lookAtTarget);
 
-      // Cursor rim light tracks pointer around Tux for dynamic ASCII edge highlights
       this.cursorLight.position.set(
         this.smoothedPointer.x * 2.8,
         1.25 + this.smoothedPointer.y * 1.4,
         2.6
       );
     } else {
-      const idleSwayX = Math.sin(elapsed * 0.35) * 0.32;
+      const idleSwayX = Math.sin(elapsed * 0.35) * 0.34;
       const idleSwayY = Math.cos(elapsed * 0.28) * 0.14;
       camera.position.set(
         this.baseCameraPos.x + this.smoothedPointer.x * amp + idleSwayX,
         this.baseCameraPos.y + this.smoothedPointer.y * (amp * 0.52) + idleSwayY,
-        this.baseCameraPos.z - Math.abs(this.smoothedPointer.x) * 0.35
+        this.baseCameraPos.z - Math.abs(this.smoothedPointer.x) * 0.38
       );
       camera.lookAt(
-        this.lookAtTarget.x + this.smoothedPointer.x * 0.55,
-        this.lookAtTarget.y + this.smoothedPointer.y * 0.32,
+        this.lookAtTarget.x + this.smoothedPointer.x * 0.65,
+        this.lookAtTarget.y + this.smoothedPointer.y * 0.36,
         this.lookAtTarget.z
       );
 
       this.cursorLight.position.set(
-        this.smoothedPointer.x * 6.5,
-        2.2 + this.smoothedPointer.y * 1.8,
-        2.8 - this.smoothedPointer.y * 3.5
+        this.smoothedPointer.x * 6.8,
+        2.2 + this.smoothedPointer.y * 1.9,
+        2.8 - this.smoothedPointer.y * 3.8
       );
     }
 
-    // 2. Update Floating Particles
+    // 2. Update Cyberpunk Neon Rain & Rising Holo-Sparks
     if (this.particles && this.particlePositions) {
       const count = this.particleSeeds.length;
       for (let i = 0; i < count; i++) {
         const s = this.particleSeeds[i]!;
         const span = s.maxY - s.minY;
-        const y = s.minY + (((elapsed * s.speedY + i * 0.41) % span + span) % span);
-        const swirl = s.angleOffset + elapsed * 0.24 * (i % 2 === 0 ? 1 : -1);
-        const r = s.baseRadius + Math.sin(elapsed * 0.9 + i) * 0.18;
 
-        this.particlePositions[i * 3] = Math.cos(swirl) * r + this.centerOffset[0];
-        this.particlePositions[i * 3 + 1] = y;
-        this.particlePositions[i * 3 + 2] = Math.sin(swirl) * r + this.centerOffset[1];
+        if (s.isRain) {
+          const fall = ((s.maxY + elapsed * s.speedY - i * 0.73) % span + span) % span;
+          const y = s.minY + fall;
+          // Slight diagonal wind slant for authentic cyberpunk rain aesthetic
+          const windOffset = (s.maxY - y) * 0.08;
+          this.particlePositions[i * 3] = s.rainX + windOffset;
+          this.particlePositions[i * 3 + 1] = y;
+          this.particlePositions[i * 3 + 2] = s.rainZ;
+        } else {
+          const y = s.minY + (((elapsed * s.speedY + i * 0.41) % span + span) % span);
+          const swirl = s.angleOffset + elapsed * 0.28 * (i % 2 === 0 ? 1 : -1);
+          const r = s.baseRadius + Math.sin(elapsed * 0.9 + i) * 0.18;
+
+          this.particlePositions[i * 3] = Math.cos(swirl) * r + this.centerOffset[0];
+          this.particlePositions[i * 3 + 1] = y;
+          this.particlePositions[i * 3 + 2] = Math.sin(swirl) * r + this.centerOffset[1];
+        }
       }
       const attr = this.particles.geometry.getAttribute('position') as THREE.BufferAttribute;
       attr.needsUpdate = true;
@@ -188,7 +226,30 @@ export class VfxController {
   public applyConfig(config: EngineConfig): void {
     this.cursorLight.color.set(config.palette.cursorLight);
     this.cursorLight.intensity =
-      config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 8.5);
+      config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 10.5);
+
+    // Re-tint rain & holo-sparks dynamically when user switches presets
+    if (this.particles && this.particleColors) {
+      const cCyan = new THREE.Color(config.palette.coolAmbient);
+      const cMagenta = new THREE.Color(config.palette.warmLight);
+      const cAmber = new THREE.Color(config.palette.warmCore);
+
+      for (let i = 0; i < this.particleSeeds.length; i++) {
+        const s = this.particleSeeds[i]!;
+        const c = s.isRain
+          ? i % 5 === 0
+            ? cMagenta
+            : cCyan
+          : i % 2 === 0
+            ? cAmber
+            : cMagenta;
+        this.particleColors[i * 3] = c.r;
+        this.particleColors[i * 3 + 1] = c.g;
+        this.particleColors[i * 3 + 2] = c.b;
+      }
+      const colorAttr = this.particles.geometry.getAttribute('color') as THREE.BufferAttribute;
+      colorAttr.needsUpdate = true;
+    }
   }
 
   public getCursorLight(): THREE.PointLight {

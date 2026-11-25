@@ -117,11 +117,11 @@ export const WATER_FRAGMENT_SHADER = /* glsl */ `
     float moonGlint = pow(moonAlign, 38.0) * 1.38 + pow(moonAlign, 7.5) * 0.26;
     color += uShallowColor * moonGlint * 1.25;
 
-    // Reflected shrine crystal + up to 4 flickering braziers/lanterns
+    // Reflected Holo-Reactor Core + alternating Cyan/Magenta cyberpunk street pylons
     color += evalPointReflection(vWorldPos, normal, viewDir, uShrineLight.xyz, uWarmCoreColor, uShrineLight.w);
-    color += evalPointReflection(vWorldPos, normal, viewDir, uTorch0.xyz, uWarmColor, uTorch0.w);
+    color += evalPointReflection(vWorldPos, normal, viewDir, uTorch0.xyz, uShallowColor, uTorch0.w);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch1.xyz, uWarmColor, uTorch1.w);
-    color += evalPointReflection(vWorldPos, normal, viewDir, uTorch2.xyz, uWarmColor, uTorch2.w);
+    color += evalPointReflection(vWorldPos, normal, viewDir, uTorch2.xyz, uShallowColor, uTorch2.w);
     color += evalPointReflection(vWorldPos, normal, viewDir, uTorch3.xyz, uWarmColor, uTorch3.w);
 
     // Interactive cursor lantern reflection on water

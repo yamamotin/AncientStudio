@@ -1,39 +1,43 @@
 import type { EngineConfig, PartialEngineConfig, ThemePalette } from '../types';
 
+/**
+ * High-contrast Cyberpunk Nocturnal Palette:
+ * - Deep obsidian night sky (`#04050B`)
+ * - Electric neon magenta (`#FF2A85`), golden-amber (`#FFB830`), and cyber-cyan (`#00E5FF`)
+ */
 export const DEFAULT_PALETTE: ThemePalette = {
-  background: '#050508',
-  warmLight: '#FF8C24',
-  warmCore: '#FFB85C',
-  coolAmbient: '#2E6F95',
-  foliageAccent: '#3A7D5C',
-  cursorLight: '#7AD7F0',
+  background: '#04050B',
+  warmLight: '#FF2A85',
+  warmCore: '#FFB830',
+  coolAmbient: '#00E5FF',
+  foliageAccent: '#7C4DFF',
+  cursorLight: '#56F2FF',
 };
 
 /**
- * Calibrated high-contrast ASCII luminance ramp inspired by classic dense Tux art
- * (` .,:;i1tfLCG08@` / ` .,:;+itIYVRBM#@`), transitioning cleanly from sparse dots/colons
- * on bright surfaces to dense structural stems (`M`, `W`, `#`, `@`) on dark contours.
+ * Calibrated high-contrast ASCII luminance ramp transitioning cleanly from deep void space
+ * through sharp cybernetic punctuation (`.,:;+i`) to dense neon blocks (`IYVRBM#@`).
  */
 export const DEFAULT_ASCII_RAMP = ' .,:;+itIYVRBM#@';
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mode: 'playground',
-  mapId: 'sanctuary-isle',
+  mapId: 'cyberpunk-citadel',
   enableKeyboard: false,
   pauseOffscreen: true,
   palette: { ...DEFAULT_PALETTE },
-  cellSize: 10,
+  cellSize: 9,
   autoResponsiveDensity: true,
   characterRamp: DEFAULT_ASCII_RAMP,
   structuralChars: '/\\|_[]',
-  edgeStrength: 0.88,
-  bloomIntensity: 1.2,
-  bloomThreshold: 0.38,
-  dofFocusDistance: 14.3,
-  dofStrength: 0.65,
-  parallaxIntensity: 1.45,
-  parallaxSmoothing: 5.2,
-  cursorLightIntensity: 1.35,
+  edgeStrength: 0.94,
+  bloomIntensity: 1.35,
+  bloomThreshold: 0.34,
+  dofFocusDistance: 14.2,
+  dofStrength: 0.48,
+  parallaxIntensity: 1.55,
+  parallaxSmoothing: 5.4,
+  cursorLightIntensity: 1.45,
   enableShadows: true,
   maxFps: 60,
   maxPixelRatio: 2,

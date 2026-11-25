@@ -3,11 +3,11 @@ import type { EntityId, World } from '../ecs/World';
 import type { ThemePalette } from '../types';
 
 /**
- * PlaygroundEntityFactory: Spawns lightweight interactive points of interest (POIs)
- * and a compact ASCII Realms Explorer character inside the island playground:
- * - Levitating Shrine Rune Crystal + Stone Orbit Ring + Warm Torch PointLight
- * - Flickering Sanctuary Braziers / Beacons
- * - Interactive Wayfarer Explorer Avatar (with lantern staff, subtle breathing & pointer/WASD readiness)
+ * PlaygroundEntityFactory: Spawns interactive Cyberpunk ECS entities inside `[ ASCII REALMS // SCENE ]`:
+ * - Levitating Holographic Quantum Reactor Core + Twin Gyro-Rings + Neon PointLight (`spawnShrineCrystal`)
+ * - Pulsing Cyber-Neon Street Pylons (`spawnBrazierBeacon`)
+ * - Autonomous Aerial Patrol Drones / Spinners (`spawnCyberDrone`)
+ * - Interactive Cyber-Runner Netrunner Avatar with glowing visor & data-katana/staff (`spawnWayfarerAvatar`)
  */
 export class PlaygroundEntityFactory {
   public static spawnShrineCrystal(
@@ -18,48 +18,70 @@ export class PlaygroundEntityFactory {
     enableShadows: boolean
   ): { entityId: EntityId; torchLight: THREE.PointLight } {
     const group = new THREE.Group();
-    group.name = 'ShrineRuneCrystal';
+    group.name = 'CyberHoloReactor';
 
     const coreMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(palette.warmCore),
       emissive: new THREE.Color(palette.warmLight),
-      emissiveIntensity: 2.35,
-      roughness: 0.18,
-      metalness: 0.1,
+      emissiveIntensity: 2.65,
+      roughness: 0.15,
+      metalness: 0.35,
       flatShading: true,
     });
 
-    const stoneRingMat = new THREE.MeshStandardMaterial({
-      color: 0x3b4d5e,
-      roughness: 0.88,
-      metalness: 0.18,
+    const cyanRingMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(palette.coolAmbient),
+      emissive: new THREE.Color(palette.coolAmbient),
+      emissiveIntensity: 1.75,
+      roughness: 0.25,
+      metalness: 0.65,
       flatShading: true,
     });
 
-    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.95, 0), coreMat);
-    crystal.scale.set(0.86, 1.55, 0.86);
+    const darkFrameMat = new THREE.MeshStandardMaterial({
+      color: 0x101826,
+      roughness: 0.6,
+      metalness: 0.7,
+      flatShading: true,
+    });
+
+    // Octahedral plasma data-core
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.98, 0), coreMat);
+    crystal.scale.set(0.88, 1.62, 0.88);
     group.add(crystal);
 
-    const orbitRing = new THREE.Mesh(new THREE.TorusGeometry(1.48, 0.085, 6, 18), stoneRingMat);
-    orbitRing.rotation.x = Math.PI * 0.35;
+    // Outer cybernetic gyro-ring (renders crisp circular/diagonal ASCII glyphs)
+    const orbitRing = new THREE.Group();
+    const ringTorus = new THREE.Mesh(new THREE.TorusGeometry(1.58, 0.08, 6, 20), cyanRingMat);
+    ringTorus.rotation.x = Math.PI * 0.36;
+    orbitRing.add(ringTorus);
+
+    const innerFrame = new THREE.Mesh(new THREE.TorusGeometry(1.18, 0.055, 4, 12), darkFrameMat);
+    innerFrame.rotation.y = Math.PI * 0.25;
+    orbitRing.add(innerFrame);
     group.add(orbitRing);
 
     group.position.set(position[0], position[1], position[2]);
     scene.add(group);
 
-    const torchLight = new THREE.PointLight(new THREE.Color(palette.warmLight), 42.0, 32.0, 1.55);
-    torchLight.position.set(position[0], position[1] + 0.3, position[2] + 0.35);
+    const torchLight = new THREE.PointLight(new THREE.Color(palette.warmLight), 46.0, 36.0, 1.5);
+    torchLight.position.set(position[0], position[1] + 0.35, position[2] + 0.4);
     torchLight.castShadow = enableShadows;
     if (enableShadows) {
       torchLight.shadow.mapSize.width = 512;
       torchLight.shadow.mapSize.height = 512;
       torchLight.shadow.camera.near = 0.5;
-      torchLight.shadow.camera.far = 28;
+      torchLight.shadow.camera.far = 32;
       torchLight.shadow.bias = -0.002;
     }
     scene.add(torchLight);
 
     const entityId = ecsWorld.createEntity();
+    ecsWorld.addComponent(entityId, 'LifecycleTag', {
+      role: 'core',
+      label: 'HoloReactorCore',
+    });
+
     ecsWorld.addComponent(entityId, 'Transform', {
       x: position[0],
       y: position[1],
@@ -76,16 +98,16 @@ export class PlaygroundEntityFactory {
       targetYaw: 0,
       targetPitch: 0,
       targetRoll: 0,
-      lerpSpeed: 3.0,
-      idleSpinSpeed: 0.68,
+      lerpSpeed: 3.2,
+      idleSpinSpeed: 0.78,
       maxPitch: 0.25,
     });
 
     ecsWorld.addComponent(entityId, 'AnimationState', {
       baseY: position[1],
-      bobAmplitude: 0.22,
-      bobFrequency: 1.85,
-      breatheAmplitude: 0,
+      bobAmplitude: 0.24,
+      bobFrequency: 1.9,
+      breatheAmplitude: 0.025,
       phase: 0,
       excitement: 0,
       parts: {
@@ -93,11 +115,20 @@ export class PlaygroundEntityFactory {
       },
     });
 
+    ecsWorld.addComponent(entityId, 'NeonBeacon', {
+      emissiveMaterial: coreMat,
+      baseEmissiveIntensity: 2.65,
+      pulseSpeed: 3.4,
+      pulseAmplitude: 0.18,
+      phase: 0.4,
+      glitchRate: 0.08,
+    });
+
     ecsWorld.addComponent(entityId, 'Renderable', {
       object3D: group,
       pointLight: torchLight,
-      baseLightIntensity: 42.0,
-      lightFlickerSpeed: 7.4,
+      baseLightIntensity: 46.0,
+      lightFlickerSpeed: 6.8,
     });
 
     return { entityId, torchLight };
@@ -108,56 +139,73 @@ export class PlaygroundEntityFactory {
     scene: THREE.Scene,
     palette: ThemePalette,
     position: [number, number, number],
-    phaseOffset: number
+    phaseOffset: number,
+    tone: 'cyan' | 'magenta' | 'amber' = 'cyan'
   ): { entityId: EntityId; light: THREE.PointLight } {
     const group = new THREE.Group();
-    group.name = 'SanctuaryBrazier';
+    group.name = 'CyberNeonPylon';
 
-    const stoneMat = new THREE.MeshStandardMaterial({
-      color: 0x344656,
-      roughness: 0.9,
-      metalness: 0.14,
+    const chassisMat = new THREE.MeshStandardMaterial({
+      color: 0x111927,
+      roughness: 0.55,
+      metalness: 0.72,
       flatShading: true,
     });
 
-    const emberMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(palette.warmCore),
-      emissive: new THREE.Color(palette.warmLight),
-      emissiveIntensity: 2.0,
-      roughness: 0.25,
+    const neonHex =
+      tone === 'cyan'
+        ? palette.coolAmbient
+        : tone === 'magenta'
+          ? palette.warmLight
+          : palette.warmCore;
+
+    const tubeMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(neonHex),
+      emissive: new THREE.Color(neonHex),
+      emissiveIntensity: 2.5,
+      roughness: 0.15,
       flatShading: true,
     });
 
-    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.38, 1.05, 6), stoneMat);
-    pedestal.position.y = 0.52;
-    pedestal.castShadow = true;
-    pedestal.receiveShadow = true;
-    group.add(pedestal);
+    // Sleek cybernetic street pylon base + vertical glowing plasma tube ('|' glyph magnet!)
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.36, 0.48), chassisMat);
+    base.position.y = 0.18;
+    base.castShadow = true;
+    base.receiveShadow = true;
+    group.add(base);
 
-    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.22, 0.26, 6), stoneMat);
-    bowl.position.y = 1.12;
-    bowl.castShadow = true;
-    group.add(bowl);
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.85, 0.22), chassisMat);
+    mast.position.y = 1.1;
+    mast.castShadow = true;
+    group.add(mast);
 
-    const flame = new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), emberMat);
-    flame.position.y = 1.42;
-    flame.scale.set(0.85, 1.45, 0.85);
-    group.add(flame);
+    const neonBar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.45, 0.28), tubeMat);
+    neonBar.position.y = 1.22;
+    group.add(neonBar);
+
+    const crown = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), tubeMat);
+    crown.position.y = 2.18;
+    group.add(crown);
 
     group.position.set(position[0], position[1], position[2]);
     scene.add(group);
 
-    const light = new THREE.PointLight(new THREE.Color(palette.warmLight), 9.5, 11.5, 1.7);
-    light.position.set(position[0], position[1] + 1.55, position[2]);
+    const light = new THREE.PointLight(new THREE.Color(neonHex), 14.5, 14.0, 1.65);
+    light.position.set(position[0], position[1] + 2.1, position[2]);
     scene.add(light);
 
     const entityId = ecsWorld.createEntity();
+    ecsWorld.addComponent(entityId, 'LifecycleTag', {
+      role: 'beacon',
+      label: `NeonPylon_${tone}`,
+    });
+
     ecsWorld.addComponent(entityId, 'Transform', {
       x: position[0],
       y: position[1],
       z: position[2],
       rotX: 0,
-      rotY: phaseOffset,
+      rotY: phaseOffset * 0.2,
       rotZ: 0,
       scaleX: 1,
       scaleY: 1,
@@ -168,24 +216,128 @@ export class PlaygroundEntityFactory {
       baseY: position[1],
       bobAmplitude: 0,
       bobFrequency: 2.2,
-      breatheAmplitude: 0.015,
+      breatheAmplitude: 0.01,
       phase: phaseOffset,
       excitement: 0,
+    });
+
+    ecsWorld.addComponent(entityId, 'NeonBeacon', {
+      emissiveMaterial: tubeMat,
+      baseEmissiveIntensity: 2.5,
+      pulseSpeed: 4.2,
+      pulseAmplitude: 0.22,
+      phase: phaseOffset,
+      glitchRate: 0.16,
     });
 
     ecsWorld.addComponent(entityId, 'Renderable', {
       object3D: group,
       pointLight: light,
-      baseLightIntensity: 9.5,
-      lightFlickerSpeed: 9.2,
+      baseLightIntensity: 14.5,
+      lightFlickerSpeed: 8.5,
     });
 
     return { entityId, light };
   }
 
   /**
-   * Spawns a compact cloaked Wayfarer Explorer character on the stone bridge/courtyard
-   * holding a glowing cyan rune lantern, reactive to pointer look-at and optional WASD movement.
+   * Spawns an autonomous Cyberpunk Hover-Spinner / Patrol Drone cruising through the urban canyon.
+   */
+  public static spawnCyberDrone(
+    ecsWorld: World,
+    scene: THREE.Scene,
+    palette: ThemePalette,
+    spec: {
+      origin: [number, number, number];
+      amplitude: [number, number, number];
+      speed: number;
+      phase: number;
+      tone: 'cyan' | 'magenta' | 'amber';
+    }
+  ): { entityId: EntityId } {
+    const group = new THREE.Group();
+    group.name = 'CyberHoverSpinner';
+
+    const hullMat = new THREE.MeshStandardMaterial({
+      color: 0x0e1624,
+      roughness: 0.45,
+      metalness: 0.8,
+      flatShading: true,
+    });
+
+    const accentHex =
+      spec.tone === 'cyan'
+        ? palette.coolAmbient
+        : spec.tone === 'magenta'
+          ? palette.warmLight
+          : palette.warmCore;
+
+    const thrusterMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(accentHex),
+      emissive: new THREE.Color(accentHex),
+      emissiveIntensity: 2.8,
+      roughness: 0.1,
+      flatShading: true,
+    });
+
+    const fuselage = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.24, 1.35), hullMat);
+    group.add(fuselage);
+
+    const lightStrip = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.09, 1.15), thrusterMat);
+    lightStrip.position.y = -0.04;
+    group.add(lightStrip);
+
+    group.position.set(...spec.origin);
+    scene.add(group);
+
+    const entityId = ecsWorld.createEntity();
+    ecsWorld.addComponent(entityId, 'LifecycleTag', {
+      role: 'vehicle',
+      label: `HoverSpinner_${spec.tone}`,
+    });
+
+    ecsWorld.addComponent(entityId, 'Transform', {
+      x: spec.origin[0],
+      y: spec.origin[1],
+      z: spec.origin[2],
+      rotX: 0,
+      rotY: 0,
+      rotZ: 0,
+      scaleX: 1,
+      scaleY: 1,
+      scaleZ: 1,
+    });
+
+    ecsWorld.addComponent(entityId, 'PatrolPath', {
+      originX: spec.origin[0],
+      originY: spec.origin[1],
+      originZ: spec.origin[2],
+      amplitudeX: spec.amplitude[0],
+      amplitudeY: spec.amplitude[1],
+      amplitudeZ: spec.amplitude[2],
+      speed: spec.speed,
+      phase: spec.phase,
+      faceTangent: true,
+    });
+
+    ecsWorld.addComponent(entityId, 'NeonBeacon', {
+      emissiveMaterial: thrusterMat,
+      baseEmissiveIntensity: 2.8,
+      pulseSpeed: 6.0,
+      pulseAmplitude: 0.16,
+      phase: spec.phase,
+    });
+
+    ecsWorld.addComponent(entityId, 'Renderable', {
+      object3D: group,
+    });
+
+    return { entityId };
+  }
+
+  /**
+   * Spawns a Cyberpunk Netrunner / Street Samurai character on the neon skybridge
+   * with high-collar trench coat, glowing cyan visor, and illuminated plasma staff/blade.
    */
   public static spawnWayfarerAvatar(
     ecsWorld: World,
@@ -194,88 +346,80 @@ export class PlaygroundEntityFactory {
     position: [number, number, number]
   ): { entityId: EntityId; group: THREE.Group } {
     const group = new THREE.Group();
-    group.name = 'WayfarerAvatar';
+    group.name = 'CyberNetrunnerAvatar';
 
-    const cloakMat = new THREE.MeshStandardMaterial({
-      color: 0x1e3a4c,
-      emissive: 0x0b1a26,
-      roughness: 0.78,
-      metalness: 0.12,
+    const coatMat = new THREE.MeshStandardMaterial({
+      color: 0x0d1522,
+      emissive: 0x050a12,
+      roughness: 0.62,
+      metalness: 0.45,
       flatShading: true,
     });
 
-    const trimMat = new THREE.MeshStandardMaterial({
-      color: 0xdbeeff,
-      emissive: 0x67b7dc,
-      emissiveIntensity: 0.25,
-      roughness: 0.5,
+    const collarNeonMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(palette.warmLight),
+      emissive: new THREE.Color(palette.warmLight),
+      emissiveIntensity: 1.9,
+      roughness: 0.25,
       flatShading: true,
     });
 
-    const staffWood = new THREE.MeshStandardMaterial({
-      color: 0x5c3d28,
-      roughness: 0.9,
-      flatShading: true,
-    });
-
-    const lanternMat = new THREE.MeshStandardMaterial({
+    const visorMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(palette.cursorLight),
       emissive: new THREE.Color(palette.cursorLight),
-      emissiveIntensity: 2.1,
-      roughness: 0.2,
+      emissiveIntensity: 2.6,
+      roughness: 0.15,
       flatShading: true,
     });
 
-    // Cloaked body cone
-    const cloak = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.15, 7), cloakMat);
-    cloak.position.y = 0.62;
-    cloak.castShadow = true;
-    group.add(cloak);
+    // Armored cyber-trench silhouette
+    const coat = new THREE.Mesh(new THREE.ConeGeometry(0.44, 1.22, 6), coatMat);
+    coat.position.y = 0.64;
+    coat.castShadow = true;
+    group.add(coat);
 
-    // Scarf / Mantle collar for crisp ASCII contrast
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.075, 5, 10), trimMat);
-    collar.rotation.x = Math.PI * 0.5;
-    collar.position.y = 1.14;
+    // Glowing high tech-collar (magenta neon rim)
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.065, 5, 10), collarNeonMat);
+    collar.rotation.x = Math.PI * 0.46;
+    collar.position.y = 1.18;
     group.add(collar);
 
-    // Hooded head pivot
+    // Cybernetic helmet + horizontal glowing visor bar
     const head = new THREE.Group();
-    head.position.set(0, 1.34, 0);
-    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.27, 0.48, 6), cloakMat);
-    hood.position.y = 0.08;
-    hood.castShadow = true;
-    head.add(hood);
+    head.position.set(0, 1.38, 0);
+    const helm = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 1), coatMat);
+    helm.scale.set(0.95, 1.08, 1.0);
+    helm.castShadow = true;
+    head.add(helm);
 
-    // Glowing eyes under hood
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.038, 6, 6), lanternMat);
-      eye.position.set(side * 0.075, 0.02, 0.19);
-      head.add(eye);
-    }
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.075, 0.14), visorMat);
+    visor.position.set(0, 0.02, 0.19);
+    head.add(visor);
     group.add(head);
 
-    // Explorer Staff + Hanging Lantern on right side
-    const staffPivot = new THREE.Group();
-    staffPivot.position.set(0.38, 0.85, 0.12);
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.55, 5), staffWood);
-    shaft.rotation.z = -0.12;
-    staffPivot.add(shaft);
-
-    const lanternGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), lanternMat);
-    lanternGem.position.set(0.12, 0.72, 0.08);
-    staffPivot.add(lanternGem);
-    group.add(staffPivot);
+    // Illuminated cyber-blade / antenna baton on right shoulder
+    const bladePivot = new THREE.Group();
+    bladePivot.position.set(0.38, 0.88, 0.1);
+    const bladeCore = new THREE.Mesh(new THREE.BoxGeometry(0.055, 1.48, 0.09), visorMat);
+    bladeCore.rotation.z = -0.16;
+    bladePivot.add(bladeCore);
+    group.add(bladePivot);
 
     group.position.set(position[0], position[1], position[2]);
     scene.add(group);
 
     const entityId = ecsWorld.createEntity();
+    ecsWorld.addComponent(entityId, 'LifecycleTag', {
+      role: 'avatar',
+      label: 'CyberNetrunner',
+    });
+
     ecsWorld.addComponent(entityId, 'Transform', {
       x: position[0],
       y: position[1],
       z: position[2],
       rotX: 0,
-      rotY: 0.25,
+      rotY: 0.22,
       rotZ: 0,
       scaleX: 1,
       scaleY: 1,
@@ -293,12 +437,12 @@ export class PlaygroundEntityFactory {
     });
 
     ecsWorld.addComponent(entityId, 'RotationTarget', {
-      targetYaw: 0.25,
+      targetYaw: 0.22,
       targetPitch: 0,
       targetRoll: 0,
-      lerpSpeed: 5.0,
+      lerpSpeed: 5.2,
       idleSpinSpeed: 0,
-      maxPitch: 0.2,
+      maxPitch: 0.22,
     });
 
     ecsWorld.addComponent(entityId, 'AnimationState', {
@@ -310,7 +454,7 @@ export class PlaygroundEntityFactory {
       excitement: 0,
       parts: {
         head,
-        rightWing: staffPivot,
+        rightWing: bladePivot,
       },
     });
 
@@ -321,10 +465,10 @@ export class PlaygroundEntityFactory {
       isDragging: false,
       moveX: 0,
       moveZ: 0,
-      yawSensitivity: 0.85,
-      pitchSensitivity: 0.18,
-      moveSpeed: 3.4,
-      boundsRadius: 6.2,
+      yawSensitivity: 0.88,
+      pitchSensitivity: 0.2,
+      moveSpeed: 3.6,
+      boundsRadius: 6.4,
     });
 
     ecsWorld.addComponent(entityId, 'Renderable', {

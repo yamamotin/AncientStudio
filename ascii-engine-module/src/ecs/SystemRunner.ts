@@ -5,9 +5,14 @@ import type { PointerInput } from '../input/PointerInput';
 
 export type { EcsSystem, SystemContext };
 
+export interface SystemEntry {
+  readonly priority: number;
+  readonly system: EcsSystem;
+}
+
 /**
- * InputSystem: Transfers normalized PointerInput (mouse + touch) and optional KeyboardInput
- * into ECS `InputState`, `RotationTarget`, and `AnimationState.excitement` components.
+ * InputSystem (priority 10): Transfers normalized PointerInput (mouse + touch) and optional
+ * KeyboardInput into ECS `InputState`, `RotationTarget`, and `AnimationState.excitement`.
  */
 export class InputSystem implements EcsSystem {
   public readonly name = 'InputSystem';
@@ -29,16 +34,13 @@ export class InputSystem implements EcsSystem {
       input.pointerX = ptr.normX;
       input.pointerY = ptr.normY;
       input.pointerActive = ptr.active;
-      input.isDown_compat = ptr.isDown;
       input.isDragging = ptr.isDown;
       input.moveX = keys.moveX;
       input.moveZ = keys.moveZ;
 
       const rotTarget = world.getComponent(id, 'RotationTarget');
       if (rotTarget && ptr.active) {
-        // Combine hover angle + touch/mouse drag accumulation smoothly
         const desiredYaw = ptr.normX * input.yawSensitivity + ptr.dragYaw * 0.85;
-        // Positive normY = cursor up -> look slightly up (negative X rotation in right-handed Three.js)
         const desiredPitch = -ptr.normY * input.pitchSensitivity + ptr.dragPitch * 0.65;
 
         rotTarget.targetYaw = desiredYaw;
@@ -57,16 +59,48 @@ export class InputSystem implements EcsSystem {
   }
 }
 
-// Allow optional internal property without polluting public interface
-declare module './World' {
-  interface InputStateComponent {
-    isDown_compat?: boolean;
+/**
+ * PatrolSystem (priority 15): Drives autonomous aerial drones, hover-vehicles, and orbital
+ * probes along deterministic Figure-8 / Lissajous paths (`PatrolPath` -> `Transform` + `AnimationState.baseY`).
+ */
+export class PatrolSystem implements EcsSystem {
+  public readonly name = 'PatrolSystem';
+
+  public update(world: World, { elapsed }: SystemContext): void {
+    const entities = world.query('Transform', 'PatrolPath');
+    for (const id of entities) {
+      const transform = world.getComponent(id, 'Transform')!;
+      const p = world.getComponent(id, 'PatrolPath')!;
+      const t = elapsed * p.speed + p.phase;
+
+      const nextX = p.originX + Math.sin(t) * p.amplitudeX;
+      const nextY = p.originY + Math.sin(t * 1.7 + p.phase) * p.amplitudeY;
+      const nextZ = p.originZ + Math.cos(t * 0.85) * p.amplitudeZ;
+
+      if (p.faceTangent) {
+        const vx = Math.cos(t) * p.amplitudeX * p.speed;
+        const vz = -Math.sin(t * 0.85) * p.amplitudeZ * p.speed * 0.85;
+        if (Math.abs(vx) + Math.abs(vz) > 0.001) {
+          transform.rotY = Math.atan2(vx, vz);
+          transform.rotZ = -vx * 0.045;
+        }
+      }
+
+      transform.x = nextX;
+      transform.y = nextY;
+      transform.z = nextZ;
+
+      const anim = world.getComponent(id, 'AnimationState');
+      if (anim) {
+        anim.baseY = nextY;
+      }
+    }
   }
 }
 
 /**
- * MovementRotationSystem: Applies smooth exponential `lerp` toward `RotationTarget`
- * (or gentle idle sway/spin when pointer is inactive), plus optional bounded playground movement.
+ * MovementRotationSystem (priority 20): Applies smooth exponential `lerp` toward `RotationTarget`
+ * (or gentle idle sway/spin when pointer is inactive), plus bounded ground movement.
  */
 export class MovementRotationSystem implements EcsSystem {
   public readonly name = 'MovementRotationSystem';
@@ -88,7 +122,6 @@ export class MovementRotationSystem implements EcsSystem {
       const userControlling = Boolean(input && input.pointerActive);
 
       if (userControlling) {
-        // Shortest-angle wrap for yaw if entity previously spun multiple turns
         const diffYaw = Math.atan2(
           Math.sin(rot.targetYaw - transform.rotY),
           Math.cos(rot.targetYaw - transform.rotY)
@@ -101,7 +134,6 @@ export class MovementRotationSystem implements EcsSystem {
         transform.rotX += (Math.sin(elapsed * 0.9) * 0.04 - transform.rotX) * damp;
         transform.rotZ += (0 - transform.rotZ) * damp;
       } else {
-        // Gentle idle look-around sway for mascot when mouse leaves page
         const idleYaw = Math.sin(elapsed * 0.85) * 0.28;
         const idlePitch = Math.cos(elapsed * 0.65) * 0.06;
         transform.rotY += (idleYaw - transform.rotY) * (damp * 0.6);
@@ -110,7 +142,7 @@ export class MovementRotationSystem implements EcsSystem {
       }
     }
 
-    // 2. Velocity & optional keyboard-driven playground wanderer movement
+    // 2. Velocity & optional keyboard-driven cyber-runner / wanderer movement
     const movEntities = world.query('Transform', 'Velocity');
     for (const id of movEntities) {
       const transform = world.getComponent(id, 'Transform')!;
@@ -122,7 +154,6 @@ export class MovementRotationSystem implements EcsSystem {
         vel.vx = input.moveX * input.moveSpeed;
         vel.vz = input.moveZ * input.moveSpeed;
 
-        // Face movement direction smoothly
         const rot = world.getComponent(id, 'RotationTarget');
         if (rot) {
           rot.targetYaw = Math.atan2(vel.vx, vel.vz);
@@ -139,7 +170,6 @@ export class MovementRotationSystem implements EcsSystem {
       transform.rotY += vel.angularVy * dt;
       transform.rotZ += vel.angularVz * dt;
 
-      // Clamp to island playground radius if configured
       if (input && input.boundsRadius > 0) {
         const dist = Math.hypot(transform.x, transform.z + 1.5);
         if (dist > input.boundsRadius) {
@@ -149,7 +179,6 @@ export class MovementRotationSystem implements EcsSystem {
         }
       }
 
-      // Snap base elevation to terrain height if terrain callback provided
       if (this.terrainHeightFn && input && input.moveSpeed > 0) {
         const groundY = this.terrainHeightFn(transform.x, transform.z);
         if (anim) {
@@ -168,8 +197,54 @@ export class MovementRotationSystem implements EcsSystem {
 }
 
 /**
- * RenderSyncSystem: Synchronizes pure ECS `Transform` & `Renderable` state
- * onto Three.js `Object3D` transforms and dynamic `PointLight` flicker.
+ * NeonPulseSystem (priority 35): Drives cyberpunk holographic signs, neon pylons, and
+ * core reactor harmonic pulses + subtle sign glitching (`NeonBeacon` + `Renderable`).
+ */
+export class NeonPulseSystem implements EcsSystem {
+  public readonly name = 'NeonPulseSystem';
+
+  public update(world: World, { elapsed }: SystemContext): void {
+    const entities = world.query('NeonBeacon');
+    for (const id of entities) {
+      const beacon = world.getComponent(id, 'NeonBeacon')!;
+      const wave =
+        Math.sin(elapsed * beacon.pulseSpeed + beacon.phase) * 0.65 +
+        Math.sin(elapsed * beacon.pulseSpeed * 2.37 + beacon.phase * 1.7) * 0.35;
+
+      // Subtle deterministic neon tube micro-flicker when glitchRate > 0
+      let glitch = 1.0;
+      if (beacon.glitchRate && beacon.glitchRate > 0) {
+        const hash = Math.sin(Math.floor(elapsed * 14 + beacon.phase * 10) * 91.7) * 43758.5453;
+        const frac = hash - Math.floor(hash);
+        if (frac < beacon.glitchRate * 0.12) {
+          glitch = 0.42;
+        }
+      }
+
+      const factor = Math.max(0.2, (1 + wave * beacon.pulseAmplitude) * glitch);
+
+      if (beacon.emissiveMaterial) {
+        beacon.emissiveIntensityCache = beacon.baseEmissiveIntensity * factor;
+        beacon.emissiveMaterial.emissiveIntensity = beacon.emissiveIntensityCache;
+      }
+
+      const renderable = world.getComponent(id, 'Renderable');
+      if (renderable?.pointLight && renderable.baseLightIntensity !== undefined) {
+        renderable.pointLight.intensity = renderable.baseLightIntensity * factor;
+      }
+    }
+  }
+}
+
+declare module './World' {
+  interface NeonBeaconComponent {
+    emissiveIntensityCache?: number;
+  }
+}
+
+/**
+ * RenderSyncSystem (priority 40): Synchronizes pure ECS `Transform` & `Renderable` state
+ * onto Three.js `Object3D` transforms and dynamic `PointLight` position/flicker.
  */
 export class RenderSyncSystem implements EcsSystem {
   public readonly name = 'RenderSyncSystem';
@@ -184,36 +259,61 @@ export class RenderSyncSystem implements EcsSystem {
       r.object3D.rotation.set(t.rotX, t.rotY, t.rotZ);
       r.object3D.scale.set(t.scaleX, t.scaleY, t.scaleZ);
 
-      if (r.pointLight && r.baseLightIntensity !== undefined) {
-        const speed = r.lightFlickerSpeed ?? 7.2;
-        const flicker =
-          1 +
-          Math.sin(elapsed * speed + id * 1.7) * 0.12 +
-          Math.sin(elapsed * speed * 2.13 + id) * 0.06;
-        r.pointLight.intensity = r.baseLightIntensity * flicker;
+      if (r.pointLight) {
+        // Keep attached pointLights synced when patrol drones / beacons move
+        if (!world.hasComponent(id, 'NeonBeacon') && r.baseLightIntensity !== undefined) {
+          const speed = r.lightFlickerSpeed ?? 7.2;
+          const flicker =
+            1 +
+            Math.sin(elapsed * speed + id * 1.7) * 0.12 +
+            Math.sin(elapsed * speed * 2.13 + id) * 0.06;
+          r.pointLight.intensity = r.baseLightIntensity * flicker;
+        }
       }
     }
   }
 }
 
 /**
- * SystemRunner: Deterministic ordered pipeline executor over an ECS `World`.
+ * SystemRunner: Deterministic priority-sorted pipeline executor over an ECS `World`.
+ * Lower `priority` numbers execute first; ties preserve registration order.
  */
 export class SystemRunner {
-  private readonly systems: EcsSystem[] = [];
+  private readonly entries: Array<{ priority: number; order: number; system: EcsSystem }> = [];
+  private nextOrder = 0;
 
-  public addSystem(system: EcsSystem): this {
-    this.systems.push(system);
+  public addSystem(system: EcsSystem, priority?: number): this {
+    const resolvedPriority = priority ?? (this.entries.length + 1) * 10;
+    this.entries.push({
+      priority: resolvedPriority,
+      order: this.nextOrder++,
+      system,
+    });
+    this.entries.sort((a, b) =>
+      a.priority !== b.priority ? a.priority - b.priority : a.order - b.order
+    );
     return this;
   }
 
+  public removeSystem(name: string): boolean {
+    const idx = this.entries.findIndex((e) => e.system.name === name);
+    if (idx === -1) return false;
+    this.entries.splice(idx, 1);
+    return true;
+  }
+
+  public getSystemNames(): string[] {
+    return this.entries.map((e) => e.system.name);
+  }
+
   public run(world: World, context: SystemContext): void {
-    for (let i = 0; i < this.systems.length; i++) {
-      this.systems[i]!.update(world, context);
+    for (let i = 0; i < this.entries.length; i++) {
+      this.entries[i]!.system.update(world, context);
     }
   }
 
   public clear(): void {
-    this.systems.length = 0;
+    this.entries.length = 0;
+    this.nextOrder = 0;
   }
 }

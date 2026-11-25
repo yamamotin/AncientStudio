@@ -1,9 +1,11 @@
 import type * as THREE from 'three';
+import { LifecycleManager } from '../core/LifecycleManager';
 
 /**
  * Lean, cache-friendly Entity-Component-System (ECS) World.
- * Pure data components (Transform, Velocity, RotationTarget, AnimationState, Renderable, InputState)
- * keep entity logic modular, testable, and decoupled from framework/DOM globals.
+ * Pure data components (Transform, Velocity, RotationTarget, AnimationState, Renderable,
+ * NeonBeacon, PatrolPath, InputState, LifecycleTag) keep entity logic modular, deterministic,
+ * and completely leak-free on entity or world teardown.
  */
 
 export type EntityId = number;
@@ -64,7 +66,7 @@ export interface AnimationStateComponent {
   phase: number;
   /** Reaction energy [0..1] boosted by pointer movement or interaction */
   excitement: number;
-  /** Optional articulated sub-meshes (e.g. Tux wings/head/feet or rune ring) */
+  /** Optional articulated sub-meshes (e.g. Tux wings/head/feet or holo-ring) */
   parts?: ArticulatedParts;
 }
 
@@ -74,6 +76,36 @@ export interface RenderableComponent {
   pointLight?: THREE.PointLight;
   baseLightIntensity?: number;
   lightFlickerSpeed?: number;
+  /** Automatically detach & dispose GPU geometry/materials when entity is destroyed (default: true) */
+  disposeOnDestroy?: boolean;
+}
+
+export interface NeonBeaconComponent {
+  /** Emissive material driven by neon pulse/strobe */
+  emissiveMaterial?: THREE.MeshStandardMaterial;
+  baseEmissiveIntensity: number;
+  pulseSpeed: number;
+  pulseAmplitude: number;
+  phase: number;
+  /** Optional cyber-sign glitch flicker probability [0..1] */
+  glitchRate?: number;
+}
+
+export interface PatrolPathComponent {
+  originX: number;
+  originY: number;
+  originZ: number;
+  amplitudeX: number;
+  amplitudeY: number;
+  amplitudeZ: number;
+  speed: number;
+  phase: number;
+  faceTangent: boolean;
+}
+
+export interface LifecycleTagComponent {
+  role: 'avatar' | 'mascot' | 'core' | 'beacon' | 'vehicle' | 'prop';
+  label: string;
 }
 
 export interface InputStateComponent {
@@ -99,6 +131,9 @@ export interface ComponentMap {
   RotationTarget: RotationTargetComponent;
   AnimationState: AnimationStateComponent;
   Renderable: RenderableComponent;
+  NeonBeacon: NeonBeaconComponent;
+  PatrolPath: PatrolPathComponent;
+  LifecycleTag: LifecycleTagComponent;
   InputState: InputStateComponent;
 }
 
@@ -113,6 +148,9 @@ export class World {
     RotationTarget: new Map(),
     AnimationState: new Map(),
     Renderable: new Map(),
+    NeonBeacon: new Map(),
+    PatrolPath: new Map(),
+    LifecycleTag: new Map(),
     InputState: new Map(),
   };
 
@@ -122,12 +160,25 @@ export class World {
     return id;
   }
 
-  public destroyEntity(id: EntityId): void {
-    if (!this.entities.has(id)) return;
+  /**
+   * Destroys a single entity, optionally detaching & disposing its WebGL `Renderable`
+   * (`Object3D`, `PointLight`, geometries, materials, and textures) with zero leaks.
+   */
+  public destroyEntity(id: EntityId, disposeGpu = true): boolean {
+    if (!this.entities.has(id)) return false;
+
+    if (disposeGpu) {
+      const renderable = this.stores.Renderable.get(id);
+      if (renderable && renderable.disposeOnDestroy !== false) {
+        this.disposeRenderableResources(renderable);
+      }
+    }
+
     for (const key of Object.keys(this.stores) as ComponentName[]) {
       this.stores[key].delete(id);
     }
     this.entities.delete(id);
+    return true;
   }
 
   public addComponent<K extends ComponentName>(
@@ -159,13 +210,13 @@ export class World {
 
   /**
    * Queries all active entities possessing every requested component type.
+   * Iterates the smallest component store first for O(min_store) lookup.
    */
   public query(...required: ComponentName[]): EntityId[] {
     if (required.length === 0) {
       return Array.from(this.entities);
     }
 
-    // Iterate smallest component store first for O(min_store) lookup
     let smallestStore: Map<EntityId, unknown> = this.stores[required[0]!];
     for (let i = 1; i < required.length; i++) {
       const candidate = this.stores[required[i]!];
@@ -194,10 +245,37 @@ export class World {
     return this.entities.size;
   }
 
-  public clear(): void {
+  /**
+   * Disposes all GPU-backed `Renderable` components and clears all entity/component stores.
+   */
+  public clear(disposeGpu = true): void {
+    if (disposeGpu) {
+      for (const renderable of this.stores.Renderable.values()) {
+        if (renderable.disposeOnDestroy !== false) {
+          this.disposeRenderableResources(renderable);
+        }
+      }
+    }
     for (const key of Object.keys(this.stores) as ComponentName[]) {
       this.stores[key].clear();
     }
     this.entities.clear();
+  }
+
+  private disposeRenderableResources(renderable: RenderableComponent): void {
+    if (renderable.pointLight) {
+      if (renderable.pointLight.parent) {
+        renderable.pointLight.parent.remove(renderable.pointLight);
+      }
+      if (renderable.pointLight.shadow?.map) {
+        renderable.pointLight.shadow.map.dispose();
+      }
+    }
+    if (renderable.object3D) {
+      if (renderable.object3D.parent) {
+        renderable.object3D.parent.remove(renderable.object3D);
+      }
+      LifecycleManager.disposeObject3D(renderable.object3D);
+    }
   }
 }

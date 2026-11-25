@@ -2,22 +2,26 @@ import * as THREE from 'three';
 
 /**
  * LifecycleManager: Centralized resource, observer, and listener custodian.
- * - Manages container-scoped `ResizeObserver` and `IntersectionObserver`
- * - Manages Page Visibility listener (`visibilitychange`)
+ * - Manages container-scoped `ResizeObserver` (with rAF coalescing for smooth drag/fullscreen resize)
+ * - Manages `IntersectionObserver`, `fullscreenchange`, and Page Visibility (`visibilitychange`)
  * - Tracks disposable functions and executes deep Three.js scene graph `.dispose()`
  *   on geometries, materials, shadow maps, and textures to guarantee zero GPU memory leaks.
  */
 
 export interface LifecycleObserverCallbacks {
-  onResize: (width: number, height: number) => void;
+  onResize: (width: number, height: number, immediate?: boolean) => void;
   onVisibilityChange?: (isVisible: boolean) => void;
   onTabHiddenChange?: (isHidden: boolean) => void;
+  onFullscreenChange?: (isFullscreen: boolean) => void;
 }
 
 export class LifecycleManager {
   private readonly container: HTMLElement;
   private resizeObserver: ResizeObserver | null = null;
   private intersectionObserver: IntersectionObserver | null = null;
+  private pendingResizeRaf: number | null = null;
+  private pendingWidth = 0;
+  private pendingHeight = 0;
   private cleanupCallbacks: Array<() => void> = [];
   private disposed = false;
 
@@ -31,14 +35,32 @@ export class LifecycleManager {
   ): void {
     if (this.disposed) return;
 
-    // 1. Container ResizeObserver
+    const scheduleResize = (width: number, height: number) => {
+      if (width <= 0 || height <= 0 || this.disposed) return;
+      this.pendingWidth = width;
+      this.pendingHeight = height;
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        if (this.pendingResizeRaf !== null) return;
+        this.pendingResizeRaf = window.requestAnimationFrame(() => {
+          this.pendingResizeRaf = null;
+          if (!this.disposed && this.pendingWidth > 0 && this.pendingHeight > 0) {
+            callbacks.onResize(this.pendingWidth, this.pendingHeight, false);
+          }
+        });
+      } else {
+        callbacks.onResize(width, height, false);
+      }
+    };
+
+    // 1. Container ResizeObserver (rAF-coalesced to prevent redundant WebGL renderTarget reallocations)
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           if (entry.target === this.container) {
             const { width, height } = entry.contentRect;
             if (width > 0 && height > 0) {
-              callbacks.onResize(width, height);
+              scheduleResize(width, height);
             }
           }
         }
@@ -46,8 +68,38 @@ export class LifecycleManager {
       this.resizeObserver.observe(this.container);
     }
 
-    // 2. Viewport IntersectionObserver (auto-hibernate offscreen stages)
-    if (options?.observeViewportIntersection !== false && typeof IntersectionObserver !== 'undefined' && callbacks.onVisibilityChange) {
+    // 2. Fullscreen & Window Resize listeners for smooth fullscreen expansion/collapse
+    if (typeof document !== 'undefined') {
+      const handleFullscreen = () => {
+        if (this.disposed) return;
+        const fsElem =
+          document.fullscreenElement ??
+          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement ??
+          null;
+        const isFs = Boolean(
+          fsElem && (fsElem === this.container || fsElem.contains(this.container))
+        );
+        callbacks.onFullscreenChange?.(isFs);
+        const rect = this.container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          scheduleResize(rect.width, rect.height);
+        }
+      };
+
+      document.addEventListener('fullscreenchange', handleFullscreen);
+      document.addEventListener('webkitfullscreenchange', handleFullscreen);
+      this.registerCleanup(() => {
+        document.removeEventListener('fullscreenchange', handleFullscreen);
+        document.removeEventListener('webkitfullscreenchange', handleFullscreen);
+      });
+    }
+
+    // 3. Viewport IntersectionObserver (auto-hibernate offscreen stages)
+    if (
+      options?.observeViewportIntersection !== false &&
+      typeof IntersectionObserver !== 'undefined' &&
+      callbacks.onVisibilityChange
+    ) {
       const onVis = callbacks.onVisibilityChange;
       this.intersectionObserver = new IntersectionObserver(
         (entries) => {
@@ -61,8 +113,12 @@ export class LifecycleManager {
       this.intersectionObserver.observe(this.container);
     }
 
-    // 3. Page Visibility API
-    if (options?.observeTabVisibility !== false && typeof document !== 'undefined' && callbacks.onTabHiddenChange) {
+    // 4. Page Visibility API
+    if (
+      options?.observeTabVisibility !== false &&
+      typeof document !== 'undefined' &&
+      callbacks.onTabHiddenChange
+    ) {
       const onTab = callbacks.onTabHiddenChange;
       const handler = () => onTab(document.hidden);
       document.addEventListener('visibilitychange', handler);
@@ -126,6 +182,11 @@ export class LifecycleManager {
   public disposeAll(sceneToDispose?: THREE.Object3D | null): void {
     if (this.disposed) return;
     this.disposed = true;
+
+    if (this.pendingResizeRaf !== null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(this.pendingResizeRaf);
+      this.pendingResizeRaf = null;
+    }
 
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();

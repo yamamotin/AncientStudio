@@ -13,24 +13,24 @@ window.TP = window.TP || {};
 
   var PRESETS = {
     sanctuary: {
-      palette: { background: '#050508', warmLight: '#FF8C24', warmCore: '#FFB85C', coolAmbient: '#2E6F95', foliageAccent: '#3A7D5C', cursorLight: '#7AD7F0' },
-      bloomIntensity: 1.2, dofStrength: 0.65, edgeStrength: 0.88, parallaxIntensity: 1.45
+      palette: { background: '#04050B', warmLight: '#FF2A85', warmCore: '#FFB830', coolAmbient: '#00E5FF', foliageAccent: '#7C4DFF', cursorLight: '#56F2FF' },
+      bloomIntensity: 1.38, dofStrength: 0.48, edgeStrength: 0.94, parallaxIntensity: 1.55
     },
     dawn: {
-      palette: { background: '#0a0d12', warmLight: '#FFB46B', warmCore: '#FFE0B2', coolAmbient: '#6D9FC0', foliageAccent: '#4D8B68', cursorLight: '#C9F0FF' },
-      bloomIntensity: 0.9, dofStrength: 0.5, edgeStrength: 0.72, parallaxIntensity: 1.3
+      palette: { background: '#090712', warmLight: '#FF6B4A', warmCore: '#FFD166', coolAmbient: '#3CE8FF', foliageAccent: '#9D4EDD', cursorLight: '#B8F3FF' },
+      bloomIntensity: 1.15, dofStrength: 0.42, edgeStrength: 0.88, parallaxIntensity: 1.4
     },
     day: {
-      palette: { background: '#0b1820', warmLight: '#FFD27A', warmCore: '#FFF4CF', coolAmbient: '#A6D8F0', foliageAccent: '#5FA97A', cursorLight: '#EAFBFF' },
-      bloomIntensity: 0.55, dofStrength: 0.35, edgeStrength: 0.65, parallaxIntensity: 1.15
+      palette: { background: '#070E18', warmLight: '#FF8E3C', warmCore: '#FFEE99', coolAmbient: '#5CEEFF', foliageAccent: '#4895EF', cursorLight: '#E0FBFC' },
+      bloomIntensity: 0.92, dofStrength: 0.34, edgeStrength: 0.84, parallaxIntensity: 1.25
     },
     storm: {
-      palette: { background: '#04060a', warmLight: '#FF6B3D', warmCore: '#FFB199', coolAmbient: '#4A6E8A', foliageAccent: '#2C4A48', cursorLight: '#9FC6E8' },
-      bloomIntensity: 1.85, dofStrength: 0.88, edgeStrength: 0.98, parallaxIntensity: 1.75
+      palette: { background: '#03040A', warmLight: '#FF1E6E', warmCore: '#FF9F1C', coolAmbient: '#00B4D8', foliageAccent: '#560BAD', cursorLight: '#90E0EF' },
+      bloomIntensity: 1.78, dofStrength: 0.62, edgeStrength: 0.98, parallaxIntensity: 1.75
     },
     emerald: {
-      palette: { background: '#040808', warmLight: '#38E5A5', warmCore: '#A6FFE0', coolAmbient: '#1F5C78', foliageAccent: '#3D8C54', cursorLight: '#FFD166' },
-      bloomIntensity: 1.35, dofStrength: 0.62, edgeStrength: 0.82, parallaxIntensity: 1.4
+      palette: { background: '#030809', warmLight: '#00F5A0', warmCore: '#FFD166', coolAmbient: '#00D9F5', foliageAccent: '#10B981', cursorLight: '#FF4D9D' },
+      bloomIntensity: 1.42, dofStrength: 0.46, edgeStrength: 0.92, parallaxIntensity: 1.48
     }
   };
 
@@ -138,6 +138,8 @@ window.TP = window.TP || {};
       weatherRaf: null,
       weatherMode: '',
       observer: null,
+      resizeRaf: null,
+      fullscreenListener: null,
       pointerListener: null
     };
 
@@ -364,16 +366,34 @@ window.TP = window.TP || {};
       if (state.weatherEnabled) setWeather(name === 'storm' ? 'storm' : 'ambient');
     }
 
-    function observe() {
-      if (!window.ResizeObserver) return;
-      state.observer = new ResizeObserver(function (entries) {
-        if (entries[0] && entries[0].contentRect.width > 0) {
-          if (state.instance && typeof state.instance.resize === 'function') {
-            state.instance.resize({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
-          }
+    function scheduleSmoothResize(width, height) {
+      if (!width || !height || width <= 0 || height <= 0) return;
+      if (state.resizeRaf) window.cancelAnimationFrame(state.resizeRaf);
+      state.resizeRaf = window.requestAnimationFrame(function () {
+        state.resizeRaf = null;
+        if (state.instance && typeof state.instance.resize === 'function') {
+          state.instance.resize({ width: width, height: height }, false);
         }
       });
-      state.observer.observe(container);
+    }
+
+    function observe() {
+      if (window.ResizeObserver) {
+        state.observer = new ResizeObserver(function (entries) {
+          if (entries[0] && entries[0].contentRect.width > 0) {
+            scheduleSmoothResize(entries[0].contentRect.width, entries[0].contentRect.height);
+          }
+        });
+        state.observer.observe(container);
+      }
+
+      state.fullscreenListener = function () {
+        var rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          scheduleSmoothResize(rect.width, rect.height);
+        }
+      };
+      document.addEventListener('fullscreenchange', state.fullscreenListener);
     }
 
     async function mount() {
@@ -398,7 +418,7 @@ window.TP = window.TP || {};
             }
           : {
               mode: 'playground',
-              mapId: 'sanctuary-isle',
+              mapId: 'cyberpunk-citadel',
               cellSize: 9,
               autoResponsiveDensity: true,
               maxPixelRatio: 2
@@ -446,10 +466,18 @@ window.TP = window.TP || {};
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;
       }
+      if (state.resizeRaf) {
+        window.cancelAnimationFrame(state.resizeRaf);
+        state.resizeRaf = null;
+      }
       clearMascotSpin();
       if (state.observer) {
         state.observer.disconnect();
         state.observer = null;
+      }
+      if (state.fullscreenListener) {
+        document.removeEventListener('fullscreenchange', state.fullscreenListener);
+        state.fullscreenListener = null;
       }
       if (state.pointerListener) {
         container.removeEventListener('pointermove', state.pointerListener);
