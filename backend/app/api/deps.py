@@ -1,7 +1,7 @@
 """FastAPI dependency providers for the Modular Monolith.
 
 Tests override these providers to inject deterministic settings, stores, queues,
-and ``httpx.MockTransport`` instances without touching production code.
+inspectors, and ``httpx.MockTransport`` instances without touching production code.
 """
 
 from __future__ import annotations
@@ -19,7 +19,18 @@ from app.domains.ai_workflows import (
 from app.domains.automation_n8n import N8NAutomationService, N8NClient
 from app.domains.etl import ETLService
 from app.domains.gateway import GatewayService
-from app.domains.pipelines_simulator import DEFAULT_REPO_ROOT, PipelineSimulatorService
+from app.domains.pipelines_simulator import (
+    DEFAULT_REPO_ROOT,
+    PipelineSimulatorService,
+    PipelineStageInspectorPort,
+    RepositoryStageInspector,
+)
+from app.domains.rag_console import (
+    EmbeddingProviderPort,
+    RAGConsoleService,
+    RAGIndexStore,
+    create_embedding_provider,
+)
 from app.domains.scraping import HttpxPageFetcher, PageFetcherPort, ScrapingService
 from app.queue import EventBus, JobQueue, create_job_queue
 from app.workers import WorkerRegistry
@@ -58,6 +69,20 @@ def get_inference_port(
     settings: Settings = Depends(get_settings),
 ) -> StructuredInferencePort:
     return OpenAICompatibleInferenceAdapter(settings)
+
+
+def get_pipeline_inspector() -> PipelineStageInspectorPort:
+    return RepositoryStageInspector()
+
+
+def get_embedding_provider(
+    settings: Settings = Depends(get_settings),
+) -> EmbeddingProviderPort:
+    return create_embedding_provider(settings)
+
+
+def get_rag_index_store() -> RAGIndexStore:
+    return RAGIndexStore()
 
 
 def get_etl_service(cache: CacheBackend = Depends(get_cache_backend)) -> ETLService:
@@ -121,9 +146,38 @@ def get_ai_workflow_service(
 def get_pipeline_simulator_service(
     settings: Settings = Depends(get_settings),
     queue: JobQueue = Depends(get_job_queue),
+    inspector: PipelineStageInspectorPort = Depends(get_pipeline_inspector),
+    cache: CacheBackend = Depends(get_cache_backend),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> PipelineSimulatorService:
     repo_root = settings.repo_root_override or DEFAULT_REPO_ROOT
-    return PipelineSimulatorService(queue=queue, repo_root=repo_root)
+    return PipelineSimulatorService(
+        queue=queue,
+        repo_root=repo_root,
+        inspector=inspector,
+        cache=cache,
+        event_bus=event_bus,
+    )
+
+
+def get_rag_console_service(
+    settings: Settings = Depends(get_settings),
+    index_store: RAGIndexStore = Depends(get_rag_index_store),
+    embedder: EmbeddingProviderPort = Depends(get_embedding_provider),
+    inference_port: StructuredInferencePort = Depends(get_inference_port),
+    cache: CacheBackend = Depends(get_cache_backend),
+    queue: JobQueue = Depends(get_job_queue),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> RAGConsoleService:
+    return RAGConsoleService(
+        settings=settings,
+        index_store=index_store,
+        embedder=embedder,
+        inference_port=inference_port,
+        cache=cache,
+        queue=queue,
+        event_bus=event_bus,
+    )
 
 
 def require_workflow_token(

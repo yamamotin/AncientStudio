@@ -45,7 +45,10 @@ def test_gateway_capabilities_exposes_modular_domains_and_telemetry(
         "scraping",
         "ai_workflows",
         "pipelines_simulator",
+        "rag_console",
     }
     assert "automation.n8n.trigger" in body["worker_topics"]
+    assert "pipelines.simulate" in body["worker_topics"]
+    assert "rag.reindex" in body["worker_topics"]
     assert "queued" in body["queue"]
     assert "hits" in body["cache"]

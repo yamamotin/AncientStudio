@@ -37,7 +37,7 @@ def test_scraping_enqueues_valid_url_and_blocks_ssrf(
     assert job_status.json()["status"] == "queued"
 
 
-def test_ai_workflows_blueprints_and_async_dispatch_exclude_rag_console(
+def test_ai_workflows_blueprints_and_async_dispatch_stay_distinct_from_rag_console(
     client: TestClient,
     auth_headers: dict[str, str],
 ) -> None:
@@ -47,9 +47,10 @@ def test_ai_workflows_blueprints_and_async_dispatch_exclude_rag_console(
     assert "invoice-anomaly-triage" in slugs
     assert all("rag" not in slug for slug in slugs)
 
-    # Confirm no RAG console routes are mounted in this phase.
+    # Phase 5 mounts dedicated /api/v1/rag/* console routes separately from ai-workflows.
     openapi_paths = set(client.get("/api/openapi.json").json()["paths"])
-    assert all("rag" not in path.lower() for path in openapi_paths)
+    assert "/api/v1/rag/query" in openapi_paths
+    assert "/api/v1/rag/search" in openapi_paths
 
     run_resp = client.post(
         "/api/v1/ai-workflows/runs",

@@ -10,6 +10,7 @@ from app.api.deps import (
 from app.core.security import Scope
 from app.domains.pipelines_simulator import (
     PipelineRunAccepted,
+    PipelineRunStatusOut,
     PipelineSimulationRequest,
     PipelineSimulatorService,
     PipelineTargetInfo,
@@ -43,3 +44,16 @@ async def enqueue_pipeline_run(
     service: PipelineSimulatorService = Depends(get_pipeline_simulator_service),
 ) -> PipelineRunAccepted:
     return await service.enqueue_simulation(body, correlation_id=correlation_id)
+
+
+@router.get(
+    "/runs/{job_id}",
+    response_model=PipelineRunStatusOut,
+    dependencies=[Depends(require_scopes(Scope.PIPELINES_RUN))],
+    summary="Fetch pipeline run status, per-stage telemetry, and verifiable RCA",
+)
+def get_pipeline_run_status(
+    job_id: str,
+    service: PipelineSimulatorService = Depends(get_pipeline_simulator_service),
+) -> PipelineRunStatusOut:
+    return service.get_run_status(job_id)

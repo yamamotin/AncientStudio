@@ -7,6 +7,7 @@ DOMAIN_MODULES: tuple[str, ...] = (
     "scraping",
     "ai_workflows",
     "pipelines_simulator",
+    "rag_console",
 )
 
 __all__ = ["DOMAIN_MODULES"]

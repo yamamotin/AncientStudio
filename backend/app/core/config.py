@@ -87,8 +87,17 @@ class Settings(BaseSettings):
     ai_provider_model: str = "gpt-4o-mini"
     ai_provider_timeout_seconds: float = Field(default=20.0, gt=0, le=120.0)
 
-    # Pipeline simulator root override
+    # Phase 4: Pipeline simulator root override
     repo_root_override: Path | None = None
+
+    # Phase 5: Console RAG indexing & hybrid/vector retrieval
+    rag_chunk_max_chars: int = Field(default=1400, ge=256, le=8000)
+    rag_chunk_overlap_lines: int = Field(default=4, ge=0, le=40)
+    rag_vector_dimensions: int = Field(default=256, ge=64, le=4096)
+    rag_default_top_k: int = Field(default=5, ge=1, le=20)
+    rag_hybrid_alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+    rag_embedding_provider: str = "local"
+    rag_embedding_model: str = "text-embedding-3-small"
 
     @property
     def is_local_like(self) -> bool:

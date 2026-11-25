@@ -9,12 +9,15 @@ from typing import Any
 
 from app.api.deps import (
     get_cache_backend,
+    get_embedding_provider,
     get_event_bus,
     get_idempotency_store,
     get_inference_port,
     get_job_queue,
     get_n8n_client,
     get_page_fetcher,
+    get_pipeline_inspector,
+    get_rag_index_store,
     get_worker_registry,
 )
 from app.api.v1.router import router as v1_router
@@ -38,6 +41,20 @@ from app.domains.automation_n8n import (
     N8NAutomationService,
     N8NClient,
 )
+from app.domains.pipelines_simulator import (
+    DEFAULT_REPO_ROOT,
+    PIPELINE_SIMULATE_TOPIC,
+    PipelineSimulatorService,
+    PipelineStageInspectorPort,
+    RepositoryStageInspector,
+)
+from app.domains.rag_console import (
+    RAG_REINDEX_TOPIC,
+    EmbeddingProviderPort,
+    RAGConsoleService,
+    RAGIndexStore,
+    create_embedding_provider,
+)
 from app.domains.scraping import (
     SCRAPING_EXTRACT_TOPIC,
     HttpxPageFetcher,
@@ -59,8 +76,9 @@ def _build_default_worker_registry(
     cache_backend: CacheBackend,
     job_queue: JobQueue,
     event_bus: EventBus,
+    rag_index_store: RAGIndexStore,
 ) -> WorkerRegistry:
-    """Register real async worker handlers for n8n, web scraping, and AI workflows."""
+    """Register real async worker handlers across all event-driven domains."""
     registry = WorkerRegistry()
 
     def resolve_n8n_client() -> N8NClient:
@@ -77,6 +95,18 @@ def _build_default_worker_registry(
             override()
             if override is not None
             else OpenAICompatibleInferenceAdapter(settings)
+        )
+
+    def resolve_pipeline_inspector() -> PipelineStageInspectorPort:
+        override = app.dependency_overrides.get(get_pipeline_inspector)
+        return override() if override is not None else RepositoryStageInspector()
+
+    def resolve_embedding_provider() -> EmbeddingProviderPort:
+        override = app.dependency_overrides.get(get_embedding_provider)
+        return (
+            override()
+            if override is not None
+            else create_embedding_provider(settings)
         )
 
     async def handle_n8n_trigger(job: JobEnvelope) -> dict[str, Any]:
@@ -107,9 +137,34 @@ def _build_default_worker_registry(
         )
         return await service.execute_workflow_job(job)
 
+    async def handle_pipeline_simulate(job: JobEnvelope) -> dict[str, Any]:
+        repo_root = settings.repo_root_override or DEFAULT_REPO_ROOT
+        service = PipelineSimulatorService(
+            queue=job_queue,
+            repo_root=repo_root,
+            inspector=resolve_pipeline_inspector(),
+            cache=cache_backend,
+            event_bus=event_bus,
+        )
+        return await service.execute_simulation_job(job)
+
+    async def handle_rag_reindex(job: JobEnvelope) -> dict[str, Any]:
+        service = RAGConsoleService(
+            settings=settings,
+            index_store=rag_index_store,
+            embedder=resolve_embedding_provider(),
+            inference_port=resolve_inference_port(),
+            cache=cache_backend,
+            queue=job_queue,
+            event_bus=event_bus,
+        )
+        return await service.execute_reindex_job(job)
+
     registry.register(N8N_TRIGGER_TOPIC, handle_n8n_trigger)
     registry.register(SCRAPING_EXTRACT_TOPIC, handle_scraping_extract)
     registry.register(AI_WORKFLOW_EXECUTE_TOPIC, handle_ai_workflow_execute)
+    registry.register(PIPELINE_SIMULATE_TOPIC, handle_pipeline_simulate)
+    registry.register(RAG_REINDEX_TOPIC, handle_rag_reindex)
     return registry
 
 
@@ -136,7 +191,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description=(
             "Modular Monolith FastAPI backend: Gateway/BFF, Event Queue & Workers, "
             "Redis/Memory Cache & Idempotency, ETL, real n8n Automation, Web Scraping, "
-            "AI Workflows, and Live CI/CD & Docker Pipeline Simulator."
+            "AI Workflows, Live CI/CD & Docker Pipeline Simulator, and Interactive RAG Console."
         ),
         docs_url="/api/docs",
         redoc_url=None,
@@ -152,12 +207,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     event_bus = EventBus()
     job_queue = create_job_queue(active)
+    rag_index_store = RAGIndexStore()
     worker_registry = _build_default_worker_registry(
         app,
         active,
         cache_backend=cache_backend,
         job_queue=job_queue,
         event_bus=event_bus,
+        rag_index_store=rag_index_store,
     )
     worker_runner = AsyncWorkerRunner(
         job_queue,
@@ -184,6 +241,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.idempotency_store = idempotency_store
     app.state.event_bus = event_bus
     app.state.job_queue = job_queue
+    app.state.rag_index_store = rag_index_store
     app.state.worker_registry = worker_registry
     app.state.worker_runner = worker_runner
     app.state.rate_limiter = scoped_rate_limiter
@@ -194,6 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_idempotency_store] = lambda: idempotency_store
     app.dependency_overrides[get_event_bus] = lambda: event_bus
     app.dependency_overrides[get_job_queue] = lambda: job_queue
+    app.dependency_overrides[get_rag_index_store] = lambda: rag_index_store
     app.dependency_overrides[get_worker_registry] = lambda: worker_registry
 
     # Starlette executes middlewares in reverse registration order (outermost registered last).

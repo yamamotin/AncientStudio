@@ -29,6 +29,8 @@ def test_lifespan_starts_and_stops_concurrent_worker_runner_cleanly() -> None:
         assert set(body["worker_topics"]) == {
             "ai_workflows.execute",
             "automation.n8n.trigger",
+            "pipelines.simulate",
+            "rag.reindex",
             "scraping.extract",
         }
 
