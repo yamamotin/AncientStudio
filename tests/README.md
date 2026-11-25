@@ -1,14 +1,17 @@
-# Test base (Node's built-in test runner)
+# Suítes de Teste da Raiz (Node nativo + Python unittest)
 
-Modular structure for future automated PR checks. No test framework dependency and no
-build step: `node --test tests/*.test.js` runs every `tests/**/*.test.js` file.
+Estrutura modular executada automaticamente em PRs e pushes para `main` (`.github/workflows/pr-tests.yml` e `.github/workflows/ci.yml`), sem dependências externas de runner:
 
-```
+```text
 tests/
-├── helpers/            # reusable assertions / fixtures for future suites
-├── static.test.js      # static site invariants (paths, sections, no trackers)
-└── engine.test.js      # public facade contract and config presets
+├── helpers/            # Asserções reutilizáveis para as suítes Node
+├── auto-merge.test.js  # Invariantes da ordem permanente (merge -> delete-branch -> redeploy) e workflows
+├── ci.test.js          # Contratos de publicação do GitHub Pages, paridade SHA e Dockerfile raiz
+├── engine.test.js      # Fachada pública, ECS, Tux 3D, modos Dia/Noite/Chuva, sombras PCF e contorno por objeto
+├── i18n.test.js        # Paridade pt-br/en, hooks data-i18n e cliente real /api/v1 sem simulações
+├── static.test.js      # Caminhos relativos seguros para file://, seções obrigatórias e zero trackers/CDN
+├── ui.test.js          # Fullscreen, retrato no hero, modos de cena, brilho (110%) e rotação autônoma do Tux
+└── test_api.py         # Contratos legados do servidor estático api/server.py (python3 -m unittest)
 ```
 
-Every test added under this folder runs automatically in the `test` job of
-`.github/workflows/pr-tests.yml` on pull requests and pushes to `main`.
+Os testes do backend FastAPI modular (66 testes `unit` e `integration`, incluindo resiliência/carga, simulador de pipelines e Console RAG) residem em `backend/tests/` e são executados com `cd backend && pytest` e `ruff check .`.

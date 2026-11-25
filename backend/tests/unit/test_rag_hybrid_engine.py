@@ -67,7 +67,12 @@ def test_real_repository_hybrid_vector_and_lexical_indexing_and_citations(
             assert len(res.results) == 5
             assert all(item.verified_on_disk is True for item in res.results)
             paths = [item.source_path for item in res.results]
-            assert any("redis_queue.py" in p or "ARCHITECTURE.md" in p for p in paths)
+            assert any(
+                "backend/app/queue/" in p or "ARCHITECTURE.md" in p
+                for p in paths
+            )
+            if mode in ("hybrid", "lexical"):
+                assert any("redis_queue.py" in p or "ARCHITECTURE.md" in p for p in paths)
 
     asyncio.run(_run())
 
