@@ -116,9 +116,10 @@ AncientStudio/
   passando** e `ruff` limpo.
 - `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflow de CI/CD e
   exports de workflows n8n versionados.
-- UX/UI: i18n `pt-br`/`en` com toggle no topbar; foto em cartão no hero à esquerda de
-  `ERON YAMAMOTO`; controle de brilho com padrão `110%`; pinguim sem ponteiro; três
-  modos de cena (`Dia`, `Noite`, `Com chuva`).
+- UX/UI: i18n `pt-br`/`en` com toggle no topbar; único título ASCII `ERON YAMAMOTO`,
+  sem rótulo duplicado; foto em cartão na coluna esquerda com topo alinhado ao texto
+  da direita; controle de brilho com padrão `130%` e máximo `150%`; pinguim sem
+  ponteiro; três modos de cena (`Dia`, `Noite`, `Com chuva`).
 - Engine: modos unificados, sombras PCF, vento ECS e API de contorno por objeto; o
   frontend ainda não consome essa API de contorno.
 - CI/CD: ordem permanente `merge (resolve-conflicts) → delete-branch → redeploy`, com
