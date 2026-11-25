@@ -6,6 +6,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: "Exact commit to publish (defaults to main HEAD)"
+        required: false
+        type: string
+
+# `workflow_dispatch` is the reliable deploy path after an agent merge: pushes
+# performed with GITHUB_TOKEN do not start new workflow runs.
+env:
+  DEPLOY_SHA: ${{ inputs.sha || github.sha }}
 
 permissions:
   contents: read
@@ -21,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       # Stage only browser-facing files. api/ and Dockerfile stay out of Pages,
       # so the static asset set is identical on both hosts (relative paths only).
@@ -29,7 +41,7 @@ jobs:
           rm -rf _site
           mkdir -p _site
           cp -R index.html robots.txt sitemap.xml api-status.json assets _site/
-          printf '%s\n' "$GITHUB_SHA" > _site/build.txt
+          printf '%s\n' "$DEPLOY_SHA" > _site/build.txt
 
       # Fail early if the artifact root is wrong; project Pages needs index.html
       # at the artifact root (URL /AncientStudio/), not inside an extra folder.
@@ -84,8 +96,8 @@ jobs:
         run: |
           # Cache-buster: without a unique query both CDNs can return the
           # previous commit and parity would pass against a stale deployment.
-          pages_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$PAGES_URL/build.txt?v=$GITHUB_SHA" | tr -d '[:space:]')
-          vercel_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$VERCEL_URL/api/v1/build?v=$GITHUB_SHA" \
+          pages_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$PAGES_URL/build.txt?v=$DEPLOY_SHA" | tr -d '[:space:]')
+          vercel_sha=$(curl -fsSL --retry 5 --retry-delay 5 "$VERCEL_URL/api/v1/build?v=$DEPLOY_SHA" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha", ""))')
           echo "pages_sha=$pages_sha"
           echo "vercel_sha=$vercel_sha"
