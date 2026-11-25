@@ -31,7 +31,7 @@ GitHub **não inicia novos workflow runs** para eventos gerados pelo `GITHUB_TOK
 
 A correção é o passo 8 acima: depois de mesclar e apagar a branch, o helper dispara explicitamente os dois workflows de deploy pelo SHA do merge. Ambos aceitam o input `sha` e fazem checkout/commit exato, então não há corrida com um push posterior. O `auto-merge.yml` concede `actions: write` ao `GITHUB_TOKEN`, sem o qual `gh workflow run` falha com 403 após o merge.
 
-Se duas execuções do helper observarem o mesmo PR, a que perder a corrida vê o estado `MERGED` e sai sem duplicar limpeza ou deploy.
+Se duas execuções do helper observarem o mesmo PR, a que perder a corrida vê o estado `MERGED` e sai sem duplicar limpeza ou deploy. O fluxo completo é verificado com um PR de validação: após os checks, o próprio `auto-merge.yml` mescla, apaga a branch e dispara os dois deploys sem intervenção humana.
 
 A Vercel também é publicada pelo GitHub Action `ci-cd.yml` quando `VERCEL_TOKEN`, `VERCEL_ORG_ID` e `VERCEL_PROJECT_ID` existem; sem esses secrets, o job registra `notice` e a integração Git nativa da Vercel continua fazendo o deploy.
 
