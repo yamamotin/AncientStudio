@@ -17,17 +17,17 @@ window.TP = window.TP || {};
   var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
     night: {
-      palette: { background: '#04050B', warmLight: '#FF2A85', warmCore: '#FFB830', coolAmbient: '#00E5FF', foliageAccent: '#7C4DFF', cursorLight: '#56F2FF' },
-      bloomIntensity: 1.38, dofStrength: 0.48, edgeStrength: 0.94, parallaxIntensity: 1.55
+      palette: { background: '#05060D', warmLight: '#FF2A85', warmCore: '#FFC145', coolAmbient: '#00F0FF', foliageAccent: '#8A5CFF', cursorLight: '#64F5FF' },
+      bloomIntensity: 1.48, dofStrength: 0.36, edgeStrength: 0.96, blockBlendWeight: 0.35, windStrength: 1.0, parallaxIntensity: 1.65
     },
     day: {
-      palette: { background: '#070E18', warmLight: '#FF8E3C', warmCore: '#FFEE99', coolAmbient: '#5CEEFF', foliageAccent: '#4895EF', cursorLight: '#E0FBFC' },
-      bloomIntensity: 0.92, dofStrength: 0.34, edgeStrength: 0.84, parallaxIntensity: 1.25
+      palette: { background: '#08101C', warmLight: '#FF8E3C', warmCore: '#FFEE99', coolAmbient: '#5CEEFF', foliageAccent: '#4895EF', cursorLight: '#E0FBFC' },
+      bloomIntensity: 1.02, dofStrength: 0.28, edgeStrength: 0.88, blockBlendWeight: 0.33, windStrength: 0.72, parallaxIntensity: 1.3
     },
     rain: {
-      palette: { background: '#03040A', warmLight: '#FF1E6E', warmCore: '#FF9F1C', coolAmbient: '#00B4D8', foliageAccent: '#560BAD', cursorLight: '#90E0EF' },
-      bloomIntensity: 1.78, dofStrength: 0.62, edgeStrength: 0.98, parallaxIntensity: 1.75
-    }
+      palette: { background: '#04050B', warmLight: '#FF1E6E', warmCore: '#FF9F1C', coolAmbient: '#00C8F0', foliageAccent: '#560BAD', cursorLight: '#90E0EF' },
+      bloomIntensity: 1.82, dofStrength: 0.46, edgeStrength: 0.98, blockBlendWeight: 0.38, windStrength: 1.65, parallaxIntensity: 1.8
+    },
   };
 
   function configFor(name) {
@@ -37,6 +37,8 @@ window.TP = window.TP || {};
       bloomIntensity: preset.bloomIntensity,
       dofStrength: preset.dofStrength,
       edgeStrength: preset.edgeStrength,
+      blockBlendWeight: preset.blockBlendWeight,
+      windStrength: preset.windStrength,
       parallaxIntensity: preset.parallaxIntensity
     };
   }
@@ -351,12 +353,13 @@ window.TP = window.TP || {};
               bloomIntensity: 0.45,
               dofStrength: 0.0,
               edgeStrength: 0.96,
+              blockBlendWeight: 0.28,
               enableShadows: false
             }
           : {
               mode: 'playground',
               mapId: 'cyberpunk-citadel',
-              cellSize: 9,
+              cellSize: 8,
               autoResponsiveDensity: true,
               maxPixelRatio: 2
             };
@@ -417,6 +420,8 @@ window.TP = window.TP || {};
       }
       if (state.pointerListener) {
         container.removeEventListener('pointermove', state.pointerListener);
+        container.removeEventListener('touchstart', state.pointerListener);
+        container.removeEventListener('touchmove', state.pointerListener);
         state.pointerListener = null;
       }
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
@@ -435,6 +440,8 @@ window.TP = window.TP || {};
         if (event.isTrusted) state.lastUserPointer = Date.now();
       };
       container.addEventListener('pointermove', state.pointerListener, { passive: true });
+      container.addEventListener('touchstart', state.pointerListener, { passive: true });
+      container.addEventListener('touchmove', state.pointerListener, { passive: true });
     }
 
     window.addEventListener('pagehide', destroy);

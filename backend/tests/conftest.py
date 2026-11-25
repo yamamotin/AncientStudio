@@ -1,6 +1,6 @@
-"""Shared fixtures for backend tests.
+"""Shared deterministic fixtures for unit and integration tests.
 
-Everything is deterministic: no real network, no real secrets, no database.
+No real network calls, external brokers, or production secrets are used.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from collections.abc import Callable
 import httpx
 import pytest
 from app.api.deps import get_n8n_client
-from app.config import Settings
+from app.core.config import Settings
+from app.domains.automation_n8n import N8NClient
 from app.main import create_app
-from app.services.n8n import N8NClient
 from fastapi.testclient import TestClient
 
 
@@ -28,6 +28,7 @@ def settings() -> Settings:
         gateway_hmac_secret="test-gateway-secret-0123456789",
         signature_max_age_seconds=300,
         workflow_api_token="test-workflow-token-0123456789",
+        admin_api_token="test-admin-api-token-0123456789",
         n8n_base_url="http://n8n.test:5678",
         n8n_webhook_base_url="http://n8n.test:5678/webhook",
         n8n_api_token="test-n8n-api-token",
@@ -39,6 +40,11 @@ def settings() -> Settings:
 @pytest.fixture
 def client(settings: Settings) -> TestClient:
     return TestClient(create_app(settings))
+
+
+@pytest.fixture
+def auth_headers(settings: Settings) -> dict[str, str]:
+    return {"X-API-Key": settings.workflow_api_token}
 
 
 @pytest.fixture
@@ -55,7 +61,9 @@ def use_n8n_transport(
 
 
 @pytest.fixture
-def signed_headers(settings: Settings) -> Callable[..., tuple[bytes, dict[str, str]]]:
+def signed_headers(
+    settings: Settings,
+) -> Callable[..., tuple[bytes, dict[str, str]]]:
     def build(
         payload: dict,
         *,
@@ -63,14 +71,19 @@ def signed_headers(settings: Settings) -> Callable[..., tuple[bytes, dict[str, s
         timestamp: str | None = None,
         signature: str | None = None,
     ) -> tuple[bytes, dict[str, str]]:
-        raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
         sent_at = timestamp or str(int(time.time()))
         digest = hashlib.sha256(raw).hexdigest()
-        expected = "sha256=" + hmac.new(
-            settings.gateway_hmac_secret.encode("utf-8"),
-            f"{sent_at}.{digest}".encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        expected = (
+            "sha256="
+            + hmac.new(
+                settings.gateway_hmac_secret.encode("utf-8"),
+                f"{sent_at}.{digest}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        )
         return raw, {
             "Content-Type": "application/json",
             "Idempotency-Key": idempotency_key,

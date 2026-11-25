@@ -9,6 +9,7 @@ import {
   ResolutionTransitionController,
 } from './core/ResolutionController';
 import { AnimationSystem } from './animation/AnimationSystem';
+import { EntityBlueprintRegistry } from './ecs/EntityBlueprint';
 import {
   InputSystem,
   MovementRotationSystem,
@@ -16,6 +17,7 @@ import {
   PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
+  WindSystem,
 } from './ecs/SystemRunner';
 import { World } from './ecs/World';
 import { PlaygroundEntityFactory } from './entities/PlaygroundEntityFactory';
@@ -25,6 +27,7 @@ import { PointerInput } from './input/PointerInput';
 import { VfxController } from './vfx/VfxController';
 import { MapLoader } from './world/MapLoader';
 import { PlaygroundSceneBuilder } from './world/PlaygroundSceneBuilder';
+import { SceneComposerKit, SceneDepthRig } from './world/SceneComposerKit';
 import type {
   DeepPartial,
   EngineConfig,
@@ -62,15 +65,19 @@ export {
   detectResolutionTier,
   ResolutionTransitionController,
   World,
+  EntityBlueprintRegistry,
   SystemRunner,
   InputSystem,
   PatrolSystem,
   MovementRotationSystem,
+  WindSystem,
   AnimationSystem,
   NeonPulseSystem,
   RenderSyncSystem,
   MapLoader,
   PlaygroundSceneBuilder,
+  SceneComposerKit,
+  SceneDepthRig,
   TuxEntityFactory,
   PlaygroundEntityFactory,
   PointerInput,

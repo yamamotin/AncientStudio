@@ -1,20 +1,24 @@
 [project]
 name = "ancientstudio-backend"
 version = "1.0.0"
-description = "FastAPI backend for AncientStudio (ETL, fiscal gateway, n8n workflows)"
-requires-python = ">=3.11"
+description = "Modular Monolith FastAPI backend for AncientStudio (Gateway/BFF, Queue/Workers, ETL, n8n, Scraping, AI Workflows, Pipeline Simulator)"
+requires-python = ">=3.10"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-# FastAPI's Depends()/Header() are intentionally used as default values.
+# FastAPI's Depends()/Header()/Query() are intentionally used as default values.
 ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
 pythonpath = ["."]
+markers = [
+    "unit: fast isolated unit tests for core, cache, queue, workers, and domain services",
+    "integration: HTTP API and cross-module contract integration tests",
+]

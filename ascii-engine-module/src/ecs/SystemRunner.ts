@@ -197,6 +197,46 @@ export class MovementRotationSystem implements EcsSystem {
 }
 
 /**
+ * WindSystem (priority 25): Applies realistic nocturnal urban canyon wind gusts & harmonic
+ * sway to suspended neon banners, street lanterns, overhead power cables, and hologram totems.
+ */
+export class WindSystem implements EcsSystem {
+  public readonly name = 'WindSystem';
+  private windStrength: number;
+
+  constructor(windStrength = 1.0) {
+    this.windStrength = windStrength;
+  }
+
+  public setWindStrength(strength: number): void {
+    this.windStrength = Math.max(0, Math.min(3, strength));
+  }
+
+  public update(world: World, { elapsed }: SystemContext): void {
+    const entities = world.query('Transform', 'WindSway');
+    if (entities.length === 0) return;
+
+    // Traveling street-canyon gust envelope
+    const globalGust =
+      (0.65 + 0.35 * Math.sin(elapsed * 0.72) + 0.22 * Math.sin(elapsed * 1.83 + 1.1)) *
+      this.windStrength;
+
+    for (const id of entities) {
+      const transform = world.getComponent(id, 'Transform')!;
+      const sway = world.getComponent(id, 'WindSway')!;
+
+      const t = elapsed * sway.frequency + sway.phase;
+      const flutter = Math.sin(t * 2.35 + sway.phase) * 0.28;
+      const env = globalGust * sway.gustFactor;
+
+      transform.rotZ = sway.baseRotZ + (Math.sin(t) * 0.72 + flutter + 0.35) * sway.swayAmpZ * env;
+      transform.rotX = sway.baseRotX + Math.cos(t * 0.88 + sway.phase) * sway.swayAmpX * env;
+      transform.rotY = sway.baseRotY + Math.sin(t * 0.55) * sway.swayAmpZ * 0.35 * env;
+    }
+  }
+}
+
+/**
  * NeonPulseSystem (priority 35): Drives cyberpunk holographic signs, neon pylons, and
  * core reactor harmonic pulses + subtle sign glitching (`NeonBeacon` + `Renderable`).
  */

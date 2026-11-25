@@ -1,14 +1,21 @@
-"""Authenticated n8n workflow trigger/query routes."""
+"""Authenticated n8n workflow catalog, trigger, and execution status routes."""
 
 from __future__ import annotations
 
 from app.api.deps import (
     get_correlation_id,
     get_n8n_client,
+    get_n8n_service,
     require_workflow_token,
 )
-from app.schemas.workflows import WorkflowRunIn, WorkflowRunOut, WorkflowStatusOut
-from app.services.n8n import N8NClient
+from app.domains.automation_n8n import (
+    N8NAutomationService,
+    N8NClient,
+    WorkflowCatalogItem,
+    WorkflowRunIn,
+    WorkflowRunOut,
+    WorkflowStatusOut,
+)
 from fastapi import APIRouter, Depends, status
 
 router = APIRouter(
@@ -16,6 +23,17 @@ router = APIRouter(
     tags=["workflows"],
     dependencies=[Depends(require_workflow_token)],
 )
+
+
+@router.get(
+    "/catalog",
+    response_model=list[WorkflowCatalogItem],
+    summary="List versioned n8n workflow blueprints discovered on disk",
+)
+def list_workflow_catalog(
+    service: N8NAutomationService = Depends(get_n8n_service),
+) -> list[WorkflowCatalogItem]:
+    return service.list_catalog()
 
 
 @router.post(

@@ -1,14 +1,21 @@
-"""Gateway signature, validation and idempotency tests."""
+"""Integration tests for Fiscal Gateway HMAC validation, math checks, and idempotency."""
+
+from __future__ import annotations
 
 import json
 from collections.abc import Callable
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.integration
 
 
 def test_valid_invoice_is_accepted(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     raw, headers = signed_headers(invoice_payload)
 
@@ -24,7 +31,9 @@ def test_valid_invoice_is_accepted(
 
 
 def test_same_key_and_payload_replays_without_reprocessing(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     raw, headers = signed_headers(invoice_payload)
 
@@ -38,7 +47,9 @@ def test_same_key_and_payload_replays_without_reprocessing(
 
 
 def test_same_key_with_other_payload_is_a_conflict(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     raw, headers = signed_headers(invoice_payload)
     client.post("/api/v1/gateway/invoices/parse", content=raw, headers=headers)
@@ -57,7 +68,9 @@ def test_same_key_with_other_payload_is_a_conflict(
 
 
 def test_invalid_signature_is_rejected(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     raw, headers = signed_headers(invoice_payload, signature="sha256=deadbeef")
 
@@ -68,7 +81,9 @@ def test_invalid_signature_is_rejected(
 
 
 def test_stale_timestamp_is_rejected(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     raw, headers = signed_headers(invoice_payload, timestamp="1")
 
@@ -79,7 +94,9 @@ def test_stale_timestamp_is_rejected(
 
 
 def test_totals_mismatch_returns_422(
-    client: TestClient, signed_headers: Callable[..., Any], invoice_payload: dict
+    client: TestClient,
+    signed_headers: Callable[..., Any],
+    invoice_payload: dict,
 ) -> None:
     payload = dict(invoice_payload)
     payload["totals"] = {**invoice_payload["totals"], "gross": 999.0}
@@ -92,7 +109,8 @@ def test_totals_mismatch_returns_422(
 
 
 def test_browser_submit_signs_on_server_and_replays(
-    client: TestClient, invoice_payload: dict
+    client: TestClient,
+    invoice_payload: dict,
 ) -> None:
     raw = json.dumps(invoice_payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}

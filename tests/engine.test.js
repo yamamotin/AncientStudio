@@ -39,7 +39,17 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
 });
 
 test('playground exposes exactly three scene modes', () => {
-  includesAll(adapter, ['DEFAULT_MODE = \'night\'', 'SCENE_MODES = [\'day\', \'night\', \'rain\']', "mode !== 'rain'"]);
+  includesAll(adapter, [
+    'DEFAULT_MODE = \'night\'',
+    'SCENE_MODES = [\'day\', \'night\', \'rain\']',
+    "mode !== 'rain'",
+    'blockBlendWeight: preset.blockBlendWeight',
+    'windStrength: preset.windStrength',
+    'blockBlendWeight: 0.28',
+    'cellSize: 8',
+    'touchstart',
+    'touchmove'
+  ]);
   assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette/);
 });
 
@@ -334,7 +344,7 @@ test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & 
   // Verify clean WebGL resource disposal & scene detachment when destroying an ECS entity
   const countBeforeDestroy = ecsWorld.getEntityCount();
   const droneRenderable = ecsWorld.getComponent(droneId, 'Renderable');
-  assert.ok(droneRenderable.object3D.parent === built.scene, 'Drone mesh attached to scene');
+  assert.ok(droneRenderable.object3D.parent !== null, 'Drone mesh attached to scene depth layer group');
   assert.equal(ecsWorld.destroyEntity(droneId, true), true);
   assert.equal(ecsWorld.getEntityCount(), countBeforeDestroy - 1);
   assert.equal(droneRenderable.object3D.parent, null, 'destroyEntity detaches and disposes Object3D');
@@ -386,4 +396,183 @@ test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & 
   assert.equal(settled.isTransitioning, false, 'Transition settles cleanly with zero residual drift');
   assert.equal(settled.cellW, fullscreenProfile.cellPhysW);
   assert.equal(settled.cellH, fullscreenProfile.cellPhysH);
+});
+
+test('GPU lighten block-detail blend (~35%), WindSystem street props, and scroll-safe touch input work end-to-end', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const asciiShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const atlasSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/glyphAtlas.ts'),
+    'utf8'
+  );
+  const pointerSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/input/PointerInput.ts'),
+    'utf8'
+  );
+
+  // 1. Verify ~35% GPU lighten block-vs-detail composition in shader & procedural block tiles in atlas
+  includesAll(asciiShader, ['uBlockBlendWeight', 'uBlockCount', 'max(detailGlyphMask']);
+  includesAll(atlasSrc, ['blockCount = 4', 'bayer4']);
+  includesAll(pointerSrc, ['touchstart', 'touchmove', 'touchend', 'pan-y', '{ passive: true }']);
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.blockBlendWeight, 0.35, 'Default lighten block weight is ~35%');
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.windStrength, 1.0, 'Default wind strength active');
+
+  // 2. Verify layered Cyberpunk street props (streetpoles, hanging banners, overhead cables) & WindSystem
+  const ecsWorld = new pkg.World();
+  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
+  assert.ok(cyberMap.buildings.length >= 14, 'Layered foreground/midground/background cyberpunk buildings');
+  assert.ok(cyberMap.streetPoles.length >= 6, 'Street poles line both sides of the nocturnal boulevard');
+
+  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+  const windEntities = ecsWorld.query('Transform', 'WindSway');
+  assert.ok(windEntities.length >= 8, 'Hanging neon banners & overhead cables carry WindSway components');
+
+  const sampleWindId = windEntities[0];
+  const initialRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
+  const windSys = new pkg.WindSystem(1.2);
+  windSys.update(ecsWorld, { dt: 0.033, elapsed: 1.4 });
+  const swayedRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
+  assert.notEqual(initialRotZ, swayedRotZ, 'WindSystem oscillates suspended street banners & cables');
+
+  // Verify central Netrunner avatar has articulated coatTail & high-contrast body components
+  const avatarAnim = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
+  assert.ok(avatarAnim && avatarAnim.parts && avatarAnim.parts.coatTail, 'Central Netrunner has wind-animated coatTail');
+
+  // 3. Verify PointerInput touchstart -> touchmove -> touchend drives dragYaw/normX passively without blocking scroll
+  const listeners = {};
+  const listenerOpts = {};
+  const mockContainer = {
+    style: {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
+    addEventListener(type, fn, opts) {
+      listeners[type] = fn;
+      listenerOpts[type] = opts;
+    },
+    removeEventListener(type) {
+      delete listeners[type];
+    }
+  };
+
+  const ptr = new pkg.PointerInput(mockContainer);
+  ptr.attach();
+  assert.equal(mockContainer.style.touchAction, 'pan-y', 'Preserves vertical page scrolling via touch-action: pan-y');
+  assert.equal(listenerOpts.touchstart.passive, true);
+  assert.equal(listenerOpts.touchmove.passive, true);
+  assert.equal(listenerOpts.touchend.passive, true);
+
+  listeners.touchstart({
+    isTrusted: true,
+    changedTouches: [{ identifier: 1, clientX: 200, clientY: 150 }]
+  });
+  listeners.touchmove({
+    isTrusted: true,
+    changedTouches: [{ identifier: 1, clientX: 290, clientY: 120 }]
+  });
+
+  const activeSnap = ptr.sample(0.016);
+  assert.equal(activeSnap.isTouch, true);
+  assert.equal(activeSnap.active, true);
+  assert.ok(activeSnap.dragYaw > 0.5, 'Horizontal touch swipe pans street camera smoothly');
+  assert.ok(activeSnap.normX > 0.3, 'Touch coordinates normalize cleanly to stage');
+
+  listeners.touchend({ touches: [] });
+  const releasedSnap = ptr.sample(0.016);
+  assert.equal(releasedSnap.isDown, false);
+  assert.equal(releasedSnap.active, true, 'Briefly holds view angle after finger release before smooth relax');
+
+  ptr.detach();
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+
+test('SceneComposerKit, SceneDepthRig & EntityBlueprintRegistry compose layered cyberpunk scenes cleanly', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/ecs/EntityBlueprint.ts')),
+    'EntityBlueprint.ts module exists'
+  );
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/world/SceneComposerKit.ts')),
+    'SceneComposerKit.ts module exists'
+  );
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(typeof pkg.EntityBlueprintRegistry, 'function');
+  assert.equal(typeof pkg.SceneComposerKit, 'function');
+  assert.equal(typeof pkg.SceneDepthRig, 'function');
+
+  const ecsWorld = new pkg.World();
+  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  // 1. DepthRig groups organize foreground, midground, background & sky layers
+  assert.ok(built.depthRig.foreground.children.length > 0, 'Foreground layer populated');
+  assert.ok(built.depthRig.midground.children.length > 0, 'Midground layer populated');
+  assert.ok(built.depthRig.background.children.length > 0, 'Background layer populated');
+  assert.ok(built.depthRig.sky.children.length > 0, 'Sky layer populated');
+
+  // 2. ECS DepthLayer & Blueprint Registry queries
+  const fgEntities = ecsWorld.queryByLayer('foreground');
+  const mgEntities = ecsWorld.queryByLayer('midground');
+  assert.ok(fgEntities.includes(built.avatarEntityId), 'Central Netrunner protagonist sits in foreground layer');
+  assert.ok(mgEntities.includes(built.shrineEntityId), 'Holo-Reactor sits in midground layer');
+  assert.equal(
+    ecsWorld.getComponent(built.avatarEntityId, 'DepthLayer').contrastPriority,
+    1.0,
+    'Foreground protagonist carries top silhouette contrast priority'
+  );
+
+  // 3. Blueprint Registry lists all reusable cyberpunk prefabs & supports role-scoped disposal
+  const bpIds = built.blueprintRegistry.listIds();
+  assert.ok(bpIds.includes('cyber.netrunner-avatar'));
+  assert.ok(bpIds.includes('cyber.wind-banner'));
+  assert.ok(bpIds.includes('cyber.hover-drone'));
+
+  const removedVehicles = ecsWorld.destroyEntitiesByRole('vehicle', true);
+  assert.ok(removedVehicles >= 3, 'destroyEntitiesByRole cleanly removes and disposes all hover-spinners');
+
+  // 4. Palette live-update via NeonMaterialBank
+  built.materialBank.updatePalette({
+    background: '#020308',
+    warmLight: '#00FFAA',
+    warmCore: '#FFEE55',
+    coolAmbient: '#22CCFF',
+    foliageAccent: '#5588FF',
+    cursorLight: '#FFFFFF'
+  });
+  assert.ok(built.materialBank.magenta.color.g > 0.8, 'NeonMaterialBank updates shared emissive materials in one call');
+
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
 });
