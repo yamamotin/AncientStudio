@@ -54,17 +54,17 @@ test('neofetch penguin auto-rotates without mouse or touch interaction', () => {
   ]);
   assert.doesNotMatch(neofetch, /pointermove|pointerdown|updateFromClientPoint/);
 
-  // Engine: pointer events are captured before the core listeners see them,
-  // and one integration-only group rotates the Tux root each frame.
+  // Engine: the mascot stage is pointer-inert via CSS and one integration-only
+  // group rotates the Tux root on yaw only; no pitch/badge updates remain.
   includesAll(adapter, [
     'TuxMascotRoot',
     'TuxAutoSpin',
-    'stopImmediatePropagation',
     'data-pointer-locked',
     'data-auto-spin',
     'getScene'
   ]);
-  assert.doesNotMatch(adapter, /updatePenguinFromPointer|penguinTargetYaw|windowPointerListener/);
+  assert.doesNotMatch(neofetch, /angleBadge|state\.pitch|setAngles/);
+  assert.doesNotMatch(adapter, /updatePenguinFromPointer|penguinTargetYaw|windowPointerListener|stopImmediatePropagation/);
 });
 
 test('modular engine architecture exposes ECS, Lifecycle, World, Entities, VFX, and Input modules', () => {
