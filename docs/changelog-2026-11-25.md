@@ -85,3 +85,13 @@ Vercel ou do GitHub foi alterada fora dos arquivos versionados do repositório.
 Integrar `setObjectOutline()` ao pinguim em uma etapa futura, após validação visual
 do contorno na engine. Esta documentação registra apenas a disponibilidade da API;
 nenhum código de contorno foi adicionado ao frontend.
+
+## 7. Ajuste final de UI no mesmo dia
+
+- Removido o `<p class="hero-name">ERON YAMAMOTO</p>`: resta apenas o banner ASCII.
+- O cartão da foto passou a ocupar `grid-row: 2 / span 4` com `margin-top` igual ao
+  do `prompt-line`, alinhando o topo da moldura ao início do texto da direita; a
+  coluna esquerda continua na mesma margem do banner.
+- Brilho: padrão alterado de `110%` para `130%` e máximo de `130%` para `150%`
+  (`--page-brightness: 1.3`, `value="130"`, `max="150"`). Controles de cenário e
+  pinguim permanecem inalterados.

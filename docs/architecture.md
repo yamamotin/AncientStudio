@@ -9,12 +9,12 @@ AncientStudio/
 ├── index.html                         # SPA estática de terminal, hooks data-i18n
 ├── assets/
 │   ├── css/style.css                  # Layout, retrato no hero, modos de cena e brilho
-│   ├── img/eron-portrait-ascii.png    # Retrato ASCII do hero à esquerda
+│   ├── img/eron-portrait-ascii.png    # Retrato ASCII do hero na coluna esquerda
 │   ├── js/
 │   │   ├── core.js                    # Helpers, prefers-reduced-motion
 │   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
 │   │   ├── api-client.js              # Chamadas reais a /api/v1 (ETL, Gateway, n8n, Pipelines, RAG)
-│   │   ├── main.js                    # Composição da UI, fullscreen e controle de brilho (110%)
+│   │   ├── main.js                    # Composição da UI, fullscreen e controle de brilho (130%)
 │   │   ├── neofetch.js                # Palco Tux 3D + fallback raycaster ASCII
 │   │   ├── pipeline.js / api.js / console.js
 │   │   ├── engine-adapter.js          # Ponte para modos day / night / rain e mascot
@@ -88,7 +88,7 @@ AncientStudio/
 ### Frontend e Engine 3D
 
 - `pt-br` é o idioma primário, com paridade total de chaves entre `assets/i18n/pt-br.json`, `en.json` e o dicionário embutido em `assets/js/i18n.js` para funcionamento inclusive via `file://`.
-- Hero apresenta o retrato em cartão à esquerda abaixo de `ERON YAMAMOTO`, alinhando cargo, localização e ações (`[github]`, `[ curriculo-pt-br ]`, `[ curriculo-en ]`); no footer, o controle de **brilho da página** opera com padrão `110%` (`100%–130%`).
+- Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações (`[github]`, `[ curriculo-pt-br ]`, `[ curriculo-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
 - `[ ASCII REALMS // SCENE ]` expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D girando continuamente em `yaw`, isolado de eventos de mouse/toque.
 - `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend.
 - `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, workflows n8n, simulador de pipelines e console RAG), sem respostas simuladas.
@@ -106,8 +106,10 @@ AncientStudio/
 - Ordem permanente automatizada em `scripts/auto-merge-verified.sh` e `.github/workflows/auto-merge.yml`: **`merge` (com `resolve-conflicts`) → `delete-branch` → `redeploy`** (`pages.yml` e `ci-cd.yml` disparados com `sha` exato + deploy de produção na Vercel).
 - O `Dockerfile` da raiz permanece servindo `api/server.py` na hospedagem atual da Vercel até a virada final de infraestrutura, enquanto `infra/docker/Dockerfile` empacota o backend FastAPI completo.
 
-## 3. Estado verificado (2026-11-25)
+## 3. Estado atual (2026-11-25)
 
-- **Backend FastAPI:** Fases 1 a 5 concluídas, **`66 passed` no `pytest`** (`33` unitários + `33` integração/resiliência/carga concorrente) e `ruff check .` sem avisos.
-- **Contratos do Repositório e Engine 3D:** **`47/47` testes em `node --test tests/*.test.js`** e **`6/6` testes em `unittest` (`tests/test_api.py`)**.
-- **Histórico detalhado do dia:** consulte [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) e [`backend/ARCHITECTURE.md`](../backend/ARCHITECTURE.md).
+- **Backend FastAPI:** Fases 1 a 5 concluídas em monólito modular, **`66 passed` no `pytest`** (`33` unitários + `33` integração/resiliência/carga concorrente) e `ruff check .` limpo.
+- **Infraestrutura:** `docker-compose.yml`, `infra/docker/Dockerfile`, `.env.example`, workflows de CI/CD e exports de workflows n8n versionados.
+- **UX/UI:** i18n `pt-br`/`en` com toggle no topbar; único título ASCII `ERON YAMAMOTO`, sem rótulo duplicado; foto em cartão na coluna esquerda com topo alinhado ao texto da direita; controle de brilho com padrão `130%` e máximo `150%`; pinguim sem ponteiro; três modos de cena (`Dia`, `Noite`, `Com chuva`).
+- **Engine:** modos unificados, sombras PCF, vento ECS e API de contorno por objeto; o frontend ainda não consome essa API de contorno.
+- **CI/CD e Pages:** ordem permanente `merge (resolve-conflicts) → delete-branch → redeploy`, com dispatch explícito dos workflows de Pages e Vercel após merges feitos pelo bot; diagnóstico em `docs/pages-recovery.md` e histórico completo em `docs/changelog-2026-11-25.md` e `backend/ARCHITECTURE.md`.

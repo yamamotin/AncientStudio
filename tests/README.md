@@ -11,7 +11,7 @@ tests/
 ├── engine.test.js        # AsciiSceneEngine facade, ECS, modes (day/night/rain), and per-object outline API
 ├── i18n.test.js          # pt-br / en dictionary parity, translation coverage, and real /api/v1 client checks
 ├── static.test.js        # static site invariants (local assets, sections, no external trackers/CDNs)
-├── ui.test.js            # hero left-margin portrait, page brightness (110%), scene buttons, inert Tux stage
+├── ui.test.js            # hero left-margin portrait, page brightness (130%), scene buttons, inert Tux stage
 └── test_api.py           # legacy api/server.py unittest suite (6 tests) for root Dockerfile compatibility
 ```
 
