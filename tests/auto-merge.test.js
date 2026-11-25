@@ -62,7 +62,9 @@ test('agent pipeline deletes the merged branch and dispatches both deploys', () 
     'pages.yml,ci-cd.yml',
     'gh workflow run',
     '--ref main',
-    '-f sha='
+    '-f sha=',
+    'Merge already in progress',
+    'skipping cleanup and deploys'
   ]);
 });
 
