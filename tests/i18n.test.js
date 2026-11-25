@@ -18,6 +18,14 @@ test('pt-br is the primary language and dictionaries have identical keys', () =>
   assert.match(i18n, /normalize\(stored \|\| 'pt-br'\)/);
 });
 
+test('embedded dictionaries match the standalone translation files', () => {
+  const match = i18n.match(/var BUNDLED = (\{[\s\S]*?\n\});/);
+  assert.ok(match, 'embedded BUNDLED object is present');
+  const bundled = JSON.parse(match[1]);
+  assert.deepEqual(Object.keys(bundled['pt-br']).sort(), Object.keys(pt).sort());
+  assert.deepEqual(Object.keys(bundled.en).sort(), Object.keys(en).sort());
+});
+
 test('HTML carries data-i18n hooks for labels and attributes', () => {
   assert.match(html, /id="lang-toggle"/);
   assert.match(html, /data-i18n-attr="data-text:hero.role"/);
