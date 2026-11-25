@@ -34,97 +34,98 @@ export class TuxEntityFactory {
     const rootGroup = new THREE.Group();
     rootGroup.name = 'TuxMascotRoot';
 
-    // Materials calibrated for balanced color-theory contrast against the #13222E backdrop & #1D2B36 floor
+    // Smooth, facet-free materials calibrated for balanced ASCII contrast against #13222E & #1D2B36
     const obsidianCoat = new THREE.MeshStandardMaterial({
-      color: 0x090d12,
-      emissive: 0x020406,
-      roughness: 0.58,
-      metalness: 0.14,
-      flatShading: true,
+      color: 0x0b1017,
+      emissive: 0x030508,
+      emissiveIntensity: 1.0,
+      roughness: 0.62,
+      metalness: 0.08,
+      flatShading: false,
     });
 
     const brightBelly = new THREE.MeshStandardMaterial({
-      color: 0xf4f9fd,
-      emissive: 0xcbe3f2,
-      emissiveIntensity: 0.22,
-      roughness: 0.48,
-      metalness: 0.02,
-      flatShading: true,
+      color: 0xeef6fc,
+      emissive: 0xd6eaf8,
+      emissiveIntensity: 0.28,
+      roughness: 0.56,
+      metalness: 0.0,
+      flatShading: false,
     });
 
     const amberBeakFeet = new THREE.MeshStandardMaterial({
       color: 0xff9f1c,
-      emissive: 0xe86f00,
-      emissiveIntensity: 0.22,
-      roughness: 0.5,
-      metalness: 0.08,
-      flatShading: true,
+      emissive: 0xe06d00,
+      emissiveIntensity: 0.24,
+      roughness: 0.52,
+      metalness: 0.04,
+      flatShading: false,
     });
 
     const eyeSclera = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const eyePupil = new THREE.MeshBasicMaterial({ color: 0x050608 });
 
-    // 1. Pear-shaped Penguin Torso
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.76, 16, 14), obsidianCoat);
+    // 1. Smooth Pear-shaped Penguin Torso (36x28 segments, smooth vertex normals — zero hard facets)
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.75, 36, 28), obsidianCoat);
     torso.position.set(0, 0.86, 0);
-    torso.scale.set(0.92, 1.18, 0.82);
+    torso.scale.set(0.92, 1.18, 0.80);
     torso.castShadow = true;
     torso.receiveShadow = true;
     rootGroup.add(torso);
 
-    // 2. High-Contrast White Belly Patch (protrudes cleanly on +Z front)
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.58, 16, 14), brightBelly);
-    belly.position.set(0, 0.78, 0.28);
-    belly.scale.set(0.86, 1.14, 0.56);
+    // 2. Smooth Snow-White Belly Patch (+0.071 cleanly proud of torso front to prevent Z-intersection blotches)
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.58, 36, 28), brightBelly);
+    belly.position.set(0, 0.79, 0.23);
+    belly.scale.set(0.84, 1.12, 0.76);
     rootGroup.add(belly);
 
-    // 3. Articulated Head Pivot
+    // 3. Articulated Smooth Head Pivot
     const headPivot = new THREE.Group();
     headPivot.position.set(0, 1.72, 0.04);
 
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.48, 16, 12), obsidianCoat);
-    skull.scale.set(0.98, 0.95, 0.92);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.48, 32, 24), obsidianCoat);
+    skull.scale.set(0.98, 0.95, 0.90);
     skull.castShadow = true;
     headPivot.add(skull);
 
-    // Cheek/brow white patches framing the eyes (classic Tux facial contour)
-    const facePatchL = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), brightBelly);
-    facePatchL.position.set(-0.14, 0.02, 0.31);
-    facePatchL.scale.set(0.85, 1.05, 0.45);
+    // Smooth white cheek/eye patches proud of skull front so facial mask never clips or blotches
+    const facePatchL = new THREE.Mesh(new THREE.SphereGeometry(0.21, 24, 20), brightBelly);
+    facePatchL.position.set(-0.135, 0.015, 0.25);
+    facePatchL.scale.set(0.86, 1.04, 1.05);
     headPivot.add(facePatchL);
 
-    const facePatchR = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), brightBelly);
-    facePatchR.position.set(0.14, 0.02, 0.31);
-    facePatchR.scale.set(0.85, 1.05, 0.45);
+    const facePatchR = new THREE.Mesh(new THREE.SphereGeometry(0.21, 24, 20), brightBelly);
+    facePatchR.position.set(0.135, 0.015, 0.25);
+    facePatchR.scale.set(0.86, 1.04, 1.05);
     headPivot.add(facePatchR);
 
-    // Expressive Sclera + Pupils
+    // Expressive Sclera + Pupils cleanly proud of facial patches
     for (const side of [-1, 1]) {
-      const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 8), eyeSclera);
-      sclera.position.set(side * 0.155, 0.09, 0.39);
-      sclera.scale.set(0.92, 1.15, 0.55);
+      const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.105, 18, 14), eyeSclera);
+      sclera.position.set(side * 0.15, 0.09, 0.43);
+      sclera.scale.set(0.92, 1.12, 0.52);
       headPivot.add(sclera);
 
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.052, 8, 8), eyePupil);
-      pupil.position.set(side * 0.145, 0.09, 0.445);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.054, 14, 12), eyePupil);
+      pupil.position.set(side * 0.145, 0.09, 0.475);
       headPivot.add(pupil);
     }
 
-    // Broad sculpted Tux Beak (upper + lower mandible ridge)
-    const upperBeak = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.42, 6), amberBeakFeet);
+    // Smooth rounded sculpted Tux Beak
+    const upperBeak = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.42, 24), amberBeakFeet);
     upperBeak.rotation.x = Math.PI * 0.52;
     upperBeak.scale.set(1.22, 1.0, 0.58);
-    upperBeak.position.set(0, -0.07, 0.54);
+    upperBeak.position.set(0, -0.07, 0.55);
     upperBeak.castShadow = true;
     headPivot.add(upperBeak);
 
     rootGroup.add(headPivot);
 
-    // 4. Articulated Left & Right Flipper Wings (shoulder pivots for smooth flap/reaction)
+    // 4. Articulated Left & Right Flipper Wings (smooth rounded cones)
     const leftWingPivot = new THREE.Group();
     leftWingPivot.position.set(-0.66, 1.32, 0.02);
     leftWingPivot.rotation.z = 0.28;
-    const leftWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 8), obsidianCoat);
+    const leftWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 24), obsidianCoat);
     leftWingMesh.position.set(-0.08, -0.42, 0);
     leftWingMesh.scale.set(0.55, 1.0, 1.28);
     leftWingMesh.rotation.z = Math.PI;
@@ -135,7 +136,7 @@ export class TuxEntityFactory {
     const rightWingPivot = new THREE.Group();
     rightWingPivot.position.set(0.66, 1.32, 0.02);
     rightWingPivot.rotation.z = -0.28;
-    const rightWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 8), obsidianCoat);
+    const rightWingMesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.96, 24), obsidianCoat);
     rightWingMesh.position.set(0.08, -0.42, 0);
     rightWingMesh.scale.set(0.55, 1.0, 1.28);
     rightWingMesh.rotation.z = Math.PI;
@@ -143,12 +144,13 @@ export class TuxEntityFactory {
     rightWingPivot.add(rightWingMesh);
     rootGroup.add(rightWingPivot);
 
-    // 5. Seated Webbed Feet (classic splayed Tux stance)
+    // 5. Seated Smooth Webbed Feet
     const leftFootPivot = new THREE.Group();
     leftFootPivot.position.set(-0.34, 0.08, 0.34);
     leftFootPivot.rotation.y = 0.26;
-    const leftFootMesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.13, 0.52), amberBeakFeet);
-    leftFootMesh.position.set(0, 0.02, 0.12);
+    const leftFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 18), amberBeakFeet);
+    leftFootMesh.scale.set(0.82, 0.30, 1.18);
+    leftFootMesh.position.set(0, 0.01, 0.12);
     leftFootMesh.castShadow = true;
     leftFootPivot.add(leftFootMesh);
     rootGroup.add(leftFootPivot);
@@ -156,14 +158,15 @@ export class TuxEntityFactory {
     const rightFootPivot = new THREE.Group();
     rightFootPivot.position.set(0.34, 0.08, 0.34);
     rightFootPivot.rotation.y = -0.26;
-    const rightFootMesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.13, 0.52), amberBeakFeet);
-    rightFootMesh.position.set(0, 0.02, 0.12);
+    const rightFootMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 18), amberBeakFeet);
+    rightFootMesh.scale.set(0.82, 0.30, 1.18);
+    rightFootMesh.position.set(0, 0.01, 0.12);
     rightFootMesh.castShadow = true;
     rightFootPivot.add(rightFootMesh);
     rootGroup.add(rightFootPivot);
 
-    // 6. Stubby Tail
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.34, 5), obsidianCoat);
+    // 6. Smooth Stubby Tail
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.34, 18), obsidianCoat);
     tail.position.set(0, 0.22, -0.64);
     tail.rotation.x = -Math.PI * 0.42;
     tail.castShadow = true;

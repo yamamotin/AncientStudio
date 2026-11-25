@@ -323,36 +323,80 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     finalColor = finalColor / (1.0 + finalColor * 0.15);
 
     if (uMascotStudio > 0.5) {
-      // Faithful color-theory studio compositing for [ STACK // NEOFETCH ]:
-      // - Backdrop (#13222E, luma ~0.124) & Floor (#1D2B36, luma ~0.160, shadow ~0.106) stay clean & true
-      // - Tux's charcoal coat (luma ~0.043 < #13222E) stays deeper than the backdrop with crisp ASCII contours
-      // - Tux's snow-white belly & warm amber beak/feet (luma > 0.30) pop with modeled ASCII glyph detail
+      // Unified Full-Viewport ASCII Studio Composite for [ STACK // NEOFETCH ]:
+      // 1. Both floor (#1D2B36) and backdrop (#13222E) render genuine, crisp ASCII characters
+      //    (substrate = 0.54 * C, glyph ink = 1.86 * C -> >3.4:1 glyph contrast & exact macro palette!)
+      // 2. Depth-driven structural contours (/ \ | _) outline Tux's 3D silhouette & horizon crease
+      //    without firing noisy interior lines across Tux's smooth white belly or facial mask
+      // 3. Single continuous response curve eliminates blotches, cutouts, and raw non-ASCII planes
+      vec3 mascotCellLinear = mix(texture2D(tScene, cellCenterUv).rgb, colIntegrated, 0.35);
+      vec3 cellSrgb = linearToSrgb(mascotCellLinear);
       vec3 surfaceSrgb = linearToSrgb(smoothSceneCol);
-      vec3 cellSrgb = linearToSrgb(colIntegrated);
-      vec3 bloomSrgb = linearToSrgb(bloomSmooth) * (0.16 * uBloomIntensity);
-      float cellLumaSrgb = getLuma(cellSrgb);
-      float edgeAccent = clamp(effectiveEdge * 1.35, 0.0, 1.0);
+      vec3 bloomSrgb = linearToSrgb(bloomSmooth) * (0.12 * uBloomIntensity);
+      float srgbLuma = getLuma(cellSrgb);
 
-      // 1. Calm, low-contrast typographic texture on #13222E backdrop & #1D2B36 floor (shadow + reflection intact)
-      vec3 studioStageCol = mix(surfaceSrgb * 0.97, surfaceSrgb * 1.04, detailGlyphMask * 0.34);
+      float depthEdgeMag = length(vec2(gxDepth, gyDepth));
+      float mascotEdge = depthEdgeMag * uEdgeStrength * compactEdgeBoost;
 
-      // 2. Tux's dark obsidian coat (strictly darker than #13222E backdrop & floor shadow)
-      float darkCoatMask = 1.0 - smoothstep(0.055, 0.092, cellLumaSrgb);
-      vec3 darkCoatBase = surfaceSrgb * 0.86;
-      vec3 darkCoatGlyph = surfaceSrgb + vec3(0.038, 0.058, 0.076) * (0.52 + edgeAccent * 0.88);
-      vec3 darkSubjectCol = mix(darkCoatBase, darkCoatGlyph, clamp(detailGlyphMask * 0.86, 0.0, 1.0));
+      // Calibrated perceptual ramp mapping:
+      // - Backdrop (#13222E, luma ~0.11..0.135) -> fine atmospheric stipple (',' ':' ';')
+      // - Floor (#1D2B36, luma ~0.15..0.185) -> horizontal floor weave ('~' '+' '_' '-')
+      // - Floor shadow (~0.10) -> sparser shadow glyphs ('.' ',') & reflection (~0.22) -> denser weave ('r' 'x' 'v')
+      // - Tux white belly (~0.84..0.96) -> uniform full-coverage glyphs ('M' 'W' '&' '8' '%' 'B')
+      float mascotDither = (hash12(cellIndex) - 0.5) * 0.012;
+      float lowBand = srgbLuma * 0.72 + 0.015;
+      float floorWeave = 0.212 + (srgbLuma - 0.150) * 1.10;
+      float highBand = pow(max(srgbLuma, 0.0), 0.62) * 0.99;
+      float wFloor = smoothstep(0.138, 0.154, srgbLuma);
+      float wHigh = smoothstep(0.192, 0.235, srgbLuma);
+      float baseDrive = mix(lowBand, floorWeave, wFloor);
+      baseDrive = mix(baseDrive, highBand, wHigh);
+      float mascotDrive = clamp(baseDrive + mascotDither, 0.02, 0.999);
+      float mascotGlyphIdx = floor(mascotDrive * (uRampCount - 0.001));
 
-      // 3. Tux's bright belly, rim-lit contour & warm complementary amber beak/feet
-      float brightFeatureMask = smoothstep(0.24, 0.42, cellLumaSrgb);
-      vec3 brightBase = mix(surfaceSrgb * 0.80, cellSrgb * 0.88, 0.5);
-      vec3 brightGlyph = min(vec3(1.0), cellSrgb * 1.05 + bloomSrgb);
-      vec3 brightSubjectCol = mix(brightBase, brightGlyph, clamp(compositeMask * 1.06, 0.0, 1.0));
+      if (mascotEdge > 0.26 && uStructuralCount >= 6.0 && !isSky) {
+        float absDx = abs(gxDepth);
+        float absDy = abs(gyDepth);
+        float sOff = 2.0;
+        if (absDy > absDx * 1.85) {
+          sOff = 3.0; // '_'
+        } else if (absDx > absDy * 1.85) {
+          sOff = 2.0; // '|'
+        } else {
+          sOff = (gxDepth * gyDepth < 0.0) ? 0.0 : 1.0; // '/' or '\\'
+        }
+        mascotGlyphIdx = uRampCount + clamp(sOff, 0.0, uStructuralCount - 1.0);
+      }
 
-      vec3 studioFinal = mix(studioStageCol, darkSubjectCol, darkCoatMask);
-      studioFinal = mix(studioFinal, brightSubjectCol, brightFeatureMask);
-      studioFinal += bloomSrgb * 0.30;
+      float mascotAtlasU = (mascotGlyphIdx + safeGlyphUv.x) / uTotalGlyphs;
+      float mascotRawMask = texture2D(tGlyphAtlas, vec2(mascotAtlasU, safeGlyphUv.y)).r;
+      float mascotGlyphMask = smoothstep(0.43 - aaWidth, 0.43 + aaWidth, mascotRawMask);
 
-      float studioVignette = 1.0 - dot(centeredUv, centeredUv) * 0.06;
+      float mascotBlockTier = floor(clamp((mascotDrive - 0.08) / 0.88, 0.0, 0.999) * max(uBlockCount, 1.0));
+      float mascotBlockIdx = uRampCount + uStructuralCount + mascotBlockTier;
+      float mascotBlockU = (mascotBlockIdx + safeGlyphUv.x) / uTotalGlyphs;
+      float mascotBlockRaw = uBlockCount > 0.5 ? texture2D(tGlyphAtlas, vec2(mascotBlockU, safeGlyphUv.y)).r : 0.0;
+      float mascotBlockMask = smoothstep(0.36 - aaWidth, 0.36 + aaWidth, mascotBlockRaw);
+
+      float stageBlockWeight = uBlockBlendWeight * smoothstep(0.08, 0.75, srgbLuma) * 0.55;
+      float mascotCompositeMask = max(mascotGlyphMask, clamp(mascotBlockMask * stageBlockWeight, 0.0, 0.72));
+
+      float hiValue = smoothstep(0.42, 0.88, srgbLuma);
+      float darkCoat = 1.0 - smoothstep(0.045, 0.095, srgbLuma);
+
+      vec3 baseHue = mix(cellSrgb, surfaceSrgb, 0.26);
+
+      float subFactor = mix(0.54, 0.78, hiValue);
+      subFactor = mix(subFactor, 0.42, darkCoat);
+      vec3 cellSubstrate = baseHue * subFactor;
+
+      float inkFactor = mix(1.86, 1.12, hiValue);
+      vec3 darkCoatStrokeLift = vec3(0.038, 0.058, 0.076) * darkCoat * (0.65 + clamp(mascotEdge, 0.0, 1.0) * 0.95);
+      vec3 rimEdgeLift = vec3(0.07, 0.11, 0.14) * clamp(mascotEdge - 0.22, 0.0, 0.85) * (1.0 - hiValue * 0.7);
+      vec3 glyphInk = min(vec3(1.0), baseHue * inkFactor + darkCoatStrokeLift + rimEdgeLift + bloomSrgb);
+
+      vec3 studioFinal = mix(cellSubstrate, glyphInk, mascotCompositeMask);
+      float studioVignette = 1.0 - dot(centeredUv, centeredUv) * 0.05;
       finalColor = clamp(studioFinal * studioVignette, 0.0, 1.0);
     }
 
