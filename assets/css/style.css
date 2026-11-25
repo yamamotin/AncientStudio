@@ -528,6 +528,13 @@ body.scene-fullscreen-active { overflow: hidden; }
 #penguin-stage canvas,
 #penguin-stage * { pointer-events: none; }
 
+#penguin-stage {
+  background:
+    radial-gradient(ellipse 46% 12% at 50% 76%, rgba(8, 12, 17, 0.34) 0%, rgba(8, 12, 17, 0) 75%),
+    radial-gradient(ellipse 36% 16% at 50% 84%, rgba(220, 235, 245, 0.08) 0%, rgba(255, 159, 28, 0.05) 45%, rgba(29, 43, 54, 0) 80%),
+    linear-gradient(180deg, #13222E 0%, #13222E 67.5%, #1D2B36 68.5%, #1D2B36 100%);
+}
+
 .penguin-fallback {
   display: grid;
   place-items: center;

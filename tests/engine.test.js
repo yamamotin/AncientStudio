@@ -868,3 +868,73 @@ test('configurable per-object outline API is exported for on-demand targets, ina
   pkg.LifecycleManager.disposeObject3D(built.scene);
   pkg.LifecycleManager.disposeObject3D(mascotScene);
 });
+
+test('neofetch mascot stage builds minimalist #13222E backdrop + #1D2B36 floor with balanced key/rim lights, soft shadow, and diffused reflection', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
+  const mascotBuilderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
+    'utf8'
+  );
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#13222E', 'Backdrop color matches #13222E slate-petrol reference');
+  assert.equal(pkg.MASCOT_FLOOR_HEX, '#1D2B36', 'Floor color matches #1D2B36 medium-low slate reference');
+
+  const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    mode: 'mascot',
+    enableShadows: true
+  });
+  const stage = pkg.MascotStageBuilder.build(mascotConfig);
+  const ecs = new pkg.World();
+  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(ecs, stage.scene, {
+    position: [0, 0.04, 0],
+    scale: 1.02,
+    includeShowcaseRig: false,
+    bobAmplitude: 0.018
+  });
+
+  // 1. Minimalist geometry: ONLY floor + backdrop around Tux (zero showcase plinth, zero particle clutter)
+  assert.ok(stage.backdropMesh && stage.backdropMesh.name === 'MascotStageBackdrop');
+  assert.ok(stage.floorMesh && stage.floorMesh.name === 'MascotStageFloor');
+  assert.equal(tuxRoot.getObjectByName('TuxShowcasePlinth'), undefined, 'Mascot stage omits pedestal clutter');
+
+  const topLevelMeshes = stage.scene.children.filter((c) => c.isMesh);
+  assert.equal(topLevelMeshes.length, 2, 'Scene contains only the floor plane and backdrop plane outside Tux');
+
+  // 2. Color-theory value hierarchy: Tux coat < #13222E backdrop < #1D2B36 floor
+  const bgCol = stage.backdropMaterial.uniforms.uBackdropColor.value;
+  const flCol = stage.floorMaterial.uniforms.uFloorColor.value;
+  assert.equal('#' + bgCol.getHexString().toUpperCase(), '#13222E');
+  assert.equal('#' + flCol.getHexString().toUpperCase(), '#1D2B36');
+  const bgLuma = 0.2126 * bgCol.r + 0.7152 * bgCol.g + 0.0722 * bgCol.b;
+  const flLuma = 0.2126 * flCol.r + 0.7152 * flCol.g + 0.0722 * flCol.b;
+  const torsoMesh = tuxRoot.children.find((c) => c.isMesh);
+  const coatCol = torsoMesh.material.color;
+  const coatLuma = 0.2126 * coatCol.r + 0.7152 * coatCol.g + 0.0722 * coatCol.b;
+  assert.ok(coatLuma < bgLuma && bgLuma < flLuma, 'Color-theory value order holds: Tux coat < #13222E backdrop < #1D2B36 floor');
+
+  // 3. Balanced studio lighting, soft floor shadow, and controlled diffused reflection
+  assert.equal(stage.keyLight.castShadow, true, 'Main key light casts soft floor shadow');
+  assert.ok(stage.rimLight && stage.rimLight.intensity > 0 && stage.rimLight.intensity < 1.5, 'Discreet rim light separates dark edges');
+  includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
+
+  // 4. Adapter + CSS keep exact palette, shadows enabled, and pointer-inert stage
+  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'enableShadows: true']);
+  includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
+
+  ecs.clear(true);
+  pkg.LifecycleManager.disposeObject3D(stage.scene);
+});

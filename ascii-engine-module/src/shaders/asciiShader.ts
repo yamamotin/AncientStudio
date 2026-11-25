@@ -115,10 +115,18 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uBlockBlendWeight;
   uniform float uBloomIntensity;
   uniform float uDaylight;
+  uniform float uMascotStudio;
   uniform vec3 uBgColor;
   uniform float uTime;
 
   varying vec2 vUv;
+
+  vec3 linearToSrgb(vec3 c) {
+    vec3 safe = max(c, vec3(0.0));
+    vec3 lo = safe * 12.92;
+    vec3 hi = 1.055 * pow(safe, vec3(1.0 / 2.4)) - 0.055;
+    return mix(lo, hi, step(vec3(0.0031308), safe));
+  }
 
   float linearizeDepth(float rawDepth) {
     float zNdc = rawDepth * 2.0 - 1.0;
@@ -313,6 +321,40 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     finalColor = mix(uBgColor, finalColor, clamp(vignette, 0.66, 1.0));
 
     finalColor = finalColor / (1.0 + finalColor * 0.15);
+
+    if (uMascotStudio > 0.5) {
+      // Faithful color-theory studio compositing for [ STACK // NEOFETCH ]:
+      // - Backdrop (#13222E, luma ~0.124) & Floor (#1D2B36, luma ~0.160, shadow ~0.106) stay clean & true
+      // - Tux's charcoal coat (luma ~0.043 < #13222E) stays deeper than the backdrop with crisp ASCII contours
+      // - Tux's snow-white belly & warm amber beak/feet (luma > 0.30) pop with modeled ASCII glyph detail
+      vec3 surfaceSrgb = linearToSrgb(smoothSceneCol);
+      vec3 cellSrgb = linearToSrgb(colIntegrated);
+      vec3 bloomSrgb = linearToSrgb(bloomSmooth) * (0.16 * uBloomIntensity);
+      float cellLumaSrgb = getLuma(cellSrgb);
+      float edgeAccent = clamp(effectiveEdge * 1.35, 0.0, 1.0);
+
+      // 1. Calm, low-contrast typographic texture on #13222E backdrop & #1D2B36 floor (shadow + reflection intact)
+      vec3 studioStageCol = mix(surfaceSrgb * 0.97, surfaceSrgb * 1.04, detailGlyphMask * 0.34);
+
+      // 2. Tux's dark obsidian coat (strictly darker than #13222E backdrop & floor shadow)
+      float darkCoatMask = 1.0 - smoothstep(0.055, 0.092, cellLumaSrgb);
+      vec3 darkCoatBase = surfaceSrgb * 0.86;
+      vec3 darkCoatGlyph = surfaceSrgb + vec3(0.038, 0.058, 0.076) * (0.52 + edgeAccent * 0.88);
+      vec3 darkSubjectCol = mix(darkCoatBase, darkCoatGlyph, clamp(detailGlyphMask * 0.86, 0.0, 1.0));
+
+      // 3. Tux's bright belly, rim-lit contour & warm complementary amber beak/feet
+      float brightFeatureMask = smoothstep(0.24, 0.42, cellLumaSrgb);
+      vec3 brightBase = mix(surfaceSrgb * 0.80, cellSrgb * 0.88, 0.5);
+      vec3 brightGlyph = min(vec3(1.0), cellSrgb * 1.05 + bloomSrgb);
+      vec3 brightSubjectCol = mix(brightBase, brightGlyph, clamp(compositeMask * 1.06, 0.0, 1.0));
+
+      vec3 studioFinal = mix(studioStageCol, darkSubjectCol, darkCoatMask);
+      studioFinal = mix(studioFinal, brightSubjectCol, brightFeatureMask);
+      studioFinal += bloomSrgb * 0.30;
+
+      float studioVignette = 1.0 - dot(centeredUv, centeredUv) * 0.06;
+      finalColor = clamp(studioFinal * studioVignette, 0.0, 1.0);
+    }
 
     gl_FragColor = vec4(finalColor, 1.0);
   }

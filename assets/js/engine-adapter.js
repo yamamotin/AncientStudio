@@ -311,14 +311,22 @@ window.TP = window.TP || {};
           ? {
               mode: 'mascot',
               atmosphere: 'night',
+              palette: {
+                background: '#13222E',
+                warmLight: '#9AD0F0',
+                warmCore: '#FF9F1C',
+                coolAmbient: '#1D2B36',
+                foliageAccent: '#2B4254',
+                cursorLight: '#9AD0F0'
+              },
               cellSize: 8,
               autoResponsiveDensity: true,
               maxPixelRatio: 2,
-              bloomIntensity: 0.45,
+              bloomIntensity: 0.22,
               dofStrength: 0.0,
               edgeStrength: 0.96,
               blockBlendWeight: 0.28,
-              enableShadows: false
+              enableShadows: true
             }
           : {
               mode: 'playground',
