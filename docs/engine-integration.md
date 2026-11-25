@@ -32,35 +32,49 @@ replaced by another implementation.
 ## Wrapper API used by the page
 
 ```js
-var scene = TP.scene.create(container, { preset: 'sanctuary', weather: true });
-scene.mount()          // Promise<boolean>; false means fallback
+var scene = TP.scene.create(container, { preset: 'night', weather: true });
+scene.mount()            // Promise<boolean>; false means fallback
 scene.setPaused(bool)
-scene.setPreset('storm')
-scene.setCycle(true)   // animated night ↔ day palette + lighting
+scene.setPreset('day')   // only 'day' | 'night' | 'rain'
 scene.setAutoOrbit(true) // synthetic pointer movement drives camera rotation
 scene.destroy()
 ```
 
-`TP.scene.mount/setPaused/setPreset/destroy` remain as convenience wrappers for
-all created controllers. Controller instances emit `tp:scene-mode` with
-`{ mode: 'engine' | 'fallback' }` so the UI enables controls only when ready.
+`setCycle()` and the old presets (`sanctuary`, `dawn`, `storm`, `emerald`) were
+removed in 2026-11-25. `TP.scene.mount/setPaused/setPreset/destroy` remain as
+convenience wrappers for all created controllers. Controller instances emit
+`tp:scene-mode` with `{ mode: 'engine' | 'fallback' }` so the UI enables controls
+only when ready.
 
 ## Playground systems
 
-`[ ASCII REALMS // SCENE ]` uses the merged engine's terrain, ruins/architecture,
-torches, foreground silhouettes, forest, horizon, cursor light and ember
-particles. The adapter adds ASCII rain (storm preset) or drifting motes, plus
-palette/bloom/DoF/parallax changes for `sanctuary`, `dawn`, `day`, `storm` and
-`emerald`. `[ STACK // NEOFETCH ]` adds a real `THREE.Group` penguin to the same
-engine scene; it spins continuously and follows pointer movement through the
-engine's passive parallax input, so touch scrolling is never prevented.
+`[ ASCII REALMS // SCENE ]` uses the merged engine's layered cyberpunk boulevard,
+PCF street shadows, wind ECS, terrain, ruins/architecture, torches, foreground
+silhouettes, forest, horizon, cursor light and ember particles. The adapter maps
+the three UI modes to palette/weather state: `day`, `night` and `rain` (rain adds
+ASCII precipitation). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md)
+records the engine-side tools added on that date.
+
+`[ STACK // NEOFETCH ]` adds a real `THREE.Group` penguin to the same engine scene.
+It spins only on the horizontal axis, continuously, with no pitch and no pointer,
+mouse or touch response; the stage is `pointer-events: none`. Text content is
+limited to the seven specified stack rows. The page does **not** yet call the
+engine outline API on the penguin.
+
+## Per-object outline API (engine side, not yet consumed by the UI)
+
+`AsciiSceneEngine` exposes `setObjectOutline(target, options)`,
+`clearObjectOutline(target?)` and `getObjectOutlineState(target)`. Targets can be
+an `Object3D`, `'primary'`, a scene object name or an ECS `EntityId`. Options
+include `highlightColor`/`color`, `thickness`/`width`, `intensity`, `opacity` and
+`enabled`/`visible`. The effect is opt-in per object, not a global post-process.
+Frontend integration is intentionally pending after 2026-11-25.
 
 ## Rebuilding the bundle
 
 ```bash
 cd ascii-engine-module
 npm install
-npx esbuild integration-entry.ts --bundle --format=iife \
-  --global-name=ASCIIRealms --minify --target=es2020 \
-  --outfile=../assets/js/ascii-engine.bundle.js
+npm run typecheck
+npm run build:portfolio
 ```

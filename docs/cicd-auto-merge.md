@@ -130,3 +130,20 @@ PAGES MATCHES MAIN
 ```
 
 Evidência real após a habilitação do Pages: run `45499594209` terminou com `build`, `deploy` e `verify-parity` em `success`, e ambos os hosts serviram `0baeee6305df9463dd1e2af22abf31c6ace2bc60`.
+
+## Evidência de 2026-11-25
+
+Após a correção do dispatch, os PRs #16 a #28 foram mesclados pelo fluxo automático.
+O último ciclo verificado antes deste commit de documentação foi:
+
+```text
+PR #28 mesclado                 -> 7d5d2a3c09417f8ed9cfc01a47be19d4e350d2c4
+Auto-merge run 45540185606      -> success
+Pages run 45540247994           -> success (workflow_dispatch)
+CI/CD run 45540250920           -> success (workflow_dispatch)
+build.txt?v=7d5d2a3c            -> 7d5d2a3c09417f8ed9cfc01a47be19d4e350d2c4
+/api/v1/build?v=7d5d2a3c       -> 7d5d2a3c09417f8ed9cfc01a47be19d4e350d2c4
+```
+
+O helper apagou a branch mesclada e não houve PR aberto ao final do ciclo. O
+histórico completo das mudanças do dia está em `docs/changelog-2026-11-25.md`.
