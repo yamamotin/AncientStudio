@@ -24,6 +24,7 @@ import {
   SystemRunner,
   TuxEntityFactory,
   VfxController,
+  WindSystem,
   World,
 } from './src/index';
 
@@ -52,6 +53,7 @@ export {
   SystemRunner,
   TuxEntityFactory,
   VfxController,
+  WindSystem,
   World,
   THREE,
 };
@@ -81,6 +83,7 @@ export default {
   SystemRunner,
   TuxEntityFactory,
   VfxController,
+  WindSystem,
   World,
   THREE,
 };

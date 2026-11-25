@@ -386,3 +386,108 @@ test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & 
   assert.equal(settled.cellW, fullscreenProfile.cellPhysW);
   assert.equal(settled.cellH, fullscreenProfile.cellPhysH);
 });
+
+test('GPU lighten block-detail blend (~35%), WindSystem street props, and scroll-safe touch input work end-to-end', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const asciiShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const atlasSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/glyphAtlas.ts'),
+    'utf8'
+  );
+  const pointerSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/input/PointerInput.ts'),
+    'utf8'
+  );
+
+  // 1. Verify ~35% GPU lighten block-vs-detail composition in shader & procedural block tiles in atlas
+  includesAll(asciiShader, ['uBlockBlendWeight', 'uBlockCount', 'max(detailGlyphMask']);
+  includesAll(atlasSrc, ['blockCount = 4', 'bayer4']);
+  includesAll(pointerSrc, ['touchstart', 'touchmove', 'touchend', 'pan-y', '{ passive: true }']);
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.blockBlendWeight, 0.35, 'Default lighten block weight is ~35%');
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.windStrength, 1.0, 'Default wind strength active');
+
+  // 2. Verify layered Cyberpunk street props (streetpoles, hanging banners, overhead cables) & WindSystem
+  const ecsWorld = new pkg.World();
+  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
+  assert.ok(cyberMap.buildings.length >= 14, 'Layered foreground/midground/background cyberpunk buildings');
+  assert.ok(cyberMap.streetPoles.length >= 6, 'Street poles line both sides of the nocturnal boulevard');
+
+  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+  const windEntities = ecsWorld.query('Transform', 'WindSway');
+  assert.ok(windEntities.length >= 8, 'Hanging neon banners & overhead cables carry WindSway components');
+
+  const sampleWindId = windEntities[0];
+  const initialRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
+  const windSys = new pkg.WindSystem(1.2);
+  windSys.update(ecsWorld, { dt: 0.033, elapsed: 1.4 });
+  const swayedRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
+  assert.notEqual(initialRotZ, swayedRotZ, 'WindSystem oscillates suspended street banners & cables');
+
+  // Verify central Netrunner avatar has articulated coatTail & high-contrast body components
+  const avatarAnim = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
+  assert.ok(avatarAnim && avatarAnim.parts && avatarAnim.parts.coatTail, 'Central Netrunner has wind-animated coatTail');
+
+  // 3. Verify PointerInput touchstart -> touchmove -> touchend drives dragYaw/normX passively without blocking scroll
+  const listeners = {};
+  const listenerOpts = {};
+  const mockContainer = {
+    style: {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
+    addEventListener(type, fn, opts) {
+      listeners[type] = fn;
+      listenerOpts[type] = opts;
+    },
+    removeEventListener(type) {
+      delete listeners[type];
+    }
+  };
+
+  const ptr = new pkg.PointerInput(mockContainer);
+  ptr.attach();
+  assert.equal(mockContainer.style.touchAction, 'pan-y', 'Preserves vertical page scrolling via touch-action: pan-y');
+  assert.equal(listenerOpts.touchstart.passive, true);
+  assert.equal(listenerOpts.touchmove.passive, true);
+  assert.equal(listenerOpts.touchend.passive, true);
+
+  listeners.touchstart({
+    isTrusted: true,
+    changedTouches: [{ identifier: 1, clientX: 200, clientY: 150 }]
+  });
+  listeners.touchmove({
+    isTrusted: true,
+    changedTouches: [{ identifier: 1, clientX: 290, clientY: 120 }]
+  });
+
+  const activeSnap = ptr.sample(0.016);
+  assert.equal(activeSnap.isTouch, true);
+  assert.equal(activeSnap.active, true);
+  assert.ok(activeSnap.dragYaw > 0.5, 'Horizontal touch swipe pans street camera smoothly');
+  assert.ok(activeSnap.normX > 0.3, 'Touch coordinates normalize cleanly to stage');
+
+  listeners.touchend({ touches: [] });
+  const releasedSnap = ptr.sample(0.016);
+  assert.equal(releasedSnap.isDown, false);
+  assert.equal(releasedSnap.active, true, 'Briefly holds view angle after finger release before smooth relax');
+
+  ptr.detach();
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});

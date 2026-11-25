@@ -3,7 +3,11 @@ import type { EntityId, World } from '../ecs/World';
 import { PlaygroundEntityFactory } from '../entities/PlaygroundEntityFactory';
 import { createSanctuaryWaterMaterial } from '../shaders/waterShader';
 import type { EngineConfig } from '../types';
-import type { BuildingSpawnDef, PlaygroundMapDefinition } from './MapLoader';
+import type {
+  BuildingSpawnDef,
+  PlaygroundMapDefinition,
+  StreetPoleSpawnDef,
+} from './MapLoader';
 
 export interface BuiltPlaygroundScene {
   scene: THREE.Scene;
@@ -24,43 +28,44 @@ export interface BuiltPlaygroundScene {
 }
 
 /**
- * PlaygroundSceneBuilder: Constructs the procedural 3D Cyberpunk Neo-Sector scene
- * (`[ ASCII REALMS // SCENE ]`) with razor-sharp structural silhouettes & neon contrast:
- * - Deep night sky (`#04050B`), volumetric depth fog (`FogExp2`), and luminous cyber-moon/sky-halo
- * - Stepped cyberpunk plaza, rain-slicked reflective canal (`PlaneGeometry 48x48`), and neon skybridge
- * - Architectural megastructures & skyscrapers with vertical/horizontal neon trim (`|`, `[`, `]`, `_` glyphs),
- *   lit window strips, holographic billboards, and rooftop spire beacons
- * - ECS Entities: Holo-Reactor Core, Cyan/Magenta Neon Pylons, Autonomous Hover-Spinners, and Cyber-Netrunner
+ * PlaygroundSceneBuilder: Constructs a rich, layered 3D Cyberpunk Nocturnal Boulevard
+ * (`[ ASCII REALMS // SCENE ]`) in three distinct perspective depth planes:
+ *  - Foreground: Streetlamps, utility poles with overhead sagging power cables, neon bollards,
+ *    wind-swaying suspended street signs, rain-slicked crosswalk, and high-contrast Netrunner protagonist
+ *  - Midground: Multi-story urban buildings with varied volumes/setbacks, dense illuminated floor/window
+ *    matrices, storefront neon awnings, cantilevered vertical/horizontal signboards, elevated transit
+ *    overpass, and central holographic portal arch
+ *  - Background: Towering arcology megastructures converging in perspective fog, rooftop spires,
+ *    vertical searchlight beams, and synth horizon ring.
  */
 export class PlaygroundSceneBuilder {
   /**
-   * Stepped urban plaza & canal profile:
-   * - Central raised cyber-plaza around `(0, -2.2)`
-   * - Central pedestrian skybridge deck along `|x| < 1.85, z in [-2.2 .. 7.5]`
-   * - Flanking rain-filled reflective neon canals (`y = -1.35`)
-   * - Outer raised street-block terraces supporting megastructures
+   * Urban street & sidewalk profile:
+   * - Central rain-slicked avenue (`|x| < 4.0`): `y = -0.04` (covered by mirror-wet street shader at `-0.06` / puddles)
+   * - Raised curbed sidewalks (`|x| >= 4.0`): `y = 0.22` (outer building terraces at `y = 0.36`)
+   * - Central raised holo-portal dais around `(0, -4.6)`: `y = 0.28`
    */
   public static terrainHeight(x: number, z: number): number {
-    const distPlaza = Math.hypot(x, z + 2.2);
-
-    // Raised octagonal cyber-plaza deck
-    if (distPlaza < 4.35) {
-      return 0.18;
+    const distPortal = Math.hypot(x, z + 4.6);
+    if (distPortal < 2.85) {
+      return 0.28;
     }
 
-    // Elevated central cyber-skybridge spanning across the reflective canal
-    if (Math.abs(x) < 1.85 && z >= -2.2 && z <= 8.2) {
-      return 0.12;
+    // Pedestrian crosswalk island pad around `(0, 4.15)` so central avatar stands slightly proud of puddles
+    if (Math.abs(x) < 1.35 && Math.abs(z - 4.15) < 1.1) {
+      return 0.04;
     }
 
-    // Flanking outer city-block sidewalks (`|x| >= 5.0` or `z <= -8.5`)
-    if (Math.abs(x) >= 5.0 || z <= -8.5) {
-      const tier = Math.abs(x) >= 8.2 || z <= -10.5 ? 0.35 : 0.05;
-      return tier;
+    // Flanking sidewalks & building foundations
+    if (Math.abs(x) >= 8.8 || z <= -10.8) {
+      return 0.34;
+    }
+    if (Math.abs(x) >= 4.05) {
+      return 0.2;
     }
 
-    // Rain-filled neon reflection canal basin
-    return -1.35;
+    // Central wet asphalt boulevard bed (just beneath reflective street film so shader renders mirror puddles + crosswalk)
+    return -0.14;
   }
 
   public static build(
@@ -73,51 +78,51 @@ export class PlaygroundSceneBuilder {
     scene.background = bgColor;
     scene.fog = new THREE.FogExp2(bgColor.getHex(), mapDef.fogDensity);
 
-    // Shared palette-reactive neon materials for buildings, skybridge & billboards
+    // High-emission palette-reactive neon materials
     const neonMaterials = {
       cyan: new THREE.MeshStandardMaterial({
         color: new THREE.Color(config.palette.coolAmbient),
         emissive: new THREE.Color(config.palette.coolAmbient),
-        emissiveIntensity: 2.35,
-        roughness: 0.18,
+        emissiveIntensity: 2.65,
+        roughness: 0.14,
         flatShading: true,
       }),
       magenta: new THREE.MeshStandardMaterial({
         color: new THREE.Color(config.palette.warmLight),
         emissive: new THREE.Color(config.palette.warmLight),
-        emissiveIntensity: 2.35,
-        roughness: 0.18,
+        emissiveIntensity: 2.65,
+        roughness: 0.14,
         flatShading: true,
       }),
       amber: new THREE.MeshStandardMaterial({
         color: new THREE.Color(config.palette.warmCore),
         emissive: new THREE.Color(config.palette.warmCore),
-        emissiveIntensity: 2.2,
-        roughness: 0.2,
+        emissiveIntensity: 2.55,
+        roughness: 0.16,
         flatShading: true,
       }),
     };
 
-    // 1. High-Contrast Nocturnal Cyberpunk Lighting Rig
+    // 1. Rich Nocturnal Cyberpunk Lighting Rig (strong ambient fill prevents dead black shadows!)
     const ambientHemi = new THREE.HemisphereLight(
       new THREE.Color(config.palette.coolAmbient),
-      new THREE.Color('#05070F'),
-      0.85
+      new THREE.Color('#141A2E'),
+      1.28
     );
     scene.add(ambientHemi);
 
     const moonDirLight = new THREE.DirectionalLight(
-      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#D8F6FF'), 0.4),
-      1.35
+      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#E2F9FF'), 0.45),
+      1.75
     );
-    moonDirLight.position.set(-14, 22, -14);
+    moonDirLight.position.set(-12, 24, 10);
     moonDirLight.castShadow = config.enableShadows;
     if (config.enableShadows) {
       moonDirLight.shadow.mapSize.width = 1024;
       moonDirLight.shadow.mapSize.height = 1024;
       moonDirLight.shadow.camera.near = 2;
-      moonDirLight.shadow.camera.far = 56;
-      const d = 20;
+      moonDirLight.shadow.camera.far = 60;
+      const d = 22;
       moonDirLight.shadow.camera.left = -d;
       moonDirLight.shadow.camera.right = d;
       moonDirLight.shadow.camera.top = d;
@@ -126,34 +131,32 @@ export class PlaygroundSceneBuilder {
     }
     scene.add(moonDirLight);
 
-    // 2. Urban Plaza & Wet Asphalt Grid Deck
-    this.buildUrbanDeck(scene, mapDef, config);
+    // 2. Sidewalks, Neon Curbs & Wet Boulevard Foundation
+    this.buildUrbanStreetFoundation(scene, mapDef, config, neonMaterials);
 
-    // 3. Rain-Slicked Reflective Neon Canal + Skybridge Guardrails
-    const { waterMesh, waterMaterial } = this.buildNeonCanalAndBridge(
-      scene,
-      mapDef,
-      config,
-      neonMaterials
-    );
+    // 3. Rain-Slicked Reflective Street Plane (`PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48)`)
+    const { waterMesh, waterMaterial } = this.buildReflectiveWetBoulevard(scene, mapDef, config);
 
-    // 4. Central Cyberpunk Holo-Portal Archway
+    // 4. Streetlamps, Utility Poles, Overhead Power Cables & Wind-Swaying Neon Signs
+    this.buildStreetPolesAndCables(scene, ecsWorld, mapDef.streetPoles ?? [], config, neonMaterials);
+
+    // 5. Elevated Midground Transit Overpass + Holo-Portal Gate
     const [shrineX, shrineZ] = mapDef.shrineCenter;
     const shrineGroundY = this.terrainHeight(shrineX, shrineZ);
-    this.buildCyberPortalArch(scene, shrineX, shrineGroundY, shrineZ, neonMaterials);
+    this.buildCyberPortalAndOverpass(scene, shrineX, shrineGroundY, shrineZ, neonMaterials);
 
-    // 5. Cyberpunk Skyscrapers, Megastructures, Rooftop Antennas & Neon Billboards
+    // 6. Layered Cyberpunk Buildings (varied volumes, lit window matrices, awnings & neon signboards)
     this.buildCyberCityscape(scene, mapDef.buildings, neonMaterials);
 
-    // 6. Distant Cyber-Horizon Sun/Moon Halo & Night Sky Matrix Stars
+    // 7. Horizon Sky-Halo, Vertical Arcology Searchlights & Night Sky Stars
     this.buildCyberSkyBackdrop(scene, neonMaterials);
 
-    // 7. ECS Entities: Holo-Reactor Core, Neon Pylons, Hover-Spinners, and Cyber-Netrunner
+    // 8. ECS Entities: Holo-Reactor Core, Street Neon Bollards, Hover-Spinners & Central Netrunner Protagonist
     const { entityId: shrineEntityId, torchLight } = PlaygroundEntityFactory.spawnShrineCrystal(
       ecsWorld,
       scene,
       config.palette,
-      [shrineX, shrineGroundY + 2.45, shrineZ],
+      [shrineX, shrineGroundY + 2.55, shrineZ],
       config.enableShadows
     );
 
@@ -171,23 +174,33 @@ export class PlaygroundSceneBuilder {
       brazierLights.push(light);
     });
 
-    // Spawn extra skyline street-level neon glow lights on flanking megastructures for rich water reflections
-    const extraCyanLight = new THREE.PointLight(new THREE.Color(config.palette.coolAmbient), 18.0, 22.0, 1.6);
-    extraCyanLight.position.set(-5.2, 2.8, -3.5);
-    scene.add(extraCyanLight);
-    brazierLights.push(extraCyanLight);
+    // Midground flanking storefront neon point-lights casting vivid cyan/magenta streaks onto the wet street
+    const midCyanLight = new THREE.PointLight(
+      new THREE.Color(config.palette.coolAmbient),
+      24.0,
+      24.0,
+      1.5
+    );
+    midCyanLight.position.set(-4.4, 3.2, -1.8);
+    scene.add(midCyanLight);
+    brazierLights.push(midCyanLight);
 
-    const extraMagentaLight = new THREE.PointLight(new THREE.Color(config.palette.warmLight), 18.0, 22.0, 1.6);
-    extraMagentaLight.position.set(5.2, 2.8, -3.5);
-    scene.add(extraMagentaLight);
-    brazierLights.push(extraMagentaLight);
+    const midMagentaLight = new THREE.PointLight(
+      new THREE.Color(config.palette.warmLight),
+      24.0,
+      24.0,
+      1.5
+    );
+    midMagentaLight.position.set(4.4, 3.2, -1.8);
+    scene.add(midMagentaLight);
+    brazierLights.push(midMagentaLight);
 
     for (const droneSpec of mapDef.drones) {
       PlaygroundEntityFactory.spawnCyberDrone(ecsWorld, scene, config.palette, droneSpec);
     }
 
     const [ax, az] = mapDef.avatarSpawn;
-    const ay = Math.max(mapDef.waterLevel + 0.2, this.terrainHeight(ax, az));
+    const ay = Math.max(mapDef.waterLevel + 0.08, this.terrainHeight(ax, az));
     const { entityId: avatarEntityId } = PlaygroundEntityFactory.spawnWayfarerAvatar(
       ecsWorld,
       scene,
@@ -210,10 +223,11 @@ export class PlaygroundSceneBuilder {
     };
   }
 
-  private static buildUrbanDeck(
+  private static buildUrbanStreetFoundation(
     scene: THREE.Scene,
     mapDef: PlaygroundMapDefinition,
-    config: EngineConfig
+    config: EngineConfig,
+    neonMats: BuiltPlaygroundScene['neonMaterials']
   ): void {
     const geo = new THREE.PlaneGeometry(
       mapDef.terrainSize,
@@ -226,10 +240,10 @@ export class PlaygroundSceneBuilder {
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
 
-    const canalBed = new THREE.Color('#050811');
-    const wetAsphalt = new THREE.Color('#0E1523');
-    const deckSteel = new THREE.Color('#1A2639');
-    const gridAccent = new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.32);
+    const roadBed = new THREE.Color('#0A101D');
+    const sidewalkConcrete = new THREE.Color('#1E2C42');
+    const terraceSteel = new THREE.Color('#162235');
+    const tileHighlight = new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.45);
     const tmpColor = new THREE.Color();
 
     for (let i = 0; i < pos.count; i++) {
@@ -238,15 +252,15 @@ export class PlaygroundSceneBuilder {
       const y = PlaygroundSceneBuilder.terrainHeight(x, z);
       pos.setY(i, y);
 
-      if (y < -0.6) {
-        tmpColor.copy(canalBed);
+      if (y < 0.0) {
+        tmpColor.copy(roadBed);
       } else {
-        // Subtle cyber-grid line highlights every 2.0 world units
-        const onGrid = Math.abs((x % 2) + 2) % 2 < 0.14 || Math.abs((z % 2) + 2) % 2 < 0.14;
-        if (onGrid && Math.abs(x) < 12) {
-          tmpColor.copy(deckSteel).lerp(gridAccent, 0.55);
+        const onPaver =
+          Math.abs((x % 1.5) + 1.5) % 1.5 < 0.12 || Math.abs((z % 1.5) + 1.5) % 1.5 < 0.12;
+        if (onPaver && Math.abs(x) < 10.5) {
+          tmpColor.copy(sidewalkConcrete).lerp(tileHighlight, 0.55);
         } else {
-          tmpColor.copy(y > 0.1 ? deckSteel : wetAsphalt);
+          tmpColor.copy(y > 0.25 ? terraceSteel : sidewalkConcrete);
         }
       }
 
@@ -260,33 +274,41 @@ export class PlaygroundSceneBuilder {
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.42,
-      metalness: 0.55,
+      roughness: 0.4,
+      metalness: 0.58,
       flatShading: true,
     });
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     scene.add(mesh);
+
+    // Continuous illuminated sidewalk curb strips converging into perspective (`x = ±4.02`)
+    const leftCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), neonMats.cyan);
+    leftCurb.position.set(-4.02, 0.24, -2.5);
+    scene.add(leftCurb);
+
+    const rightCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), neonMats.magenta);
+    rightCurb.position.set(4.02, 0.24, -2.5);
+    scene.add(rightCurb);
   }
 
-  private static buildNeonCanalAndBridge(
+  private static buildReflectiveWetBoulevard(
     scene: THREE.Scene,
     mapDef: PlaygroundMapDefinition,
-    config: EngineConfig,
-    neonMats: BuiltPlaygroundScene['neonMaterials']
+    config: EngineConfig
   ): { waterMesh: THREE.Mesh; waterMaterial: THREE.ShaderMaterial } {
     const [sx, sz] = mapDef.shrineCenter;
-    const sy = PlaygroundSceneBuilder.terrainHeight(sx, sz) + 2.45;
+    const sy = PlaygroundSceneBuilder.terrainHeight(sx, sz) + 2.55;
 
-    // 48x48 subdivided reflective water surface for neon rain-slicked canal reflections
+    // 48x48 subdivided reflective surface for wet rain-slicked boulevard & neon puddle streaks
     const waterGeo = new THREE.PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48);
     waterGeo.rotateX(-Math.PI / 2);
 
     const waterMaterial = createSanctuaryWaterMaterial({
       palette: config.palette,
       shrineLightPos: new THREE.Vector3(sx, sy, sz),
-      moonDir: new THREE.Vector3(-14, 22, -14),
+      moonDir: new THREE.Vector3(-12, 24, 10),
     });
 
     const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
@@ -294,33 +316,135 @@ export class PlaygroundSceneBuilder {
     waterMesh.renderOrder = 1;
     scene.add(waterMesh);
 
-    // Pedestrian Skybridge Deck & Illuminated Neon Curb Rails
-    const bridgeMat = new THREE.MeshStandardMaterial({
-      color: 0x162234,
-      roughness: 0.5,
-      metalness: 0.65,
-      flatShading: true,
-    });
-
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.28, 10.2), bridgeMat);
-    deck.position.set(0, 0.05, 3.0);
-    deck.receiveShadow = true;
-    deck.castShadow = true;
-    scene.add(deck);
-
-    // Left (Cyan) and Right (Magenta) illuminated neon curb strips leading the eye to the portal!
-    const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 10.2), neonMats.cyan);
-    leftRail.position.set(-1.68, 0.26, 3.0);
-    scene.add(leftRail);
-
-    const rightRail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 10.2), neonMats.magenta);
-    rightRail.position.set(1.68, 0.26, 3.0);
-    scene.add(rightRail);
-
     return { waterMesh, waterMaterial };
   }
 
-  private static buildCyberPortalArch(
+  private static buildStreetPolesAndCables(
+    scene: THREE.Scene,
+    ecsWorld: World,
+    poles: StreetPoleSpawnDef[],
+    config: EngineConfig,
+    neonMats: BuiltPlaygroundScene['neonMaterials']
+  ): void {
+    const poleMetal = new THREE.MeshStandardMaterial({
+      color: 0x182538,
+      roughness: 0.48,
+      metalness: 0.78,
+      flatShading: true,
+    });
+
+    const cableMat = new THREE.MeshStandardMaterial({
+      color: 0x263b59,
+      emissive: new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.22),
+      roughness: 0.5,
+      flatShading: true,
+    });
+
+    poles.forEach((p, idx) => {
+      const baseY = PlaygroundSceneBuilder.terrainHeight(p.x, p.z);
+      const group = new THREE.Group();
+      group.position.set(p.x, baseY, p.z);
+
+      const lampNeon = neonMats[p.tone];
+      const inward = p.side < 0 ? 1 : -1;
+
+      // Vertical utility/streetlamp mast ('|' silhouette)
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.16, p.height, 0.16), poleMetal);
+      mast.position.y = p.height * 0.5;
+      mast.castShadow = true;
+      group.add(mast);
+
+      // Horizontal transformer crossbars & glowing insulator nodes
+      const crossArm = new THREE.Mesh(
+        new THREE.BoxGeometry(1.35, 0.11, 0.12),
+        poleMetal
+      );
+      crossArm.position.set(inward * 0.55, p.height - 0.18, 0);
+      group.add(crossArm);
+
+      // Bright streetlamp luminaire head overhanging the wet road
+      const lampHead = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.12, 0.24), lampNeon);
+      lampHead.position.set(inward * 0.96, p.height - 0.28, 0);
+      group.add(lampHead);
+
+      scene.add(group);
+
+      // Spawn wind-swaying suspended neon street banner under the pole arm!
+      if (p.hasHangingBanner) {
+        PlaygroundEntityFactory.spawnHangingNeonBanner(ecsWorld, scene, config.palette, {
+          pivot: [p.x + inward * 0.62, baseY + p.height - 0.34, p.z],
+          width: 0.52,
+          height: 1.28,
+          tone: p.tone,
+          phase: idx * 1.35,
+        });
+      }
+    });
+
+    // Overhead sagging cyberpunk utility cables spanning across the street canyon (`/` and `_` silhouettes!)
+    const cableZList = [6.4, 1.9, -2.6];
+    cableZList.forEach((cz, idx) => {
+      const sagGroup = new THREE.Group();
+      const pivotY = 4.35;
+      sagGroup.position.set(0, pivotY, cz);
+
+      // 3-segment catenary cable approximation across `x in [-4.3 .. +4.3]`
+      const leftSpan = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.055, 0.055), cableMat);
+      leftSpan.position.set(-2.85, -0.24, 0);
+      leftSpan.rotation.z = -0.15;
+      sagGroup.add(leftSpan);
+
+      const midSpan = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.055, 0.055), cableMat);
+      midSpan.position.set(0, -0.46, 0);
+      sagGroup.add(midSpan);
+
+      const rightSpan = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.055, 0.055), cableMat);
+      rightSpan.position.set(2.85, -0.24, 0);
+      rightSpan.rotation.z = 0.15;
+      sagGroup.add(rightSpan);
+
+      // Glowing cyber-lantern node suspended at cable midpoint
+      const nodeMat = idx % 2 === 0 ? neonMats.amber : neonMats.cyan;
+      const midLantern = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), nodeMat);
+      midLantern.position.set(0, -0.58, 0);
+      sagGroup.add(midLantern);
+
+      scene.add(sagGroup);
+
+      // Register cable span in ECS `WindSway` so overhead wires & lanterns gently sway in the wind!
+      const cableEntity = ecsWorld.createEntity();
+      ecsWorld.addComponent(cableEntity, 'LifecycleTag', {
+        role: 'prop',
+        label: `OverheadCable_${idx}`,
+      });
+      ecsWorld.addComponent(cableEntity, 'Transform', {
+        x: 0,
+        y: pivotY,
+        z: cz,
+        rotX: 0,
+        rotY: 0,
+        rotZ: 0,
+        scaleX: 1,
+        scaleY: 1,
+        scaleZ: 1,
+      });
+      ecsWorld.addComponent(cableEntity, 'WindSway', {
+        baseRotX: 0,
+        baseRotY: 0,
+        baseRotZ: 0,
+        swayAmpZ: 0.035,
+        swayAmpX: 0.14,
+        frequency: 1.85,
+        phase: idx * 1.7,
+        gustFactor: 0.9,
+      });
+      ecsWorld.addComponent(cableEntity, 'Renderable', {
+        object3D: sagGroup,
+      });
+    });
+  }
+
+  private static buildCyberPortalAndOverpass(
     scene: THREE.Scene,
     shrineX: number,
     baseY: number,
@@ -331,57 +455,74 @@ export class PlaygroundSceneBuilder {
     group.position.set(shrineX, baseY, shrineZ);
 
     const obsidianMetal = new THREE.MeshStandardMaterial({
-      color: 0x0e1624,
-      roughness: 0.48,
+      color: 0x121d2f,
+      roughness: 0.45,
       metalness: 0.78,
       flatShading: true,
     });
 
     const darkTrim = new THREE.MeshStandardMaterial({
-      color: 0x1b2940,
-      roughness: 0.6,
-      metalness: 0.6,
+      color: 0x20324d,
+      roughness: 0.55,
+      metalness: 0.65,
       flatShading: true,
     });
 
-    // Stepped octagonal cyber-dais with glowing amber rim
-    const stepBase = new THREE.Mesh(new THREE.CylinderGeometry(3.7, 4.1, 0.34, 8), obsidianMetal);
-    stepBase.position.y = 0.17;
+    // Stepped octagonal holo-pad dais with amber neon ring
+    const stepBase = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.0, 0.3, 8), obsidianMetal);
+    stepBase.position.y = 0.15;
     stepBase.receiveShadow = true;
     group.add(stepBase);
 
-    const stepNeonRing = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.22, 0.1, 8), neonMats.amber);
-    stepNeonRing.position.y = 0.38;
+    const stepNeonRing = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.35, 2.42, 0.1, 8),
+      neonMats.amber
+    );
+    stepNeonRing.position.y = 0.34;
     group.add(stepNeonRing);
 
-    // Twin Brutalist Cyber-Gate Towers framing the Holo-Reactor (crisp '|', '[', ']' edges!)
+    // Twin Brutalist Cyber-Gate Towers framing the Holo-Reactor
     for (const side of [-1, 1]) {
-      const tower = new THREE.Mesh(new THREE.BoxGeometry(0.78, 5.2, 0.78), obsidianMetal);
-      tower.position.set(side * 2.35, 2.75, -0.35);
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(0.76, 5.8, 0.78), obsidianMetal);
+      tower.position.set(side * 2.55, 2.95, -0.2);
       tower.castShadow = true;
       tower.receiveShadow = true;
       group.add(tower);
 
-      // Vertical inner neon strip
       const vStrip = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 4.7, 0.84),
+        new THREE.BoxGeometry(0.14, 5.3, 0.84),
         side < 0 ? neonMats.cyan : neonMats.magenta
       );
-      vStrip.position.set(side * 1.92, 2.75, -0.35);
+      vStrip.position.set(side * 2.1, 2.95, -0.2);
       group.add(vStrip);
     }
 
-    // Overhead Holographic Header Beam ('_' horizontal ASCII edge!)
-    const headerBeam = new THREE.Mesh(new THREE.BoxGeometry(6.1, 0.68, 0.96), darkTrim);
-    headerBeam.position.set(0, 5.55, -0.35);
+    // Overhead Holographic Header Beam + Elevated Transit Monorail Overpass spanning the avenue (`z = -8.4`)
+    const headerBeam = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.72, 0.96), darkTrim);
+    headerBeam.position.set(0, 6.0, -0.2);
     headerBeam.castShadow = true;
     group.add(headerBeam);
 
-    const headerNeon = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.14, 1.02), neonMats.cyan);
-    headerNeon.position.set(0, 5.55, -0.35);
+    const headerNeon = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.16, 1.04), neonMats.cyan);
+    headerNeon.position.set(0, 6.0, -0.2);
     group.add(headerNeon);
 
     scene.add(group);
+
+    // Background Elevated Skybridge / Maglev Overpass at `z = -8.6` adding unmistakable urban depth!
+    const overpass = new THREE.Group();
+    overpass.position.set(0, 6.8, -8.6);
+    const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(20.0, 0.62, 1.4), darkTrim);
+    overpass.add(bridgeDeck);
+
+    const upperRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.14, 1.48), neonMats.amber);
+    upperRail.position.y = 0.36;
+    overpass.add(upperRail);
+
+    const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.12, 1.48), neonMats.magenta);
+    lowerRail.position.y = -0.34;
+    overpass.add(lowerRail);
+    scene.add(overpass);
   }
 
   private static buildCyberCityscape(
@@ -390,16 +531,16 @@ export class PlaygroundSceneBuilder {
     neonMats: BuiltPlaygroundScene['neonMaterials']
   ): void {
     const hullDark = new THREE.MeshStandardMaterial({
-      color: 0x090e18,
-      roughness: 0.58,
+      color: 0x101929,
+      roughness: 0.5,
       metalness: 0.72,
       flatShading: true,
     });
 
     const hullMid = new THREE.MeshStandardMaterial({
-      color: 0x121c2d,
-      roughness: 0.62,
-      metalness: 0.6,
+      color: 0x19273d,
+      roughness: 0.54,
+      metalness: 0.64,
       flatShading: true,
     });
 
@@ -410,8 +551,16 @@ export class PlaygroundSceneBuilder {
       bGroup.position.set(b.x, baseY, b.z);
 
       const accentMat = neonMats[b.neonTone];
+      const secondaryMat =
+        b.neonTone === 'cyan'
+          ? neonMats.magenta
+          : b.neonTone === 'magenta'
+            ? neonMats.amber
+            : neonMats.cyan;
 
-      // Main brutalist skyscraper shaft
+      const faceSignX = b.x < 0 ? 1 : b.x > 0 ? -1 : 1;
+
+      // 1. Primary Brutalist/Cyber Architectural Volume
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(b.width, b.height, b.depth),
         idx % 2 === 0 ? hullDark : hullMid
@@ -421,71 +570,136 @@ export class PlaygroundSceneBuilder {
       body.receiveShadow = true;
       bGroup.add(body);
 
-      // Stepped upper crown setback for classic cyberpunk architectural silhouette
-      const crownH = b.height * 0.22;
+      // 2. Varied Upper Setback Volume + Penthouse Tier
+      const setback = b.setbackRatio ?? 0.72;
+      const crownH = b.height * 0.24;
       const crown = new THREE.Mesh(
-        new THREE.BoxGeometry(b.width * 0.72, crownH, b.depth * 0.72),
+        new THREE.BoxGeometry(b.width * setback, crownH, b.depth * setback),
         hullDark
       );
       crown.position.y = b.height + crownH * 0.5;
       bGroup.add(crown);
 
-      // Rooftop glowing neon cornice trim (creates razor-sharp '_' roofline in ASCII!)
+      // Rooftop glowing neon cornice & penthouse trim (`_` horizontal roofline silhouettes)
       const roofTrim = new THREE.Mesh(
-        new THREE.BoxGeometry(b.width * 1.03, 0.18, b.depth * 1.03),
+        new THREE.BoxGeometry(b.width * 1.04, 0.2, b.depth * 1.04),
         accentMat
       );
-      roofTrim.position.y = b.height + 0.05;
+      roofTrim.position.y = b.height + 0.06;
       bGroup.add(roofTrim);
 
-      // Vertical corner neon light-pipes facing the street canyon ('|' ASCII edge magnet)
-      const faceSignX = b.x < 0 ? 1 : b.x > 0 ? -1 : 1;
-      const edgePipe = new THREE.Mesh(
-        new THREE.BoxGeometry(0.13, b.height * 0.88, 0.13),
-        accentMat
+      const crownTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(b.width * setback * 1.04, 0.15, b.depth * setback * 1.04),
+        secondaryMat
       );
-      edgePipe.position.set(
-        faceSignX * (b.width * 0.5 + 0.04),
-        b.height * 0.46,
-        b.depth * 0.5 + 0.04
-      );
-      bGroup.add(edgePipe);
+      crownTrim.position.y = b.height + crownH + 0.04;
+      bGroup.add(crownTrim);
 
-      // Illuminated horizontal cyber-window bands
-      const bandCount = Math.min(5, Math.max(2, Math.floor(b.height / 3.4)));
-      for (let k = 1; k <= bandCount; k++) {
-        const wy = (k / (bandCount + 1)) * b.height;
-        const winMat = k % 2 === 0 ? neonMats.amber : accentMat;
-        const winStrip = new THREE.Mesh(
-          new THREE.BoxGeometry(b.width * 0.78, 0.14, 0.08),
-          winMat
+      // 3. Vertical Corner Neon Light-Pipes on BOTH street-facing & camera-facing edges (`|` silhouettes)
+      for (const zCorner of [-1, 1]) {
+        const edgePipe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, b.height * 0.92, 0.14),
+          zCorner > 0 ? accentMat : secondaryMat
         );
-        winStrip.position.set(0, wy, b.depth * 0.5 + 0.05);
-        bGroup.add(winStrip);
+        edgePipe.position.set(
+          faceSignX * (b.width * 0.5 + 0.04),
+          b.height * 0.48,
+          zCorner * (b.depth * 0.5 + 0.04)
+        );
+        bGroup.add(edgePipe);
       }
 
-      // Holographic Vertical Neon Billboard mounted on midground towers
+      // 4. Multi-Floor Illuminated Window Grids (both camera-facing `+Z` AND avenue-facing `±X` facades!)
+      const floors = b.floors ?? Math.max(4, Math.floor(b.height / 1.8));
+      const cols = 3;
+      for (let f = 1; f <= floors; f++) {
+        const fy = 1.4 + ((f - 0.5) / floors) * (b.height - 1.9);
+        if (fy >= b.height - 0.35) continue;
+
+        for (let c = 0; c < cols; c++) {
+          // Deterministic lit-office hash (~68% of windows lit in varied amber/cyan/magenta)
+          const hash = Math.sin((idx + 1) * 37.7 + f * 13.3 + c * 7.1) * 43758.5453;
+          const litRoll = hash - Math.floor(hash);
+          if (litRoll < 0.32) continue;
+
+          const winMat =
+            litRoll > 0.82 ? secondaryMat : litRoll > 0.54 ? neonMats.amber : accentMat;
+
+          // Camera-facing facade (`+Z`) window pane
+          const colOffset = (c - (cols - 1) * 0.5) * (b.width * 0.27);
+          const frontWin = new THREE.Mesh(
+            new THREE.BoxGeometry(b.width * 0.19, 0.24, 0.08),
+            winMat
+          );
+          frontWin.position.set(colOffset, fy, b.depth * 0.5 + 0.05);
+          bGroup.add(frontWin);
+
+          // Street-canyon inward facade (`faceSignX`) window pane
+          const sideOffset = (c - (cols - 1) * 0.5) * (b.depth * 0.27);
+          const sideWin = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.24, b.depth * 0.19),
+            winMat
+          );
+          sideWin.position.set(faceSignX * (b.width * 0.5 + 0.05), fy, sideOffset);
+          bGroup.add(sideWin);
+        }
+      }
+
+      // 5. Ground-Floor Storefront Neon Canopy / Awning
+      if (b.hasStorefront) {
+        const awning = new THREE.Mesh(
+          new THREE.BoxGeometry(0.85, 0.16, b.depth * 0.86),
+          secondaryMat
+        );
+        awning.position.set(faceSignX * (b.width * 0.5 + 0.42), 1.35, 0);
+        bGroup.add(awning);
+
+        const shopWindow = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.92, b.depth * 0.72),
+          neonMats.amber
+        );
+        shopWindow.position.set(faceSignX * (b.width * 0.5 + 0.06), 0.68, 0);
+        bGroup.add(shopWindow);
+      }
+
+      // 6. Cantilevered Vertical & Horizontal Cyberpunk Neon Signboards jutting over the avenue!
       if (b.hasBillboard) {
-        const boardTone =
-          b.neonTone === 'cyan'
-            ? neonMats.magenta
-            : b.neonTone === 'magenta'
-              ? neonMats.amber
-              : neonMats.cyan;
-        const board = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.65, 1.15), boardTone);
-        board.position.set(faceSignX * (b.width * 0.5 + 0.36), b.height * 0.52, 0.35);
-        bGroup.add(board);
+        const signBracket = new THREE.Mesh(
+          new THREE.BoxGeometry(0.75, 0.1, 0.12),
+          hullMid
+        );
+        signBracket.position.set(faceSignX * (b.width * 0.5 + 0.38), b.height * 0.58, 0.45);
+        bGroup.add(signBracket);
+
+        const vSign = new THREE.Mesh(
+          new THREE.BoxGeometry(0.16, 3.25, 0.98),
+          secondaryMat
+        );
+        vSign.position.set(faceSignX * (b.width * 0.5 + 0.68), b.height * 0.52, 0.45);
+        bGroup.add(vSign);
+
+        // Secondary stacked glowing sign plaque at lower tier
+        const hSign = new THREE.Mesh(
+          new THREE.BoxGeometry(0.95, 0.68, 0.16),
+          neonMats.amber
+        );
+        hSign.position.set(
+          faceSignX * (b.width * 0.5 + 0.52),
+          Math.max(2.6, b.height * 0.28),
+          b.depth * 0.5 + 0.12
+        );
+        bGroup.add(hSign);
       }
 
-      // Rooftop Communications Spire + Beacon Tip
+      // 7. Rooftop Communications Spire + Aircraft Warning Beacon
       if (b.hasAntenna) {
-        const spireH = 2.6 + (idx % 3) * 0.9;
-        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.1, spireH, 4), hullMid);
+        const spireH = 2.8 + (idx % 3) * 1.1;
+        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.11, spireH, 4), hullMid);
         spire.position.y = b.height + crownH + spireH * 0.5;
         bGroup.add(spire);
 
-        const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), neonMats.magenta);
-        tip.position.y = b.height + crownH + spireH + 0.1;
+        const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), neonMats.magenta);
+        tip.position.y = b.height + crownH + spireH + 0.12;
         bGroup.add(tip);
       }
 
@@ -497,21 +711,35 @@ export class PlaygroundSceneBuilder {
     scene: THREE.Scene,
     neonMats: BuiltPlaygroundScene['neonMaterials']
   ): void {
-    // Iconic Cyberpunk Synth/Holographic Horizon Ring high behind the central megatower
-    const haloRing = new THREE.Mesh(new THREE.RingGeometry(3.4, 3.85, 28), neonMats.magenta);
-    haloRing.position.set(0, 14.2, -26.5);
+    // Iconic Synth/Cyberpunk Horizon Ring & Luminous Core framed at the end of the perspective street canyon!
+    const haloRing = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.35, 32), neonMats.magenta);
+    haloRing.position.set(0, 13.8, -28.5);
     scene.add(haloRing);
 
-    const innerSun = new THREE.Mesh(new THREE.CircleGeometry(2.9, 24), neonMats.amber);
-    innerSun.position.set(0, 14.2, -26.7);
+    const innerSun = new THREE.Mesh(new THREE.CircleGeometry(3.25, 28), neonMats.amber);
+    innerSun.position.set(0, 13.8, -28.7);
     scene.add(innerSun);
 
-    // Sparse crisp cyber-grid sky stars above the smog line
-    const starCount = 140;
+    // Distant vertical cyber-searchlight columns rising into the night clouds
+    for (const sx of [-9.5, 9.5]) {
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: sx < 0 ? neonMats.cyan.color : neonMats.magenta.color,
+        transparent: true,
+        opacity: 0.22,
+      });
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.14, 26, 6), beamMat);
+      beam.position.set(sx, 15.0, -20.0);
+      beam.rotation.z = sx < 0 ? -0.1 : 0.1;
+      scene.add(beam);
+    }
+
+    // Crisp nocturnal stars & high-altitude distant sky-traffic glints
+    const starCount = 160;
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
-    const cCyan = new THREE.Color('#80F4FF');
-    const cMag = new THREE.Color('#FF79C6');
+    const cCyan = new THREE.Color('#8AF6FF');
+    const cMag = new THREE.Color('#FF7AD9');
+    const cAmb = new THREE.Color('#FFD97D');
 
     for (let i = 0; i < starCount; i++) {
       const h1 = Math.sin(i * 127.1) * 43758.5453;
@@ -519,11 +747,11 @@ export class PlaygroundSceneBuilder {
       const rx = h1 - Math.floor(h1);
       const ry = h2 - Math.floor(h2);
 
-      positions[i * 3] = (rx - 0.5) * 76;
-      positions[i * 3 + 1] = 8.5 + ry * 24;
+      positions[i * 3] = (rx - 0.5) * 80;
+      positions[i * 3 + 1] = 8.2 + ry * 25;
       positions[i * 3 + 2] = -22 - ((i * 0.37) % 18);
 
-      const c = i % 4 === 0 ? cMag : cCyan;
+      const c = i % 5 === 0 ? cAmb : i % 3 === 0 ? cMag : cCyan;
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
@@ -534,11 +762,11 @@ export class PlaygroundSceneBuilder {
     starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const starMat = new THREE.PointsMaterial({
-      size: 0.36,
+      size: 0.38,
       vertexColors: true,
       fog: false,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.88,
     });
 
     scene.add(new THREE.Points(starGeo, starMat));

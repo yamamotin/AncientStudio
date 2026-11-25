@@ -16,6 +16,7 @@ import {
   PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
+  WindSystem,
 } from './ecs/SystemRunner';
 import { World } from './ecs/World';
 import { PlaygroundEntityFactory } from './entities/PlaygroundEntityFactory';
@@ -66,6 +67,7 @@ export {
   InputSystem,
   PatrolSystem,
   MovementRotationSystem,
+  WindSystem,
   AnimationSystem,
   NeonPulseSystem,
   RenderSyncSystem,

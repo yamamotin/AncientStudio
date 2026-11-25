@@ -96,20 +96,20 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
       const widthNorm = Math.max(0, Math.min(1, (cssW - 360) / 1240));
       const continuousScale = 1.24 - widthNorm * 0.44; // smoothly spans 1.24x -> 0.80x
       if (tier === 'mobile') {
-        cellCss = Math.max(11, Math.round(baseCell * Math.max(1.24, continuousScale)));
+        cellCss = Math.max(11, Math.round(baseCell * Math.max(1.38, continuousScale)));
       } else if (tier === 'compact') {
-        cellCss = Math.max(9.5, Number((baseCell * Math.max(1.04, continuousScale)).toFixed(2)));
+        cellCss = Math.max(9.0, Number((baseCell * Math.max(1.06, continuousScale)).toFixed(2)));
       } else if (tier === 'hd') {
-        cellCss = Math.max(8, Number((baseCell * Math.min(0.92, continuousScale)).toFixed(2)));
+        cellCss = Math.max(7.2, Number((baseCell * Math.min(0.92, continuousScale)).toFixed(2)));
       } else if (tier === 'uhd') {
-        cellCss = Math.max(7.5, Number((baseCell * Math.min(0.82, continuousScale)).toFixed(2)));
+        cellCss = Math.max(6.8, Number((baseCell * Math.min(0.84, continuousScale)).toFixed(2)));
       } else {
-        cellCss = Math.max(8.5, Number((baseCell * continuousScale).toFixed(2)));
+        cellCss = Math.max(8.0, Number((baseCell * continuousScale).toFixed(2)));
       }
 
       if (input.isFullscreen && tier !== 'mobile') {
         // Slightly refine cell size in fullscreen so wide urban vistas reveal extra detail cleanly
-        cellCss = Math.max(7.5, Number((cellCss * 0.94).toFixed(2)));
+        cellCss = Math.max(6.8, Number((cellCss * 0.93).toFixed(2)));
       }
     }
   }

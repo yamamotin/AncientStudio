@@ -68,6 +68,13 @@ export class AnimationSystem implements EcsSystem {
           anim.parts.orbitRing.rotation.x = Math.sin(elapsed * 0.7) * 0.45 + 0.6;
           anim.parts.orbitRing.rotation.y = -elapsed * 0.55;
         }
+        if (anim.parts.coatTail) {
+          const gust = 0.14 + 0.08 * Math.sin(elapsed * 1.15);
+          anim.parts.coatTail.rotation.x =
+            0.18 + Math.sin(elapsed * 4.2 + anim.phase) * 0.09 + gust * 0.5;
+          anim.parts.coatTail.rotation.z =
+            -0.08 - Math.cos(elapsed * 3.1 + anim.phase) * 0.065;
+        }
       }
     }
   }

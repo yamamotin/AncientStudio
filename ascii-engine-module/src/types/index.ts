@@ -127,6 +127,14 @@ export interface EngineConfig {
   structuralChars: string;
   /** Strength of structural edge glyph substitution (0.0 = luminance only, 1.0 = crisp structural edges) */
   edgeStrength: number;
+  /**
+   * GPU `lighten` block-vs-detail composition weight [0..1] (default: 0.35):
+   * Blends ~35% solid/shaded block mass (`░▒▓█`) with 100% crisp typographic ASCII detail (`max(detail, block * weight)`),
+   * delivering luminous silhouettes and rich surface readability with zero extra CPU passes.
+   */
+  blockBlendWeight: number;
+  /** Wind speed & sway intensity driving cyber-rain slant, rising steam, banners, and avatar coat/cables (default: 1.0) */
+  windStrength: number;
   /** Bloom / warm light bleed intensity across neighboring ASCII cells (default: 1.15, range: 0..3) */
   bloomIntensity: number;
   /** Luminance threshold above which light bleeds into adjacent glyphs (default: 0.42) */

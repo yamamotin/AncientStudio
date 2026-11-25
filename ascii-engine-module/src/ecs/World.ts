@@ -51,6 +51,7 @@ export interface ArticulatedParts {
   leftFoot?: THREE.Object3D;
   rightFoot?: THREE.Object3D;
   orbitRing?: THREE.Object3D;
+  coatTail?: THREE.Object3D;
 }
 
 export interface AnimationStateComponent {
@@ -108,6 +109,21 @@ export interface LifecycleTagComponent {
   label: string;
 }
 
+export interface WindSwayComponent {
+  /** Base rotation X/Y/Z before wind oscillation */
+  baseRotX: number;
+  baseRotY: number;
+  baseRotZ: number;
+  /** Roll/pitch sway amplitudes in radians */
+  swayAmpZ: number;
+  swayAmpX: number;
+  /** Wind harmonic frequency & spatial phase */
+  frequency: number;
+  phase: number;
+  /** Gust sensitivity multiplier */
+  gustFactor: number;
+}
+
 export interface InputStateComponent {
   /** Normalized pointer coordinates [-1..1] driving this entity */
   pointerX: number;
@@ -133,6 +149,7 @@ export interface ComponentMap {
   Renderable: RenderableComponent;
   NeonBeacon: NeonBeaconComponent;
   PatrolPath: PatrolPathComponent;
+  WindSway: WindSwayComponent;
   LifecycleTag: LifecycleTagComponent;
   InputState: InputStateComponent;
 }
@@ -150,6 +167,7 @@ export class World {
     Renderable: new Map(),
     NeonBeacon: new Map(),
     PatrolPath: new Map(),
+    WindSway: new Map(),
     LifecycleTag: new Map(),
     InputState: new Map(),
   };
