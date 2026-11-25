@@ -17,7 +17,7 @@ AncientStudio/
 │   │   ├── i18n.js                    # pt-br → en, sem rebuild
 │   │   ├── api-client.js              # chamadas reais ao backend
 │   │   ├── main.js                    # composição da UI e controle de brilho
-│   │   ├── neofetch.js                # palco Tux 3D + fallback raycaster ASCII
+│   │   ├── neofetch.js                # palco Tux 3D + placeholder ASCII estático
 │   │   ├── pipeline.js / api.js / console.js
 │   │   ├── engine-adapter.js          # ponte para modos day / night / rain e mascot
 │   │   └── ascii-engine.bundle.js     # bundle IIFE gerado por ascii-engine-module

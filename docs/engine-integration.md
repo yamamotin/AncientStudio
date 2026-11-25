@@ -66,8 +66,11 @@ stronger wind). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) record
 the engine-side tools added on that date.
 
 `[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (built by
-`TuxEntityFactory` with `TuxShowcasePlinth`, falling back to the 2D ASCII
-raycaster in `assets/js/neofetch.js` when hardware WebGL2 is unavailable). It
+`TuxEntityFactory` with `TuxShowcasePlinth`). While the engine is still loading,
+or if it fails, `assets/js/neofetch.js` shows a cute **static** ASCII penguin
+placeholder (eyes, beak and webbed feet) that is never animated. As soon as
+`data-mode="engine"` / `tp:scene-mode` reports the live scene, the placeholder
+is hidden by CSS and no fallback loop touches the 3D mascot. The active penguin
 spins only on the horizontal axis (`yaw`), continuously, with no pitch and no
 pointer, mouse or touch response; the stage is `pointer-events: none`. Text
 content is limited to the seven specified stack rows. The page does **not** yet

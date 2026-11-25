@@ -54,16 +54,18 @@ test('playground exposes exactly three scene modes', () => {
   assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette/);
 });
 
-test('neofetch penguin auto-rotates without mouse or touch interaction', () => {
+test('neofetch fallback is static ASCII art and stays pointer-free', () => {
   const neofetch = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
 
-  // Fallback: continuous RAF yaw driven by elapsed time, not by pointer state.
+  // Placeholder: a fixed, cute Tux art; no raycaster, yaw advance or animation loop.
   includesAll(neofetch, [
-    'AUTO_SPIN_RAD_PER_SEC',
-    'state.yaw += delta * AUTO_SPIN_RAD_PER_SEC',
-    'renderPenguinAscii',
+    'STATIC_PENGUIN',
+    'renderStaticPenguinArt',
+    'renderFallback',
+    'tp:scene-mode',
     'penguin-stage'
   ]);
+  assert.doesNotMatch(neofetch, /AUTO_SPIN_RAD_PER_SEC|state\.yaw \+=|requestAnimationFrame|renderPenguinAscii/);
   assert.doesNotMatch(neofetch, /pointermove|pointerdown|updateFromClientPoint/);
 
   // Engine: the mascot stage is pointer-inert via CSS and one integration-only

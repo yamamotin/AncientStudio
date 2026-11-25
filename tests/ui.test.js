@@ -157,14 +157,17 @@ test('page brightness defaults to 130%, allows up to 150%, and updates live', ()
   assert.doesNotMatch(main, /page-contrast|contrast-control/i);
 });
 
-test('fallback penguin yaw advances from elapsed time without pointer events', () => {
+test('fallback penguin is static ASCII art without pointer events or RAF', () => {
   let queuedFrame = null;
+  let sceneModeHandler = null;
   const frame = {
     attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; },
     getAttribute(name) { return this.attrs[name] || null; },
     getBoundingClientRect() { return { width: 420, height: 240, left: 0, top: 0 }; },
-    addEventListener() {}
+    addEventListener(type, handler) {
+      if (type === 'tp:scene-mode') sceneModeHandler = handler;
+    }
   };
   const logo = { style: {}, textContent: '' };
   const sandbox = {
@@ -198,18 +201,35 @@ test('fallback penguin yaw advances from elapsed time without pointer events', (
   vm.runInContext(neofetch, sandbox);
   sandbox.TP.neofetch.init();
 
-  const initialYaw = sandbox.TP.neofetch.getState().yaw;
-  for (let index = 1; index <= 6; index += 1) {
-    const callback = queuedFrame;
-    assert.equal(typeof callback, 'function', 'RAF loop is scheduled');
-    queuedFrame = null;
-    callback(index * 100);
-  }
-  const finalYaw = sandbox.TP.neofetch.getState().yaw;
+  const staticArt = logo.textContent;
+  assert.match(staticArt, /o o/, 'friendly eyes are legible');
+  assert.match(staticArt, />/, 'wide beak is legible');
+  assert.match(staticArt, /-----/, 'belly is legible');
+  assert.ok(staticArt.includes('/_\\'), 'webbed feet are legible');
+  assert.equal(queuedFrame, null, 'no fallback RAF loop is scheduled');
+  assert.equal(sandbox.TP.neofetch.getState().autoSpin, false);
+  assert.equal(frame.getAttribute('data-auto-spin'), 'false');
 
-  assert.ok(finalYaw > initialYaw + 0.05, `yaw did not advance: ${initialYaw} -> ${finalYaw}`);
-  assert.equal(frame.getAttribute('data-auto-spin'), 'true');
+  // API compatibility: yaw can be recorded, but the placeholder never re-renders.
+  sandbox.TP.neofetch.setYaw(1.2);
+  assert.equal(sandbox.TP.neofetch.getState().yaw, 1.2);
+  assert.equal(logo.textContent, staticArt, 'static art does not react to setYaw');
+
+  // Engine ready: the fallback is left untouched and no animation loop is started.
+  assert.equal(typeof sceneModeHandler, 'function');
+  sceneModeHandler({ detail: { mode: 'engine' } });
+  assert.equal(sandbox.TP.neofetch.getState().engineActive, true);
+  assert.equal(logo.textContent, staticArt);
+  assert.equal(queuedFrame, null);
+
+  // Engine failure: the same static art remains as a safe fallback.
+  sceneModeHandler({ detail: { mode: 'fallback' } });
+  assert.equal(sandbox.TP.neofetch.getState().engineActive, false);
+  assert.equal(logo.textContent, staticArt);
+  assert.equal(queuedFrame, null);
+
   assert.equal(sandbox.TP.neofetch.getState().pitch, undefined, 'no pitch state remains');
+  assert.doesNotMatch(neofetch, /requestAnimationFrame|AUTO_SPIN_RAD_PER_SEC|state\.yaw \+=/);
   assert.doesNotMatch(neofetch, /angleBadge|neofetch-penguin-telemetry|state\.pitch/);
 });
 
