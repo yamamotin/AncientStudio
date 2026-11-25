@@ -22,7 +22,8 @@ permissions:
   contents: write
   pull-requests: write
   checks: read
-  actions: read
+  # gh workflow run needs actions: write to dispatch Pages/Vercel deploys.
+  actions: write
   statuses: read
 
 concurrency:
