@@ -64,10 +64,12 @@ AncientStudio/
 │   ├── ci.yml                         # Matriz completa (Node, engine TS, ruff + pytest)
 │   ├── ci-cd.yml                      # Ruff, pytest, Docker build e deploy Vercel
 │   ├── pages.yml                      # Deploy estático GitHub Pages + parity check não-bloqueante
-│   └── pr-tests.yml                   # Testes estáticos e contratos do frontend/engine
+│   ├── pr-tests.yml                   # Testes estáticos e contratos do frontend/engine
+│   └── vcr-cleanup.yml                # Retenção das 3 imagens mais recentes no Vercel Container Registry
 │
 ├── scripts/
 │   ├── auto-merge-verified.sh         # Helper de merge, resolução de conflito, limpeza de branch e redeploy
+│   ├── vcr-cleanup.js                 # Limpeza segura do repositório "dockerfile" no VCR (CLI e REST API)
 │   └── verify-pages-parity.sh         # Validação de paridade de SHA (Pages vs Vercel)
 │
 ├── docs/
@@ -75,12 +77,13 @@ AncientStudio/
 │   ├── changelog-2026-11-25.md        # Consolidação das entregas de 2026-11-25
 │   ├── cicd-auto-merge.md             # Fluxo de auto-merge e configurações do GitHub
 │   ├── engine-integration.md          # Contrato de integração do motor 3D [agente 3D]
-│   └── pages-recovery.md              # Diagnóstico e recuperação do GitHub Pages
+│   ├── pages-recovery.md              # Diagnóstico e recuperação do GitHub Pages
+│   └── vcr-cleanup.md                 # Automação de retenção de 3 imagens no VCR (ancientstudio/dockerfile)
 │
 ├── docker-compose.yml                 # Subida local de api + n8n com segredos obrigatórios via .env
 ├── .env.example                       # Variáveis documentadas e higienizadas (sem credenciais reais)
 ├── Dockerfile                         # Host estático legado usado na Vercel atual (api/server.py)
-└── tests/                             # 47 testes Node (contratos estáticos, UI, i18n, CI e engine) + 6 unittest
+└── tests/                             # Suítes Node (contratos estáticos, UI, i18n, CI, VCR e engine) + 6 unittest
 ```
 
 ## 2. Responsabilidades por trilha

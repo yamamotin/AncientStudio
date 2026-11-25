@@ -1,0 +1,98 @@
+name: VCR Cleanup — retain 3 latest dockerfile images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Inspect only (log KEEP / WOULD_DELETE without deleting images)"
+        required: false
+        default: false
+        type: boolean
+      backend:
+        description: "Execution backend: Vercel CLI (`vercel vcr`) or Vercel REST API"
+        required: false
+        default: cli
+        type: choice
+        options:
+          - cli
+          - api
+      repository:
+        description: "Vercel Container Registry repository name"
+        required: false
+        default: "dockerfile"
+        type: string
+      project:
+        description: "Vercel project name or ID"
+        required: false
+        default: "ancientstudio"
+        type: string
+  push:
+    branches: [main]
+  deployment_status:
+  workflow_run:
+    workflows:
+      - "CI/CD — backend, Docker and deploy"
+    types: [completed]
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vcr-cleanup-${{ inputs.project || 'ancientstudio' }}-${{ inputs.repository || 'dockerfile' }}
+  cancel-in-progress: false
+
+jobs:
+  prune-vcr-images:
+    name: Retain 3 latest VCR images
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Skip automatic run when VERCEL_TOKEN is not configured
+        id: check-token
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+              echo "::notice::VERCEL_TOKEN secret is not configured; skipping automatic VCR cleanup. Add VERCEL_TOKEN in Settings -> Secrets and variables -> Actions."
+            fi
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Vercel CLI
+        if: >-
+          steps.check-token.outputs.configured == 'true' &&
+          (inputs.backend || 'cli') == 'cli'
+        run: npm install --global --no-audit --no-fund vercel@latest
+
+      - name: Prune surplus VCR images (keep 3 newest)
+        if: >-
+          steps.check-token.outputs.configured == 'true' ||
+          github.event_name == 'workflow_dispatch'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ inputs.project || secrets.VERCEL_PROJECT_ID || 'ancientstudio' }}
+          VCR_REPOSITORY: ${{ inputs.repository || 'dockerfile' }}
+          VCR_KEEP_COUNT: "3"
+          VCR_BACKEND: ${{ inputs.backend || 'cli' }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: node scripts/vcr-cleanup.js
