@@ -1,7 +1,7 @@
 # Test base (Node's built-in test runner + Python suites)
 
 Zero external JS test framework dependencies and no build step required:
-`node --test tests/*.test.js` runs every frontend, engine, i18n, and CI/CD contract suite (47 tests).
+`node --test tests/*.test.js` runs every frontend, engine, i18n, VCR retention, and CI/CD contract suite.
 
 ```text
 tests/
@@ -12,6 +12,7 @@ tests/
 ├── i18n.test.js          # pt-br / en dictionary parity, translation coverage, and real /api/v1 client checks
 ├── static.test.js        # static site invariants (local assets, sections, no external trackers/CDNs)
 ├── ui.test.js            # hero left-margin portrait, page brightness (130%), scene buttons, inert Tux stage
+├── vcr-cleanup.test.js   # VCR "dockerfile" 3-image retention, dry-run, CLI/REST backends, and secret redaction
 └── test_api.py           # legacy api/server.py unittest suite (6 tests) for root Dockerfile compatibility
 ```
 
