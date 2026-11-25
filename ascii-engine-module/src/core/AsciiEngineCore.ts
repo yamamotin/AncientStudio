@@ -18,11 +18,21 @@ import { TuxEntityFactory } from '../entities/TuxEntityFactory';
 import { KeyboardInput } from '../input/KeyboardInput';
 import { PointerInput } from '../input/PointerInput';
 import { AsciiPostProcessor } from '../shaders/AsciiPostProcessor';
+import {
+  applyObjectOutline,
+  clearObjectOutline,
+  DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
+  getObjectOutlineState,
+} from '../shaders/objectOutline';
 import type {
   EngineConfig,
   EngineLifecycleState,
   EngineStats,
+  ObjectOutlineHandle,
+  ObjectOutlineOptions,
+  OutlineTargetSelector,
   PartialEngineConfig,
+  ResolvedObjectOutlineState,
   ResolutionTier,
 } from '../types';
 import { VfxController } from '../vfx/VfxController';
@@ -51,6 +61,8 @@ export class AsciiEngineCore {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
+  private lastAutoPlaygroundFov: number | null = null;
+  private readonly outlinedTargets = new Set<THREE.Object3D>();
   private postProcessor: AsciiPostProcessor | null = null;
 
   private loop: EngineLoop | null = null;
@@ -230,10 +242,12 @@ export class AsciiEngineCore {
     this.scene = built.scene;
     this.primaryEntityId = built.avatarEntityId;
 
-    const camera = new THREE.PerspectiveCamera(46, 16 / 9, 0.5, 110);
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 46;
+    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.5, 110);
     camera.position.set(...mapDef.cameraAnchor);
     camera.lookAt(...mapDef.cameraLookAt);
     this.camera = camera;
+    this.lastAutoPlaygroundFov = typeof this.config.fov === 'number' ? null : initialFov;
 
     this.vfx = new VfxController({
       scene: built.scene,
@@ -288,7 +302,8 @@ export class AsciiEngineCore {
     const cameraAnchor: [number, number, number] = [0, 1.02, 4.15];
     const lookTarget: [number, number, number] = [0, 0.92, 0];
 
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.3, 40);
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 38;
+    const camera = new THREE.PerspectiveCamera(initialFov, 1, 0.3, 40);
     camera.position.set(...cameraAnchor);
     camera.lookAt(...lookTarget);
     this.camera = camera;
@@ -357,6 +372,12 @@ export class AsciiEngineCore {
 
     if (!this.renderer || !this.scene || !this.postProcessor) return;
 
+    if (this.camera && typeof partialConfig.fov === 'number') {
+      this.camera.fov = partialConfig.fov;
+      this.camera.updateProjectionMatrix();
+      this.lastAutoPlaygroundFov = null;
+    }
+
     if (prevShadows !== this.config.enableShadows) {
       this.renderer.shadowMap.enabled = this.config.enableShadows;
       this.renderer.shadowMap.needsUpdate = true;
@@ -413,6 +434,11 @@ export class AsciiEngineCore {
     this.systemRunner?.clear();
     this.systemRunner = null;
     this.windSystem = null;
+
+    for (const outlined of this.outlinedTargets) {
+      clearObjectOutline(outlined);
+    }
+    this.outlinedTargets.clear();
 
     // Dispose ECS-owned dynamic entities & lights cleanly before sweeping remaining scene graph
     this.ecsWorld?.clear(true);
@@ -484,6 +510,109 @@ export class AsciiEngineCore {
     const t = this.ecsWorld.getComponent(this.primaryEntityId, 'Transform');
     if (!t) return null;
     return { yaw: t.rotY, pitch: t.rotX };
+  }
+
+  /**
+   * Resolves a target selector (`THREE.Object3D`, `'primary'`, object name in scene, or ECS `EntityId`)
+   * to its underlying `THREE.Object3D` without applying any global scene effects.
+   */
+  private resolveOutlineTarget(target: OutlineTargetSelector): THREE.Object3D | null {
+    if (!target && target !== 0) return null;
+
+    if (typeof (target as THREE.Object3D).traverse === 'function') {
+      return target as THREE.Object3D;
+    }
+
+    if (target === 'primary') {
+      if (this.ecsWorld && this.primaryEntityId !== null) {
+        return this.ecsWorld.getComponent(this.primaryEntityId, 'Renderable')?.object3D ?? null;
+      }
+      return null;
+    }
+
+    if (typeof target === 'number') {
+      return this.ecsWorld?.getComponent(target as EntityId, 'Renderable')?.object3D ?? null;
+    }
+
+    if (typeof target === 'string' && this.scene) {
+      return this.scene.getObjectByName(target) ?? null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Applies or updates a configurable silhouette outline on a specific target object on demand.
+   * Accepts `thickness`/`width`, `enabled`/`visible`, `intensity`, `opacity`, and an optional
+   * `highlightColor`/`color` (defaulting to the engine's `palette.cursorLight` or `#7DF9FF` when
+   * omitted on first application so dark objects stand out against dark backgrounds).
+   */
+  public setObjectOutline(
+    target: OutlineTargetSelector,
+    options?: ObjectOutlineOptions
+  ): ObjectOutlineHandle | null {
+    if (this.state === 'destroyed') return null;
+
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return null;
+
+    const hasExisting = getObjectOutlineState(resolvedObj) !== null;
+    const mergedOptions: ObjectOutlineOptions = { ...(options ?? {}) };
+    if (
+      !hasExisting &&
+      mergedOptions.highlightColor === undefined &&
+      mergedOptions.color === undefined
+    ) {
+      mergedOptions.highlightColor =
+        this.config.palette?.cursorLight || DEFAULT_OUTLINE_HIGHLIGHT_COLOR;
+    }
+
+    const handle = applyObjectOutline(resolvedObj, mergedOptions);
+    this.outlinedTargets.add(resolvedObj);
+
+    if (this.state === 'paused') {
+      this.loop?.stepOnce(0);
+    }
+    return handle;
+  }
+
+  /**
+   * Removes and disposes the outline from a specific target (or from all outlined targets in this
+   * engine instance when `target` is omitted). Returns the number of outline shell meshes removed.
+   */
+  public clearObjectOutline(target?: OutlineTargetSelector): number {
+    if (target === undefined) {
+      let total = 0;
+      for (const obj of this.outlinedTargets) {
+        total += clearObjectOutline(obj);
+      }
+      this.outlinedTargets.clear();
+      if (this.state === 'paused') {
+        this.loop?.stepOnce(0);
+      }
+      return total;
+    }
+
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return 0;
+
+    const removed = clearObjectOutline(resolvedObj);
+    this.outlinedTargets.delete(resolvedObj);
+    if (this.state === 'paused') {
+      this.loop?.stepOnce(0);
+    }
+    return removed;
+  }
+
+  /**
+   * Returns the current outline configuration snapshot for `target`, or `null` if not outlined.
+   */
+  public getObjectOutlineState(
+    target: OutlineTargetSelector
+  ): ResolvedObjectOutlineState | null {
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return null;
+    return getObjectOutlineState(resolvedObj);
   }
 
   private renderFrame(dt: number, elapsed: number): void {
@@ -634,9 +763,20 @@ export class AsciiEngineCore {
 
     const aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
     this.camera.aspect = aspect;
-    // Slightly widen FOV on narrow portrait viewports or expand vista cleanly on ultrawide/fullscreen
-    if (this.config.mode === 'playground') {
-      this.camera.fov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+    // Preserve explicit custom FOV (e.g. 106°) when configured via `config.fov` or mutated on `camera.fov`;
+    // otherwise apply responsive default playground FOV
+    if (typeof this.config.fov === 'number') {
+      this.camera.fov = this.config.fov;
+      this.lastAutoPlaygroundFov = null;
+    } else if (this.config.mode === 'playground') {
+      const wasCustomizedExternally =
+        this.lastAutoPlaygroundFov !== null &&
+        Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
+      if (!wasCustomizedExternally) {
+        const autoFov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+        this.camera.fov = autoFov;
+        this.lastAutoPlaygroundFov = autoFov;
+      }
     }
     this.camera.updateProjectionMatrix();
 
