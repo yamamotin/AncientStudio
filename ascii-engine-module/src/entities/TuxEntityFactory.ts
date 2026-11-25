@@ -6,6 +6,8 @@ export interface TuxSpawnOptions {
   scale?: number;
   /** High-contrast Neofetch showcase lighting rig attached to Tux */
   includeShowcaseRig?: boolean;
+  /** Optional vertical idle bob amplitude override (smaller keeps feet grounded on floor) */
+  bobAmplitude?: number;
   /** Allow future keyboard movement if spawned inside playground */
   moveSpeed?: number;
   boundsRadius?: number;
@@ -32,29 +34,29 @@ export class TuxEntityFactory {
     const rootGroup = new THREE.Group();
     rootGroup.name = 'TuxMascotRoot';
 
-    // Materials calibrated for razor-sharp luminance contrast in the ASCII shader
+    // Materials calibrated for balanced color-theory contrast against the #13222E backdrop & #1D2B36 floor
     const obsidianCoat = new THREE.MeshStandardMaterial({
-      color: 0x101822,
-      emissive: 0x050910,
-      roughness: 0.72,
-      metalness: 0.18,
+      color: 0x090d12,
+      emissive: 0x020406,
+      roughness: 0.58,
+      metalness: 0.14,
       flatShading: true,
     });
 
     const brightBelly = new THREE.MeshStandardMaterial({
-      color: 0xf6fbff,
-      emissive: 0xcfe8f7,
-      emissiveIntensity: 0.34,
-      roughness: 0.45,
+      color: 0xf4f9fd,
+      emissive: 0xcbe3f2,
+      emissiveIntensity: 0.22,
+      roughness: 0.48,
       metalness: 0.02,
       flatShading: true,
     });
 
     const amberBeakFeet = new THREE.MeshStandardMaterial({
       color: 0xff9f1c,
-      emissive: 0xff7b00,
-      emissiveIntensity: 0.28,
-      roughness: 0.52,
+      emissive: 0xe86f00,
+      emissiveIntensity: 0.22,
+      roughness: 0.5,
       metalness: 0.08,
       flatShading: true,
     });
@@ -164,6 +166,7 @@ export class TuxEntityFactory {
     const tail = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.34, 5), obsidianCoat);
     tail.position.set(0, 0.22, -0.64);
     tail.rotation.x = -Math.PI * 0.42;
+    tail.castShadow = true;
     rootGroup.add(tail);
 
     // Optional Neofetch pedestal & rim/key light rig for crystal-clear silhouette separation
@@ -222,7 +225,7 @@ export class TuxEntityFactory {
 
     ecsWorld.addComponent(entityId, 'AnimationState', {
       baseY: pos[1],
-      bobAmplitude: 0.045,
+      bobAmplitude: options?.bobAmplitude ?? 0.045,
       bobFrequency: 2.1,
       breatheAmplitude: 0.022,
       phase: 0.3,

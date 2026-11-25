@@ -183,6 +183,7 @@ function isEligibleOutlineMesh(
   meshFilter?: (mesh: THREE.Mesh) => boolean
 ): boolean {
   if (mesh.userData?.__isAsciiOutlineShell) return false;
+  if (mesh.userData?.skipObjectOutline) return false;
   if (mesh.name === OUTLINE_SHELL_NAME) return false;
 
   // Skip nested descendants if an ancestor is itself an outline shell
