@@ -32,6 +32,7 @@ test('required sections and real identity are present', () => {
     '| ____|  _ \\ / _ \\',
     'ASCII REALMS // SCENE',
     'STACK // NEOFETCH',
+    'assets/img/eron-portrait-ascii.png',
     'id="penguin-stage"',
     'id="ascii-scene"',
     '>[github]</button>',
