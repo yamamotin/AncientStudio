@@ -1,14 +1,15 @@
-"""Execution port contracts for the Live CI/CD & Docker Pipeline Simulator (Phase 3)."""
+"""Execution port contracts for the Live CI/CD & Docker Pipeline Simulator."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from app.domains.pipelines_simulator.schemas import (
     PipelineStageSpec,
     PipelineTargetId,
+    StageArtifactFinding,
     StageExecutionStatus,
 )
 
@@ -21,6 +22,9 @@ class StageCheckOutcome:
     status: StageExecutionStatus
     duration_ms: float
     logs: tuple[str, ...]
+    inspected_files: tuple[str, ...] = ()
+    metrics: dict[str, int | float | str | bool] = field(default_factory=dict)
+    findings: tuple[StageArtifactFinding, ...] = ()
 
 
 @runtime_checkable

@@ -7,6 +7,7 @@ from app.api.v1 import (
     health,
     jobs,
     pipelines,
+    rag,
     scraping,
     workflows,
 )
@@ -21,3 +22,4 @@ router.include_router(jobs.router)
 router.include_router(scraping.router)
 router.include_router(ai_workflows.router)
 router.include_router(pipelines.router)
+router.include_router(rag.router)

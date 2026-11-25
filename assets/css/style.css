@@ -37,8 +37,8 @@
   --radius: 2px;
   --transition: 180ms ease;
 
-  /* Page-wide brightness control. Default is slightly above neutral (1). */
-  --page-brightness: 1.1;
+  /* Page-wide brightness control. Default is the previous maximum (130%). */
+  --page-brightness: 1.3;
 
   /* ASCII art keeps a legible computed size and is scaled to fit small screens. */
   --banner-font: 12px;
@@ -223,14 +223,6 @@ body > footer { filter: brightness(var(--page-brightness)); }
 .hero {
   padding-block: var(--section-gap) var(--section-gap);
   border-bottom: 1px solid var(--border-soft);
-}
-
-.hero-name {
-  color: var(--green);
-  font-size: var(--fs-small);
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
 }
 
 .hero-portrait {
@@ -655,7 +647,6 @@ body.scene-fullscreen-active { overflow: hidden; }
     align-items: start;
   }
 
-  .hero > .hero-name,
   .hero > .banner-frame { grid-column: 1 / -1; }
 
   .hero > .prompt-line,
@@ -663,14 +654,15 @@ body.scene-fullscreen-active { overflow: hidden; }
   .hero > .hero-location,
   .hero > .hero-actions { grid-column: 2; }
 
-  /* The portrait starts below the name/banner and becomes the left margin
-     for all identity copy and actions; no orphan rows or empty right column. */
+  /* The portrait sits in the left column directly below the ASCII banner and
+     becomes the margin for the identity copy. Its top offset matches the
+     prompt line's margin so both columns start at the same height. */
   .hero > .hero-portrait {
     grid-column: 1;
-    grid-row: 3 / span 4;
+    grid-row: 2 / span 4;
     align-self: start;
     width: 100%;
-    margin: 0;
+    margin: var(--space-5) 0 0;
   }
 }
 

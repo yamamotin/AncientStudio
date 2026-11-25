@@ -44,6 +44,8 @@ class Scope(str, Enum):
     SCRAPING_RUN = "scraping:run"
     AI_WORKFLOWS_RUN = "ai_workflows:run"
     PIPELINES_RUN = "pipelines:run"
+    RAG_QUERY = "rag:query"
+    RAG_INDEX = "rag:index"
     QUEUE_INSPECT = "queue:inspect"
     ADMIN = "admin"
 
@@ -55,6 +57,8 @@ DEFAULT_WORKFLOW_SCOPES: frozenset[Scope] = frozenset(
         Scope.SCRAPING_RUN,
         Scope.AI_WORKFLOWS_RUN,
         Scope.PIPELINES_RUN,
+        Scope.RAG_QUERY,
+        Scope.RAG_INDEX,
         Scope.QUEUE_INSPECT,
     }
 )

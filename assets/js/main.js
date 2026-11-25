@@ -277,8 +277,8 @@ window.TP = window.TP || {};
 
     var storageKey = 'tp-page-brightness';
     var min = Number(input.min) || 100;
-    var max = Number(input.max) || 130;
-    var fallback = Number(input.value) || 110;
+    var max = Number(input.max) || 150;
+    var fallback = Number(input.value) || 130;
 
     function apply(value, persist) {
       var amount = Math.min(max, Math.max(min, Number(value) || fallback));
