@@ -11,6 +11,7 @@ import {
   PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
+  WindSystem,
 } from '../ecs/SystemRunner';
 import { type EntityId, World } from '../ecs/World';
 import { TuxEntityFactory } from '../entities/TuxEntityFactory';
@@ -59,6 +60,7 @@ export class AsciiEngineCore {
 
   private ecsWorld: World | null = null;
   private systemRunner: SystemRunner | null = null;
+  private windSystem: WindSystem | null = null;
   private vfx: VfxController | null = null;
   private builtPlayground: BuiltPlaygroundScene | null = null;
   private primaryEntityId: EntityId | null = null;
@@ -238,14 +240,18 @@ export class AsciiEngineCore {
       baseCameraPos: mapDef.cameraAnchor,
       lookAtTarget: mapDef.cameraLookAt,
       particleOrigin: mapDef.shrineCenter,
-      particleCount: 168,
+      particleCount: 240,
     });
+
+    const windSys = new WindSystem(this.config.windStrength);
+    this.windSystem = windSys;
 
     // Deterministic priority-sorted ECS pipeline
     systemRunner
       .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
       .addSystem(new PatrolSystem(), 15)
       .addSystem(new MovementRotationSystem(built.terrainHeightAt), 20)
+      .addSystem(windSys, 25)
       .addSystem(new AnimationSystem(), 30)
       .addSystem(new NeonPulseSystem(), 35)
       .addSystem(new RenderSyncSystem(), 40);
@@ -341,6 +347,7 @@ export class AsciiEngineCore {
     this.config = mergeEngineConfig(this.config, partialConfig);
     this.keyboardInput?.setEnabled(this.config.enableKeyboard);
     this.loop?.setMaxFps(this.config.maxFps);
+    this.windSystem?.setWindStrength(this.config.windStrength);
 
     if (!this.renderer || !this.scene || !this.postProcessor) return;
 
@@ -365,13 +372,8 @@ export class AsciiEngineCore {
         .lerp(new THREE.Color('#D8F6FF'), 0.4);
       this.builtPlayground.torchLight.color.set(p.warmLight);
 
-      // Update shared cyberpunk architectural neon materials dynamically on preset switch
-      this.builtPlayground.neonMaterials.cyan.color.set(p.coolAmbient);
-      this.builtPlayground.neonMaterials.cyan.emissive.set(p.coolAmbient);
-      this.builtPlayground.neonMaterials.magenta.color.set(p.warmLight);
-      this.builtPlayground.neonMaterials.magenta.emissive.set(p.warmLight);
-      this.builtPlayground.neonMaterials.amber.color.set(p.warmCore);
-      this.builtPlayground.neonMaterials.amber.emissive.set(p.warmCore);
+      // Update shared cyberpunk architectural neon material bank dynamically on preset switch
+      this.builtPlayground.materialBank.updatePalette(p);
 
       this.builtPlayground.brazierLights.forEach((bl, idx) => {
         bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
@@ -423,6 +425,7 @@ export class AsciiEngineCore {
 
     this.systemRunner?.clear();
     this.systemRunner = null;
+    this.windSystem = null;
 
     // Dispose ECS-owned dynamic entities & lights cleanly before sweeping remaining scene graph
     this.ecsWorld?.clear(true);
@@ -514,6 +517,7 @@ export class AsciiEngineCore {
           dragPitch: 0,
           active: false,
           isDown: false,
+          isTouch: false,
           motionSpeed: 0,
           lastInteractionMs: 0,
         };

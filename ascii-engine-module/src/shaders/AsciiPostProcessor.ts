@@ -132,12 +132,14 @@ export class AsciiPostProcessor {
         uTransitionMix: { value: 0.0 },
         uRampCount: { value: this.atlasData.rampCount },
         uStructuralCount: { value: this.atlasData.structuralCount },
+        uBlockCount: { value: this.atlasData.blockCount },
         uTotalGlyphs: { value: this.atlasData.totalGlyphs },
         uCameraNear: { value: 0.5 },
         uCameraFar: { value: 110.0 },
         uDofFocus: { value: config.dofFocusDistance },
         uDofStrength: { value: config.dofStrength },
         uEdgeStrength: { value: config.edgeStrength },
+        uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
         uBgColor: { value: bgColor },
         uTime: { value: 0 },
@@ -250,6 +252,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uDofFocus.value = config.dofFocusDistance;
     this.compositeMaterial.uniforms.uDofStrength.value = config.dofStrength;
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
+    this.compositeMaterial.uniforms.uBlockBlendWeight.value = config.blockBlendWeight;
     this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
 
     return this.applyResolutionProfile(profile, config, false);
@@ -266,6 +269,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.tGlyphAtlas.value = this.atlasData.texture;
     this.compositeMaterial.uniforms.uRampCount.value = this.atlasData.rampCount;
     this.compositeMaterial.uniforms.uStructuralCount.value = this.atlasData.structuralCount;
+    this.compositeMaterial.uniforms.uBlockCount.value = this.atlasData.blockCount;
     this.compositeMaterial.uniforms.uTotalGlyphs.value = this.atlasData.totalGlyphs;
     oldAtlas.texture.dispose();
   }
