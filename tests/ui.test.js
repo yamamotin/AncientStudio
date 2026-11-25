@@ -157,6 +157,67 @@ test('page brightness defaults to 130%, allows up to 150%, and updates live', ()
   assert.doesNotMatch(main, /page-contrast|contrast-control/i);
 });
 
+test('contact button uses email on mobile and WhatsApp on other devices', () => {
+  function loadContactApi(profile) {
+    const sandbox = {
+      console,
+      document: {
+        readyState: 'loading',
+        addEventListener() {},
+        getElementById: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => []
+      }
+    };
+    sandbox.window = {
+      TP: {},
+      navigator: profile.navigator || {},
+      matchMedia: (query) => ({
+        matches: Boolean(profile.matches && profile.matches[query])
+      }),
+      addEventListener() {}
+    };
+    sandbox.TP = sandbox.window.TP;
+    vm.createContext(sandbox);
+    vm.runInContext(main, sandbox);
+    return sandbox.TP.contact;
+  }
+
+  const email = 'mailto:yamah1337@gmail.com';
+  const whatsapp = 'https://api.whatsapp.com/send/?phone=5544920009249';
+
+  const iphone = loadContactApi({ navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)' } });
+  assert.equal(iphone.isMobile(), true);
+  assert.equal(iphone.destination(), email);
+
+  const smallTouch = loadContactApi({
+    matches: { '(pointer: coarse)': true, '(max-width: 900px)': true }
+  });
+  assert.equal(smallTouch.destination(), email);
+
+  const desktop = loadContactApi({ navigator: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' } });
+  assert.equal(desktop.isMobile(), false);
+  assert.equal(desktop.destination(), whatsapp);
+
+  const touchLaptop = loadContactApi({ matches: { '(pointer: coarse)': true } });
+  assert.equal(touchLaptop.destination(), whatsapp);
+
+  includesAll(main, [
+    'CONTACT_EMAIL_URL',
+    'CONTACT_WHATSAPP_URL',
+    '(pointer: coarse)',
+    '(max-width: 900px)',
+    'initContactButton();'
+  ]);
+  const initStart = main.indexOf('function init()');
+  const initEnd = main.indexOf('function scheduleUiIntegrations');
+  assert.ok(
+    main.indexOf('initContactButton();', initStart) < initEnd,
+    'contact href is synced during init, before deferred UI wiring'
+  );
+  assert.match(html, /id="contact-button"[^>]*href="mailto:yamah1337@gmail\.com"/);
+});
+
 test('fallback penguin is static ASCII art without pointer events or RAF', () => {
   let queuedFrame = null;
   let sceneModeHandler = null;

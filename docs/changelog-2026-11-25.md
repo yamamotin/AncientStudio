@@ -105,3 +105,15 @@ nenhum código de contorno foi adicionado ao frontend.
   via CSS; o pinguim 3D ativo mantém sua rotação horizontal original.
 - API preservada: `init`, `computeFallbackGrid`, `setYaw`, `getState` e o ajuste
   adaptativo de fonte/container para desktop e mobile.
+
+## 9. Botões de ação
+
+- Rótulos padronizados no formato `[ termo ]`, sem `--` ou `github` colado:
+  `pt-br` usa `[ contato ]` e `[ curriculo-* ]`; `en` usa `[ contact ]` e
+  `[ resume-* ]`. Dicionários standalone e embutidos permanecem idênticos.
+- LinkedIn corrigido para `https://www.linkedin.com/in/eron-yamamoto-bb3384156`,
+  inclusive no comando `contact` do console.
+- Contato continua sendo um `<a>` acessível: em mobile abre `mailto:`, em
+  desktop/telas não-mobile direciona para
+  `https://api.whatsapp.com/send/?phone=5544920009249`. A detecção combina UA,
+  `userAgentData.mobile` e media queries de ponteiro/largura, sem listeners de mouse.

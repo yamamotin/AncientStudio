@@ -8,6 +8,37 @@ window.TP = window.TP || {};
   var t = function (key, vars) { return TP.i18n ? TP.i18n.t(key, vars) : key; };
   var sceneFullscreenState = { active: false, syncLabels: null };
 
+  var CONTACT_EMAIL_URL = 'mailto:yamah1337@gmail.com';
+  var CONTACT_WHATSAPP_URL = 'https://api.whatsapp.com/send/?phone=5544920009249';
+
+  // Mobile keeps the existing "write an email" action; every other device opens WhatsApp.
+  // UA hints are combined with pointer/viewport media queries so a touch laptop or a
+  // resized desktop is not misclassified. Detection never binds mouse/pointer handlers.
+  function isMobileContactDevice() {
+    var nav = window.navigator || {};
+    var mobileUa = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent || '');
+    var mobileHint = Boolean(nav.userAgentData && nav.userAgentData.mobile);
+    var coarsePointer = false;
+    var narrowViewport = false;
+    try {
+      coarsePointer = Boolean(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+      narrowViewport = Boolean(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
+    } catch (error) {
+      coarsePointer = false;
+      narrowViewport = false;
+    }
+    return mobileUa || mobileHint || (coarsePointer && narrowViewport);
+  }
+
+  function contactDestination() {
+    return isMobileContactDevice() ? CONTACT_EMAIL_URL : CONTACT_WHATSAPP_URL;
+  }
+
+  TP.contact = {
+    isMobile: isMobileContactDevice,
+    destination: contactDestination
+  };
+
   /* The full line is present in the HTML for a fast, stable LCP; the terminal
      caret animation in CSS keeps the typewriter feel without delaying paint. */
   function initTypewriter() {
@@ -309,6 +340,24 @@ window.TP = window.TP || {};
     });
   }
 
+  // The contact control stays a real <a>, so keyboard activation and its translated
+  // label are unchanged. Only its href follows the current device profile.
+  function initContactButton() {
+    var link = document.getElementById('contact-button');
+    if (!link) return;
+
+    function syncHref() {
+      var href = contactDestination();
+      if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+    }
+
+    syncHref();
+    if (window.addEventListener) {
+      window.addEventListener('resize', syncHref, { passive: true });
+      window.addEventListener('orientationchange', syncHref, { passive: true });
+    }
+  }
+
   /* Fullscreen is a viewport/layout change only: no scene instance is created,
      destroyed or remounted. The existing adapter ResizeObserver handles the new
      container size, so the rest of the portfolio keeps running. */
@@ -386,6 +435,7 @@ window.TP = window.TP || {};
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
     initBrightness();
+    initContactButton();
     initTypewriter();
     initTabs();
     initScene();
