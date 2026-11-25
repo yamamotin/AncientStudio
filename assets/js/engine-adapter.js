@@ -11,31 +11,27 @@ window.TP = window.TP || {};
 
   var controllers = [];
 
+  // The UI exposes one scene with exactly three modes: day, night and rain.
+  // These are palette/weather states only; engine internals are untouched.
+  var DEFAULT_MODE = 'night';
+  var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
-    sanctuary: {
+    night: {
       palette: { background: '#05060D', warmLight: '#FF2A85', warmCore: '#FFC145', coolAmbient: '#00F0FF', foliageAccent: '#8A5CFF', cursorLight: '#64F5FF' },
       bloomIntensity: 1.48, dofStrength: 0.36, edgeStrength: 0.96, blockBlendWeight: 0.35, windStrength: 1.0, parallaxIntensity: 1.65
-    },
-    dawn: {
-      palette: { background: '#090714', warmLight: '#FF6B4A', warmCore: '#FFD166', coolAmbient: '#3CE8FF', foliageAccent: '#9D4EDD', cursorLight: '#B8F3FF' },
-      bloomIntensity: 1.24, dofStrength: 0.32, edgeStrength: 0.92, blockBlendWeight: 0.34, windStrength: 0.82, parallaxIntensity: 1.45
     },
     day: {
       palette: { background: '#08101C', warmLight: '#FF8E3C', warmCore: '#FFEE99', coolAmbient: '#5CEEFF', foliageAccent: '#4895EF', cursorLight: '#E0FBFC' },
       bloomIntensity: 1.02, dofStrength: 0.28, edgeStrength: 0.88, blockBlendWeight: 0.33, windStrength: 0.72, parallaxIntensity: 1.3
     },
-    storm: {
+    rain: {
       palette: { background: '#04050B', warmLight: '#FF1E6E', warmCore: '#FF9F1C', coolAmbient: '#00C8F0', foliageAccent: '#560BAD', cursorLight: '#90E0EF' },
       bloomIntensity: 1.82, dofStrength: 0.46, edgeStrength: 0.98, blockBlendWeight: 0.38, windStrength: 1.65, parallaxIntensity: 1.8
     },
-    emerald: {
-      palette: { background: '#04090B', warmLight: '#00F5A0', warmCore: '#FFD166', coolAmbient: '#00D9F5', foliageAccent: '#10B981', cursorLight: '#FF4D9D' },
-      bloomIntensity: 1.45, dofStrength: 0.36, edgeStrength: 0.94, blockBlendWeight: 0.35, windStrength: 1.05, parallaxIntensity: 1.55
-    }
   };
 
   function configFor(name) {
-    var preset = PRESETS[name] || PRESETS.sanctuary;
+    var preset = PRESETS[name] || PRESETS[DEFAULT_MODE];
     return {
       palette: Object.assign({}, preset.palette),
       bloomIntensity: preset.bloomIntensity,
@@ -45,30 +41,6 @@ window.TP = window.TP || {};
       windStrength: preset.windStrength,
       parallaxIntensity: preset.parallaxIntensity
     };
-  }
-
-  function hexToRgb(hex) {
-    var value = String(hex).replace('#', '');
-    if (value.length === 3) value = value.split('').map(function (c) { return c + c; }).join('');
-    return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
-  }
-
-  function rgbToHex(rgb) {
-    return '#' + rgb.map(function (n) {
-      return Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
-    }).join('');
-  }
-
-  function mixColor(a, b, t) {
-    var ca = hexToRgb(a);
-    var cb = hexToRgb(b);
-    return rgbToHex(ca.map(function (value, index) { return value + (cb[index] - value) * t; }));
-  }
-
-  function mixPalettes(a, b, t) {
-    var result = {};
-    Object.keys(a).forEach(function (key) { result[key] = mixColor(a[key], b[key], t); });
-    return result;
   }
 
   /* Software WebGL (SwiftShader/llvmpipe) spends seconds per frame on multi-pass shaders.
@@ -125,11 +97,11 @@ window.TP = window.TP || {};
       engine: null,
       instance: null,
       mode: 'fallback',
-      preset: (options && options.preset) || 'sanctuary',
+      preset: SCENE_MODES.indexOf((options && options.preset) || '') >= 0
+        ? (options && options.preset)
+        : DEFAULT_MODE,
       paused: false,
       weatherEnabled: !isMascot && (!options || options.weather !== false),
-      cycleTimer: null,
-      cycleStart: 0,
       orbitTimer: null,
       lastUserPointer: 0,
       mascotSpinGroup: null,
@@ -236,7 +208,7 @@ window.TP = window.TP || {};
 
       var THREE = state.engine && state.engine.THREE;
       var scene = getThreeScene();
-      if (!THREE || !scene || mode !== 'storm') return;
+      if (!THREE || !scene || mode !== 'rain') return;
 
       var count = 180;
       var positions = new Float32Array(count * 3);
@@ -286,29 +258,6 @@ window.TP = window.TP || {};
       state.weatherRaf = window.requestAnimationFrame(stepWeather);
     }
 
-    function stopCycle() {
-      if (state.cycleTimer) window.clearInterval(state.cycleTimer);
-      state.cycleTimer = null;
-    }
-
-    function setCycle(enabled) {
-      stopCycle();
-      if (!enabled || state.mode !== 'engine') return;
-      state.cycleStart = Date.now();
-      var night = PRESETS.sanctuary.palette;
-      var day = PRESETS.day.palette;
-
-      state.cycleTimer = window.setInterval(function () {
-        var phase = (Math.sin((Date.now() - state.cycleStart) / 12000) + 1) / 2;
-        applyConfig({
-          palette: mixPalettes(night, day, phase),
-          bloomIntensity: 1.2 - phase * 0.65,
-          dofStrength: 0.65 - phase * 0.3,
-          parallaxIntensity: 1.45 - phase * 0.3
-        });
-      }, 120);
-    }
-
     function stopOrbit() {
       if (state.orbitTimer) window.clearInterval(state.orbitTimer);
       state.orbitTimer = null;
@@ -353,7 +302,7 @@ window.TP = window.TP || {};
     function setPreset(name) {
       state.preset = name;
       applyConfig(configFor(name));
-      if (state.weatherEnabled) setWeather(name === 'storm' ? 'storm' : 'ambient');
+      if (state.weatherEnabled) setWeather(name === 'rain' ? 'rain' : 'ambient');
     }
 
     function scheduleSmoothResize(width, height) {
@@ -436,7 +385,7 @@ window.TP = window.TP || {};
 
         emit('engine');
         if (isMascot) startMascotSpin();
-        if (state.weatherEnabled) setWeather(state.preset === 'storm' ? 'storm' : 'ambient');
+        if (state.weatherEnabled) setWeather(state.preset === 'rain' ? 'rain' : 'ambient');
         observe();
         setPaused(state.paused);
         if (!isMascot) setAutoOrbit(true);
@@ -450,7 +399,6 @@ window.TP = window.TP || {};
     }
 
     function destroy() {
-      stopCycle();
       stopOrbit();
       removeWeather();
       if (state.telemetryRaf) {
@@ -502,7 +450,6 @@ window.TP = window.TP || {};
       mount: mount,
       setPaused: setPaused,
       setPreset: setPreset,
-      setCycle: setCycle,
       setAutoOrbit: setAutoOrbit,
       setPlayableKeyboard: function (enabled) {
         if (state.instance && typeof state.instance.setPlayableKeyboardEnabled === 'function') {

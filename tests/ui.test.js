@@ -64,7 +64,13 @@ test('uploaded portrait is a local, responsive asset with bilingual alt text', (
     'loading="lazy"'
   ]);
   assert.ok(pt['hero.portraitAlt'] && en['hero.portraitAlt'], 'portrait alt is translated');
-  includesAll(css, ['.hero-portrait', 'aspect-ratio: 892 / 1184', 'object-fit: cover', 'float: right']);
+  includesAll(css, [
+    '.hero-portrait',
+    'aspect-ratio: 3 / 4',
+    'object-fit: cover',
+    'grid-template-columns: minmax(0, 1fr) clamp(8rem, 18vw, 11rem)'
+  ]);
+  assert.doesNotMatch(css, /\.hero-portrait\s*\{[^}]*float:/s);
 });
 
 test('stack section shows only the penguin and the exact requested rows', () => {
@@ -87,6 +93,53 @@ test('stack section shows only the penguin and the exact requested rows', () => 
     'Education [B.Sc](http://B.Sc). Electrical Engineering (IFPR) + Erasmus+ International Program'
   ];
   rows.forEach((row) => assert.ok(text.includes(row), `missing exact row: ${row}`));
+});
+
+test('scene modes replace the old preset selector with day, night and rain', () => {
+  assert.doesNotMatch(html, /id="scene-preset"|id="scene-cycle"|value="sanctuary"|value="dawn"|value="storm"|value="emerald"/);
+  includesAll(html, [
+    'data-scene-mode="day"',
+    'data-scene-mode="night"',
+    'data-scene-mode="rain"',
+    'data-i18n="scene.day"',
+    'data-i18n="scene.night"',
+    'data-i18n="scene.rain"',
+    'aria-pressed="true"'
+  ]);
+  for (const key of ['scene.day', 'scene.night', 'scene.rain', 'scene.presetLabel']) {
+    assert.ok(pt[key] && en[key], `missing translation for ${key}`);
+  }
+  assert.deepEqual(
+    [pt['scene.day'], pt['scene.night'], pt['scene.rain']],
+    ['[ Dia ]', '[ Noite ]', '[ Com chuva ]']
+  );
+  assert.doesNotMatch(main, /scene-cycle|scene-preset|setCycle/);
+  includesAll(main, ['data-scene-mode', 'scene.setPreset(activeMode)', 'aria-pressed']);
+});
+
+test('page contrast defaults to 110% and updates live', () => {
+  includesAll(html, [
+    'id="contrast-control"',
+    'type="range"',
+    'min="100"',
+    'max="130"',
+    'step="5"',
+    'value="110"',
+    'id="contrast-value"',
+    'data-i18n-attr="aria-label:contrast.label"'
+  ]);
+  assert.ok(pt['contrast.label'] && en['contrast.label'], 'contrast label is translated');
+  includesAll(css, [
+    '--page-contrast: 1.1',
+    'contrast(var(--page-contrast))',
+    '.contrast-control input[type="range"]'
+  ]);
+  includesAll(main, [
+    "getElementById('contrast-control')",
+    "setProperty('--page-contrast'",
+    "addEventListener('input'",
+    "localStorage.setItem(storageKey"
+  ]);
 });
 
 test('fallback penguin yaw advances from elapsed time without pointer events', () => {

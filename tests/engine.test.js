@@ -38,8 +38,19 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
   includesAll(pointerInput, ['pointerdown', 'pointermove', 'pointerup', '{ passive: true }']);
 });
 
-test('playground presets cover day/night and weather lighting', () => {
-  includesAll(adapter, ['sanctuary', 'dawn', 'day', 'storm', 'emerald']);
+test('playground exposes exactly three scene modes', () => {
+  includesAll(adapter, [
+    'DEFAULT_MODE = \'night\'',
+    'SCENE_MODES = [\'day\', \'night\', \'rain\']',
+    "mode !== 'rain'",
+    'blockBlendWeight: preset.blockBlendWeight',
+    'windStrength: preset.windStrength',
+    'blockBlendWeight: 0.28',
+    'cellSize: 8',
+    'touchstart',
+    'touchmove'
+  ]);
+  assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette/);
 });
 
 test('neofetch penguin auto-rotates without mouse or touch interaction', () => {

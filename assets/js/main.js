@@ -222,14 +222,14 @@ window.TP = window.TP || {};
 
     var badge = document.getElementById('scene-mode');
     var toggle = document.getElementById('scene-toggle');
-    var cycle = document.getElementById('scene-cycle');
-    var preset = document.getElementById('scene-preset');
+    var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-scene-mode]'));
     var help = document.querySelector('.scene-help');
+    var activeMode = 'night';
 
-    var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'sanctuary' });
+    var scene = TP.scene.create(stage, { preset: activeMode });
     var penguin = penguinStage
       ? TP.scene.create(penguinStage, {
-          preset: 'sanctuary',
+          preset: 'night',
           weather: false,
           mascotFocus: true,
           config: { mode: 'mascot', maxFps: 36, cellSize: 8, dofStrength: 0.0, edgeStrength: 0.96 }
@@ -239,7 +239,7 @@ window.TP = window.TP || {};
     stage.addEventListener('tp:scene-mode', function (event) {
       var engineReady = event.detail.mode === 'engine';
       if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
-      [toggle, cycle, preset].forEach(function (control) {
+      [toggle].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
       if (help) {
@@ -256,23 +256,44 @@ window.TP = window.TP || {};
       });
     }
 
-    if (cycle) {
-      cycle.addEventListener('click', function () {
-        var enabled = cycle.getAttribute('aria-pressed') !== 'true';
-        scene.setCycle(enabled);
-        cycle.setAttribute('aria-pressed', String(enabled));
-        cycle.textContent = enabled ? t('scene.cycleOn') : t('scene.cycleOff');
+    modeButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        activeMode = button.getAttribute('data-scene-mode');
+        scene.setPreset(activeMode);
+        modeButtons.forEach(function (other) {
+          other.setAttribute('aria-pressed', String(other === button));
+        });
       });
-    }
-
-    if (preset) {
-      preset.addEventListener('change', function () {
-        scene.setPreset(preset.value);
-      });
-    }
+    });
 
     scene.mount();
     if (penguin) penguin.mount();
+  }
+
+  function initContrast() {
+    var input = document.getElementById('contrast-control');
+    var output = document.getElementById('contrast-value');
+    if (!input) return;
+
+    var storageKey = 'tp-page-contrast';
+    var min = Number(input.min) || 100;
+    var max = Number(input.max) || 130;
+    var fallback = Number(input.value) || 110;
+
+    function apply(value, persist) {
+      var amount = Math.min(max, Math.max(min, Number(value) || fallback));
+      document.documentElement.style.setProperty('--page-contrast', String(amount / 100));
+      input.value = String(amount);
+      if (output) output.textContent = amount + '%';
+      if (persist) {
+        try { localStorage.setItem(storageKey, String(amount)); } catch (error) { /* storage disabled */ }
+      }
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(storageKey); } catch (error) { saved = null; }
+    apply(saved === null ? fallback : saved, false);
+    input.addEventListener('input', function () { apply(input.value, true); });
   }
 
   function initGithubButton() {
@@ -349,11 +370,9 @@ window.TP = window.TP || {};
 
   function applyDynamicLabels() {
     var toggle = document.getElementById('scene-toggle');
-    var cycle = document.getElementById('scene-cycle');
     var audio = document.getElementById('audio-toggle');
     var status = document.getElementById('connection-status');
     if (toggle && toggle.textContent.indexOf('resume') >= 0) toggle.textContent = t('scene.resume');
-    if (cycle && cycle.getAttribute('aria-pressed') === 'true') cycle.textContent = t('scene.cycleOn');
     if (audio && audio.getAttribute('aria-pressed') === 'true') audio.textContent = t('console.audioOn');
     if (status && status.textContent === t('console.statusSim')) status.textContent = t('console.statusSim');
     if (sceneFullscreenState.syncLabels) sceneFullscreenState.syncLabels();
@@ -366,6 +385,7 @@ window.TP = window.TP || {};
     TP.pipeline.init();
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
+    initContrast();
     initTypewriter();
     initTabs();
     initScene();

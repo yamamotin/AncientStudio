@@ -46,13 +46,11 @@
   "api.offline": "// backend unavailable: {detail}",
   "scene.hint": "ASCII 3D engine stage. If WebGL is unavailable, the static fallback remains.",
   "scene.aria": "Decorative ASCII scene with a terminal, a hill and a data bus.",
-  "scene.presetLabel": "Scene preset",
+  "scene.presetLabel": "Scene modes",
   "scene.presetHelp": "// mouse/touch rotate the camera; scrolling stays free",
   "scene.fallbackHelp": "// controls enable when the engine is available",
   "scene.pause": "[ pause ]",
   "scene.resume": "[ resume ]",
-  "scene.cycleOff": "[ cycle: off ]",
-  "scene.cycleOn": "[ cycle: on ]",
   "specs.user": "User",
   "specs.os": "OS",
   "specs.languages": "Languages",
@@ -76,5 +74,9 @@
   "scene.fullscreen": "[ fullscreen ]",
   "scene.exitFullscreen": "[ exit fullscreen ]",
   "scene.fullscreenAria": "Expand the ASCII REALMS section",
-  "scene.exitFullscreenAria": "Restore the ASCII REALMS section"
+  "scene.exitFullscreenAria": "Restore the ASCII REALMS section",
+  "scene.day": "[ Day ]",
+  "scene.night": "[ Night ]",
+  "scene.rain": "[ Rain ]",
+  "contrast.label": "Page contrast"
 }
