@@ -1,48 +1,51 @@
 # AncientStudio Backend — Arquitetura (Monólito Modular por Domínios + Eventos/Filas)
 
-Este documento descreve a arquitetura consolidada em `backend/` para o servidor técnico do portfólio AncientStudio, projetada sob o padrão **Monólito Modular por Domínios orientado a Eventos/Filas + Gateway/BFF**, compatível com **Python 3.10 e 3.11+**, livre de simulações mascaradas e preparada para evolução incremental até múltiplas réplicas.
+Este documento descreve a arquitetura consolidada em `backend/` (Fases 1, 2 e 3 entregues), projetada sob o padrão **Monólito Modular por Domínios orientado a Eventos/Filas + Gateway/BFF**, compatível com **Python 3.10 e 3.11+**, livre de simulações mascaradas e pronta para execução distribuída com Redis e workers concorrentes.
 
 > **Nota sobre servidores no repositório:**
-> - `backend/` é o backend principal **FastAPI** (serviços reais, contratos tipados em `/api/v1`, segurança HMAC/API Key com escopos, cache, filas/workers e integração n8n).
-> - `api/server.py` (na raiz) permanece apenas como host estático legado sem dependências usado pelo `Dockerfile` raiz atual da Vercel até a virada final de infraestrutura, preservando os contratos de CI existentes.
+> - `backend/` é o backend principal **FastAPI** (serviços reais, contratos tipados em `/api/v1`, segurança HMAC/API Key com escopos, rate limiting por cota, headers de segurança HTTP, cache/idempotência Redis+Memória, filas/workers no ciclo `lifespan`, scrapers reais, workflows multi-etapas de IA e integração n8n).
+> - `api/server.py` (na raiz) permanece apenas como host estático legado usado pelo `Dockerfile` raiz atual da Vercel até a virada final de infraestrutura, preservando os contratos de CI existentes.
 > - `ascii-engine-module/` é um módulo gráfico WebGL2/ECS isolado e não é acoplado nem modificado pelo backend.
 
 ---
 
-## 1. Estrutura de Diretórios
+## 1. Estrutura de Diretórios Atualizada
 
 ```text
 backend/
 ├── __init__.py                        # Garante resolução dual de imports (app.* e backend.app.*)
-├── ARCHITECTURE.md                    # Documentação arquitetural e roadmap de fases
+├── ARCHITECTURE.md                    # Documentação arquitetural e estado das fases
 ├── pyproject.toml                     # Ruff (target py310) + Pytest (markers unit/integration)
-├── requirements.txt                   # Dependências de runtime
-├── requirements-dev.txt               # Dependências de lint e testes
+├── requirements.txt                   # FastAPI, Uvicorn, Pydantic v2, HTTPX, Redis
+├── requirements-dev.txt               # Pytest + Ruff
 ├── app/
-│   ├── main.py                        # Factory create_app(), singletons de estado, middlewares e static mount
-│   ├── core/                          # Infraestrutura transversal
+│   ├── main.py                        # Factory create_app(), lifespan (AsyncWorkerRunner), middlewares e EventBus bridge
+│   ├── core/
 │   │   ├── time.py                    # Utilitários UTC compatíveis com Python 3.10 e 3.11+
-│   │   ├── config.py                  # Settings centralizado (pydantic-settings) + trava anti-segredos dev em prod
+│   │   ├── config.py                  # Settings centralizado (Redis, Workers, Rate Limit, Scraping, AI, n8n)
 │   │   ├── errors.py                  # Exceções semânticas de domínio + RFC 7807 (problem+json)
 │   │   ├── logging.py                 # ContextVar de X-Correlation-ID + formatter estruturado JSON
-│   │   └── security.py                # HMAC-SHA256, ApiKeyVerifier + Scopes, sanitização, guarda SSRF e Rate Limiter
-│   ├── cache/                         # Camada unificada de Cache + Idempotência
+│   │   ├── security.py                # HMAC-SHA256, ApiKeyVerifier + Scopes, sanitização, guarda SSRF e Rate Limiter
+│   │   └── middleware.py              # RateLimitMiddleware por escopo/IP (X-RateLimit-*) + SecurityHeadersMiddleware
+│   ├── cache/
 │   │   ├── base.py                    # Protocolo CacheBackend e telemetria CacheStats
 │   │   ├── memory.py                  # InMemoryTTLCache thread-safe com clock monotônico e evicção LRU limitada
-│   │   └── idempotency.py             # IdempotencyStore construído sobre CacheBackend (sem duplicar TTL/locks)
-│   ├── queue/                         # Mensageria interna, Eventos de Domínio e Filas Assíncronas
+│   │   ├── redis_backend.py           # RedisTTLCache (SET EX NX atômico + codec JSON/Pydantic seguro sem pickle) + fallback
+│   │   └── idempotency.py             # IdempotencyStore unificado sobre CacheBackend (Memória ou Redis)
+│   ├── queue/
 │   │   ├── models.py                  # JobEnvelope, JobStatus, RetryPolicy, DomainEvent, QueueMetrics
 │   │   ├── base.py                    # Protocolo JobQueue + EventBus assíncrono pub/sub
-│   │   └── memory.py                  # InMemoryJobQueue com deduplicação idempotente, backoff e Dead-Letter Queue
-│   ├── workers/                       # Execução assíncrona desacoplada
-│   │   └── runner.py                  # WorkerRegistry (topic -> handler) + AsyncWorkerRunner com propagação de correlation_id
-│   ├── domains/                       # Contextos Delimitados (Bounded Contexts)
-│   │   ├── gateway/                   # BFF, manifesto de capacidades e Gateway Fiscal (HMAC + reconciliação + idempotência)
-│   │   ├── etl/                       # Pipeline real de leitura/normalização contábil sobre datasets em disco
-│   │   ├── automation_n8n/            # Cliente HTTP real para webhooks/execuções n8n + catálogo de workflows versionados
-│   │   ├── scraping/                  # Contratos, portas de extração, guarda SSRF e despacho assíncrono de scrapers
-│   │   ├── ai_workflows/              # Catálogo e contratos de workflows operacionais de IA (sem console RAG nesta etapa)
-│   │   └── pipelines_simulator/       # Descoberta real de targets do monorepo e contratos do Live CI/CD & Docker Simulator
+│   │   ├── memory.py                  # InMemoryJobQueue com deduplicação idempotente, backoff e Dead-Letter Queue
+│   │   └── redis_queue.py             # RedisJobQueue (hashes, listas, ZSET delayed retries e DLQ) + fallback automático
+│   ├── workers/
+│   │   └── runner.py                  # WorkerRegistry + AsyncWorkerRunner gerenciado pelo lifespan do FastAPI
+│   ├── domains/
+│   │   ├── gateway/                   # BFF, telemetria de backends ativos e Gateway Fiscal (HMAC + EventBus)
+│   │   ├── etl/                       # Pipeline real sobre ledger.csv com cache transparente
+│   │   ├── automation_n8n/            # N8NClient + catálogo (3 workflows) + EventBus bridge + callbacks HMAC assinados
+│   │   ├── scraping/                  # HttpxPageFetcher (streaming cap, retries, SSRF em redirects) + 3 extratores reais
+│   │   ├── ai_workflows/              # OpenAICompatibleInferenceAdapter + pipelines multi-etapas validados por schema
+│   │   └── pipelines_simulator/       # Descoberta real de targets do monorepo e contratos do Live CI/CD Simulator
 │   ├── api/
 │   │   ├── deps.py                    # Injeção de dependências FastAPI e autorização por escopos
 │   │   └── v1/                        # Roteadores HTTP finos por domínio agregados em router.py
@@ -50,49 +53,40 @@ backend/
 │       └── ledger.csv                 # Dataset financeiro real consumido pelo domínio ETL
 └── tests/
     ├── conftest.py                    # Fixtures determinísticas compartilhadas
-    ├── unit/                          # Testes isolados (compatibilidade 3.10+, core/security, cache/idempotência, filas/DLQ)
-    └── integration/                   # Testes HTTP ponta a ponta de contratos /api/v1 com TestClient e MockTransport
+    ├── unit/                          # Testes unitários (compat 3.10+, security, Redis/Memory cache & queue, scrapers, IA)
+    └── integration/                   # Testes HTTP/lifespan ponta a ponta (/api/v1, rate limit, headers, workers, n8n)
 ```
 
 ---
 
-## 2. Fronteiras de Módulos e Decisões de Consolidação
+## 2. Entregas das Fases 2 e 3
 
-1. **Eliminação de Camadas Horizontais Duplicadas (`schemas/` e `services/` antigos)**:
-   - Os contratos Pydantic e regras de negócio foram consolidados dentro de cada domínio em `app/domains/<dominio>/`, evitando dispersão entre pastas globais e mantendo coesão alta por contexto.
-2. **Unificação de Cache e Idempotência (`app/cache/`)**:
-   - `IdempotencyStore` deixou de manter estrutura própria de dicionário/locks/TTL e passou a delegar armazenamento atômico (`get_or_set`) ao `CacheBackend` sob namespace `idempotency:`. Ao conectar Redis na Fase 2, tanto cache de domínio quanto idempotência passam a ser distribuídos automaticamente.
-3. **Segurança Centralizada (`app/core/security.py`)**:
-   - Verificação constante (`hmac.compare_digest`) de chaves de API com escopos (`Scope`), assinaturas HMAC de payloads brutos, sanitização de identificadores/textos, proteção contra SSRF em URLs externas (`validate_public_http_url`) e base de rate limiting (`SlidingWindowRateLimiter`).
-4. **Fluxo Assíncrono Orientado a Filas (`app/queue/` + `app/workers/`)**:
-   ```text
-   Cliente HTTP ──► Router /api/v1/<domínio>
-                       │ (valida schema, escopo, SSRF e idempotência)
-                       ▼
-                  Domain Service ──► JobQueue.enqueue(topic, payload, correlation_id)
-                       │                     │
-                       ◄── 202 Accepted ─────┘ (retorna job_id imediatamente)
-                                             │
-                                             ▼
-                                    AsyncWorkerRunner.process_one()
-                                       ├── Sucesso ──► JobStatus.COMPLETED (persiste resultado)
-                                       └── Falha ────► attempts <= max_retries ?
-                                                        ├── Sim ──► JobStatus.RETRYING (backoff exponencial)
-                                                        └── Não ──► JobStatus.DEAD_LETTER (inspecionável em /api/v1/jobs/dead-letters)
-   ```
+### Fase 2 — Filas/Workers Distribuídos + Cache/Segurança
+- **Adaptadores Redis com Fallback Automático (`create_cache_backend` & `create_job_queue`):**
+  - `RedisTTLCache` utiliza `SET key payload EX ttl NX` para atomicidade entre múltiplas réplicas e serialização JSON tipada restrita ao namespace `app.*` (zero uso de `pickle`).
+  - `RedisJobQueue` persiste jobs em Hashes, fila pronta em Lists, agendamentos de retry com backoff em Sorted Sets (`ZADD`/`ZRANGEBYSCORE`) e falhas exauridas em lista `dlq`, fazendo fallback automático para `InMemory*` quando `REDIS_URL` não está definido ou indisponível em ambiente local/CI (`REDIS_FALLBACK_TO_MEMORY=true`).
+- **Ciclo `lifespan` do FastAPI:**
+  - Inicia automaticamente o pool concorrente do `AsyncWorkerRunner` no startup da aplicação e drena/cancela todas as tasks de forma limpa no shutdown.
+- **Rate Limiting por Escopo/IP & Políticas HTTP (`app/core/middleware.py`):**
+  - Cotas diferenciadas por tier (`anonymous` por IP, `authenticated` por chave operacional e `admin`), expondo `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` e `X-RateLimit-Scope` em cada resposta de API e `429 problem+json` + `Retry-After` ao exceder.
+  - `SecurityHeadersMiddleware` aplica `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cache-Control: no-store` e `Content-Security-Policy` restritiva nas rotas `/api/*`.
+
+### Fase 3 — Web Scrapers + Workflows de IA + Automações n8n Reais
+- **Web Scrapers (`app/domains/scraping/`):**
+  - `HttpxPageFetcher` realiza streaming com teto estrito de bytes (`SCRAPER_MAX_RESPONSE_BYTES`), validação de `Content-Type`, retries exponenciais em falhas transitórias (`429/502/503/504`) e validação SSRF manual em **cada salto de redirecionamento HTTP**.
+  - Extratores concretos (`StructuredMetadataExtractor`, `HttpStaticExtractor`, `SitemapXmlExtractor` protegido contra DTD/XXE) registrados no worker `scraping.extract`, com cache automático e emissão de `scraping.document.extracted` no `EventBus`.
+- **Workflows de IA Multi-Etapas (`app/domains/ai_workflows/`):**
+  - `OpenAICompatibleInferenceAdapter` integra endpoints reais `/chat/completions` (OpenAI, vLLM, Red Hat OpenShift AI, Ollama) com `response_format={"type": "json_object"}`.
+  - `AIWorkflowService.execute_workflow_job` executa pré-processamento determinístico de domínio (Etapa 1) seguido de inferência estruturada validada estritamente via schemas Pydantic (`AnomalyTriageOutput`, `EntityExtractionOutput`, `IncidentClassificationOutput`) na Etapa 2, publicando `ai_workflows.run.completed` no `EventBus`.
+- **Automações n8n Expandidas (`infra/n8n/workflows/` + `app/domains/automation_n8n/`):**
+  - Três workflows reais versionados: `invoice-enrichment.json`, `scraping-postprocess.json` e `ai-anomaly-alert.json`.
+  - Ponte automática `EventBus -> JobQueue` disparando workflows n8n deduplicados a partir de eventos reais de domínio, além de endpoint autenticado via HMAC (`POST /api/v1/workflows/callbacks/{workflow_id}`) para recepção idempotente de callbacks de execução do n8n.
 
 ---
 
-## 3. Roadmap das Próximas Fases de Implementação
+## 3. Próximas Fases do Roadmap
 
-1. **Fase 2 — Filas/Workers Distribuídos + Cache/Segurança Avançados**:
-   - Adaptador Redis para `CacheBackend` e `JobQueue` (mantendo fallback local `InMemory*` para desenvolvimento/CI sem dependências externas).
-   - Ciclo de vida `lifespan` do FastAPI gerenciando pool de workers em background, middleware ativo de rate limiting por rota/IP/API Key e headers de segurança HTTP.
-2. **Fase 3 — Web Scrapers Reais + Workflows de IA + Automações n8n Reais**:
-   - Implementação concreta de `PageFetcherPort` (`httpx` com limites de payload, timeout, retry e respeito a `Content-Type`) e extratores HTML/metadados/sitemap registrados no `WorkerRegistry` (`scraping.extract`).
-   - Implementação de adaptadores reais para `StructuredInferencePort` com validação estrita de schema JSON e execução multi-etapas em `ai_workflows.execute`.
-   - Workflows adicionais versionados em `infra/n8n/workflows/` integrados a eventos do `EventBus` e callbacks assinados.
-3. **Fase 4 — Live CI/CD & Docker Pipeline Simulator + Suíte Completa de Testes**:
-   - Implementação dos inspetores reais (`PipelineStageInspectorPort`) auditando manifestos, AST/lint, Dockerfiles e artefatos dos targets do repositório (`backend-api`, `ascii-engine`, `portfolio-static`) via `pipelines.simulate`, com streaming/telemetria estruturada por estágio e testes de carga/resiliência.
-4. **Fase 5 (Última) — Console RAG**:
-   - Indexação vetorial/lexical sobre a base técnica real do portfólio e documentação arquitetural, pipeline de recuperação com citações verificáveis e integração com o console interativo.
+1. **Fase 4 — Live CI/CD & Docker Pipeline Simulator + Testes Completos:**
+   - Implementar inspetores reais (`PipelineStageInspectorPort`) para `backend-api`, `ascii-engine` e `portfolio-static` no worker `pipelines.simulate`, com auditoria real de manifestos/Dockerfiles/artefatos, RCA estruturado e suíte completa de resiliência.
+2. **Fase 5 (Última) — Console RAG:**
+   - Indexação e recuperação sobre a base documental/código real do repositório com citações verificáveis (mantido intencionalmente fora do escopo até a última etapa).

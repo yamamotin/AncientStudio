@@ -1,7 +1,8 @@
-"""Schemas for real n8n workflow orchestration and versioned workflow catalog."""
+"""Schemas for real n8n workflow orchestration, callbacks, and versioned catalog."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -37,3 +38,24 @@ class WorkflowCatalogItem(BaseModel):
     active: bool
     webhook_path: str | None = None
     node_count: int
+
+
+class WebhookCallbackIn(BaseModel):
+    """Signed inbound callback payload posted by n8n when an execution transitions."""
+
+    execution_id: str = Field(min_length=2, max_length=120)
+    status: WorkflowExecutionStatus = "completed"
+    finished: bool = True
+    started_at: str | None = None
+    ended_at: str | None = None
+    output: dict[str, Any] = Field(default_factory=dict)
+
+
+class WebhookCallbackOut(BaseModel):
+    """Acknowledgement returned to n8n after verifying HMAC and recording callback state."""
+
+    execution_id: str
+    workflow_id: str
+    status: WorkflowExecutionStatus
+    acknowledged_at: datetime
+    replayed: bool

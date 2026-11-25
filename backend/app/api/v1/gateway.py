@@ -1,4 +1,4 @@
-"""API Gateway / BFF and Fiscal Gateway routes (HMAC + unified idempotency)."""
+"""API Gateway / BFF and Fiscal Gateway routes (HMAC + unified idempotency + EventBus)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import platform
 from app.api.deps import (
     get_cache_backend,
     get_correlation_id,
+    get_event_bus,
     get_gateway_service,
     get_job_queue,
     get_worker_registry,
@@ -21,7 +22,7 @@ from app.domains.gateway import (
     GatewayService,
     InvoiceOut,
 )
-from app.queue import JobQueue
+from app.queue import DomainEvent, EventBus, JobQueue
 from app.workers import WorkerRegistry
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
@@ -40,27 +41,51 @@ def _invoice_response(result: InvoiceOut, replayed: bool) -> JSONResponse:
     )
 
 
+async def _emit_invoice_accepted(
+    event_bus: EventBus,
+    result: InvoiceOut,
+    correlation_id: str,
+) -> None:
+    await event_bus.publish(
+        DomainEvent(
+            event_type="gateway.invoice.accepted",
+            source="gateway",
+            correlation_id=correlation_id,
+            payload=result.model_dump(mode="json"),
+        )
+    )
+
+
 @router.get(
     "/capabilities",
     response_model=GatewayCapabilitiesOut,
-    summary="BFF architecture, active domains, cache and queue telemetry",
+    summary="BFF architecture, active domains, cache, queue, and worker telemetry",
 )
 def gateway_capabilities(
+    request: Request,
     settings: Settings = Depends(get_settings),
     cache: CacheBackend = Depends(get_cache_backend),
     queue: JobQueue = Depends(get_job_queue),
     workers: WorkerRegistry = Depends(get_worker_registry),
 ) -> GatewayCapabilitiesOut:
     stats = cache.stats()
+    runner = getattr(request.app.state, "worker_runner", None)
+    cache_kind = getattr(cache, "backend_name", "memory")
+    queue_kind = getattr(queue, "backend_name", "memory")
+
     return GatewayCapabilitiesOut(
         service="ancientstudio-api",
         version=settings.api_version,
         environment=settings.environment,
         python_runtime=platform.python_version(),
         architecture="modular-monolith-event-driven",
+        cache_backend=cache_kind,
+        queue_backend=queue_kind,
+        workers_running=bool(runner and runner.is_running),
         domains=list(DOMAIN_MODULES),
         worker_topics=workers.topics(),
         cache=CacheTelemetryOut(
+            backend=cache_kind,
             hits=stats.hits,
             misses=stats.misses,
             sets=stats.sets,
@@ -88,6 +113,7 @@ async def parse_invoice(
     ),
     settings: Settings = Depends(get_settings),
     service: GatewayService = Depends(get_gateway_service),
+    event_bus: EventBus = Depends(get_event_bus),
     correlation_id: str = Depends(get_correlation_id),
 ) -> Response:
     raw = await request.body()
@@ -104,6 +130,8 @@ async def parse_invoice(
         idempotency_key=idempotency_key,
         fingerprint=fingerprint(sha256_hex(raw)),
     )
+    if not replayed:
+        await _emit_invoice_accepted(event_bus, result, correlation_id)
     return _invoice_response(result, replayed)
 
 
@@ -119,6 +147,8 @@ async def submit_invoice(
     request: Request,
     settings: Settings = Depends(get_settings),
     service: GatewayService = Depends(get_gateway_service),
+    event_bus: EventBus = Depends(get_event_bus),
+    correlation_id: str = Depends(get_correlation_id),
 ) -> Response:
     raw = await request.body()
     result, replayed = service.submit_browser_invoice(
@@ -126,4 +156,6 @@ async def submit_invoice(
         secret=settings.gateway_hmac_secret,
         max_age_seconds=settings.signature_max_age_seconds,
     )
+    if not replayed:
+        await _emit_invoice_accepted(event_bus, result, correlation_id)
     return _invoice_response(result, replayed)
