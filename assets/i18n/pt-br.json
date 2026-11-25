@@ -52,8 +52,8 @@
   "scene.resume": "[ resume ]",
   "scene.cycleOff": "[ cycle: off ]",
   "scene.cycleOn": "[ cycle: on ]",
-  "stack.penguinAria": "Pinguim ASCII 3D interativo. Arraste com o mouse ou o dedo para girar.",
-  "stack.penguinHint": "// mouse ou toque para girar",
+  "stack.penguinAria": "Pinguim ASCII 3D girando automaticamente, sem controle por mouse ou toque.",
+  "stack.penguinHint": "// giro automático · mouse e toque não alteram a cena",
   "specs.user": "User",
   "specs.os": "OS",
   "specs.languages": "Languages",
@@ -73,5 +73,9 @@
   "console.githubTodo": "[ TODO ] GitHub ainda não informado pelo Eron.",
   "console.githubDetail": "Envie o username para adicionar o link real aqui.",
   "footer.note": "// no trackers · no analytics · self-hosted fonts",
-  "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água"
+  "scene.engineHelp": "// motor WebGL2 3D conectado · mouse/toque controlam câmera e reflexo na água",
+  "scene.fullscreen": "[ tela cheia ]",
+  "scene.exitFullscreen": "[ sair da tela cheia ]",
+  "scene.fullscreenAria": "Ampliar a seção ASCII REALMS",
+  "scene.exitFullscreenAria": "Restaurar a seção ASCII REALMS"
 }

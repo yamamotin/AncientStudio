@@ -2,7 +2,8 @@
    Connects:
    1. `#ascii-scene` -> Lightweight interactive ASCII Realms Playground (`mode: 'playground'`)
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
-   Zero framework dependencies; preserves scroll-safe `{ passive: true }` pointer/touch listeners. */
+   Zero framework dependencies. The playground keeps scroll-safe passive pointer input;
+   the mascot has no pointer interaction and spins on its own via a single RAF loop. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -129,16 +130,15 @@ window.TP = window.TP || {};
       cycleStart: 0,
       orbitTimer: null,
       lastUserPointer: 0,
-      penguinTargetYaw: 0,
-      penguinTargetPitch: 0,
-      penguinPointerActive: false,
+      mascotSpinGroup: null,
+      mascotSpinLast: 0,
+      mascotPointerBlockers: [],
       telemetryRaf: null,
       weather: null,
       weatherRaf: null,
       weatherMode: '',
       observer: null,
-      pointerListener: null,
-      windowPointerListener: null
+      pointerListener: null
     };
 
     function emit(mode) {
@@ -159,22 +159,71 @@ window.TP = window.TP || {};
       return null;
     }
 
-    function syncMascotTelemetry() {
+    /* Wrap the Tux root in an integration-only group. The ECS still owns its
+       Transform; rotating the wrapper gives a continuous spin without touching
+       the engine core, ECS systems or shaders. */
+    function ensureMascotSpinGroup() {
+      if (state.mascotSpinGroup) return;
+      var scene = getThreeScene();
+      var THREE = state.engine && state.engine.THREE;
+      if (!scene || !THREE || typeof scene.getObjectByName !== 'function') return;
+
+      var root = scene.getObjectByName('TuxMascotRoot');
+      if (!root || root.parent === state.mascotSpinGroup) return;
+
+      var group = new THREE.Group();
+      group.name = 'TuxAutoSpin';
+      scene.add(group);
+      if (typeof group.attach === 'function') group.attach(root);
+      else group.add(root);
+      state.mascotSpinGroup = group;
+      container.setAttribute('data-auto-spin', 'true');
+    }
+
+    function clearMascotSpin() {
+      var scene = getThreeScene();
+      if (state.mascotSpinGroup) {
+        var root = state.mascotSpinGroup.children[0];
+        if (root && scene) {
+          if (typeof scene.attach === 'function') scene.attach(root);
+          else scene.add(root);
+        }
+        if (state.mascotSpinGroup.parent) state.mascotSpinGroup.parent.remove(state.mascotSpinGroup);
+      }
+      state.mascotSpinGroup = null;
+      state.mascotSpinLast = 0;
+      container.removeAttribute('data-auto-spin');
+    }
+
+    function stepMascotSpin(now) {
       state.telemetryRaf = null;
       if (!isMascot || state.paused || !state.instance) return;
 
+      ensureMascotSpinGroup();
+      var tSec = (now || performance.now()) * 0.001;
+      var delta = state.mascotSpinLast ? Math.min(0.05, tSec - state.mascotSpinLast) : 0;
+      state.mascotSpinLast = tSec;
+      if (state.mascotSpinGroup) state.mascotSpinGroup.rotation.y += delta * 0.55;
+
       var badge = document.getElementById('neofetch-penguin-telemetry');
-      if (badge && typeof state.instance.getPrimaryEntityAngles === 'function') {
-        var angles = state.instance.getPrimaryEntityAngles();
-        if (angles) {
-          var degYaw = Math.round((angles.yaw * 180) / Math.PI);
-          var degPitch = Math.round((-angles.pitch * 180) / Math.PI);
-          badge.textContent =
-            'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch ' + (degPitch >= 0 ? '+' : '') + degPitch + '°';
-        }
+      if (badge) {
+        var yaw = state.mascotSpinGroup
+          ? state.mascotSpinGroup.rotation.y
+          : (typeof state.instance.getPrimaryEntityAngles === 'function'
+              ? (state.instance.getPrimaryEntityAngles() || {}).yaw
+              : 0) || 0;
+        var degYaw = Math.round((yaw * 180) / Math.PI);
+        badge.textContent =
+          'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch +0°';
       }
 
-      state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
+      state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
+    }
+
+    function startMascotSpin() {
+      if (!isMascot || state.paused || state.telemetryRaf) return;
+      state.mascotSpinLast = 0;
+      state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
     }
 
     function removeWeather() {
@@ -301,9 +350,7 @@ window.TP = window.TP || {};
         state.weatherRaf = null;
       } else {
         if (typeof state.instance.resume === 'function') state.instance.resume();
-        if (isMascot && !state.telemetryRaf) {
-          state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
-        }
+        if (isMascot) startMascotSpin();
         if (state.weather && !state.weatherRaf) {
           state.weather.last = performance.now();
           state.weatherRaf = window.requestAnimationFrame(stepWeather);
@@ -377,9 +424,7 @@ window.TP = window.TP || {};
         if (lifecycle === 'idle' && typeof state.instance.mount === 'function') state.instance.mount();
 
         emit('engine');
-        if (isMascot) {
-          state.telemetryRaf = window.requestAnimationFrame(syncMascotTelemetry);
-        }
+        if (isMascot) startMascotSpin();
         if (state.weatherEnabled) setWeather(state.preset === 'storm' ? 'storm' : 'ambient');
         observe();
         setPaused(state.paused);
@@ -401,6 +446,7 @@ window.TP = window.TP || {};
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;
       }
+      clearMascotSpin();
       if (state.observer) {
         state.observer.disconnect();
         state.observer = null;
@@ -409,45 +455,31 @@ window.TP = window.TP || {};
         container.removeEventListener('pointermove', state.pointerListener);
         state.pointerListener = null;
       }
-      if (state.windowPointerListener) {
-        window.removeEventListener('pointermove', state.windowPointerListener);
-        state.windowPointerListener = null;
-      }
+      state.mascotPointerBlockers.forEach(function (entry) {
+        container.removeEventListener(entry.type, entry.handler, { capture: true });
+      });
+      state.mascotPointerBlockers = [];
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
       state.instance = null;
       state.engine = null;
       emit('fallback');
     }
 
-    function updatePenguinFromPointer(event) {
-      var rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      var cx = rect.left + rect.width * 0.5;
-      var cy = rect.top + rect.height * 0.5;
-      var spanX = Math.max(rect.width * 0.65, window.innerWidth * 0.35, 160);
-      var spanY = Math.max(rect.height * 0.65, window.innerHeight * 0.35, 140);
-      var nx = Math.max(-1, Math.min(1, (event.clientX - cx) / spanX));
-      var ny = Math.max(-1, Math.min(1, (event.clientY - cy) / spanY));
-      state.penguinTargetYaw = nx * 1.35;
-      state.penguinTargetPitch = ny * 0.42;
-      state.penguinPointerActive = true;
-    }
-
-    state.pointerListener = function (event) {
-      if (event.isTrusted) {
-        state.lastUserPointer = Date.now();
-        updatePenguinFromPointer(event);
-      }
-    };
-    container.addEventListener('pointermove', state.pointerListener, { passive: true });
-
+    /* The engine core registers passive pointer listeners during mount(). Capture
+       them on the mascot container before mount so no mouse/touch event ever
+       reaches the Tux entity. This does not call preventDefault, so scroll is unaffected. */
     if (isMascot) {
-      state.windowPointerListener = function (event) {
-        if (!event.isTrusted) return;
-        state.lastUserPointer = Date.now();
-        updatePenguinFromPointer(event);
+      ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave', 'pointerenter', 'pointerout', 'pointerover'].forEach(function (type) {
+        var blocker = function (event) { event.stopImmediatePropagation(); };
+        container.addEventListener(type, blocker, { capture: true, passive: true });
+        state.mascotPointerBlockers.push({ type: type, handler: blocker });
+      });
+      container.setAttribute('data-pointer-locked', 'true');
+    } else {
+      state.pointerListener = function (event) {
+        if (event.isTrusted) state.lastUserPointer = Date.now();
       };
-      window.addEventListener('pointermove', state.windowPointerListener, { passive: true });
+      container.addEventListener('pointermove', state.pointerListener, { passive: true });
     }
 
     window.addEventListener('pagehide', destroy);
