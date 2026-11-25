@@ -43,6 +43,7 @@ test('playground exposes exactly three scene modes', () => {
     'DEFAULT_MODE = \'night\'',
     'SCENE_MODES = [\'day\', \'night\', \'rain\']',
     "mode !== 'rain'",
+    'atmosphere: atmosphere',
     'blockBlendWeight: preset.blockBlendWeight',
     'windStrength: preset.windStrength',
     'blockBlendWeight: 0.28',
@@ -155,10 +156,11 @@ test('built portfolio IIFE bundle executes cleanly and runs ECS, TuxEntityFactor
   assert.ok(transform.rotX < -0.02, 'Tux smoothly lerps pitch toward pointer target');
   assert.equal(rootGroup.rotation.y, transform.rotY, 'RenderSyncSystem syncs Three.js Object3D');
 
-  // Verify MapLoader loads lightweight sanctuary-isle definition
-  const mapDef = enginePkg.MapLoader.load('sanctuary-isle');
-  assert.equal(mapDef.id, 'sanctuary-isle');
-  assert.ok(mapDef.trees.length > 0 && mapDef.braziers.length === 2);
+  // Verify MapLoader consolidates exclusively onto the single cyberpunk-citadel scenario
+  assert.deepEqual(Array.from(enginePkg.MapLoader.listMapIds()), ['cyberpunk-citadel']);
+  const mapDef = enginePkg.MapLoader.load('cyberpunk-citadel');
+  assert.equal(mapDef.id, 'cyberpunk-citadel');
+  assert.ok(mapDef.buildings.length === 14 && mapDef.braziers.length === 2);
 
   // Verify KeyboardInput stays disabled by default so page shortcuts/scroll are never hijacked
   const kb = new enginePkg.KeyboardInput();
@@ -575,4 +577,294 @@ test('SceneComposerKit, SceneDepthRig & EntityBlueprintRegistry compose layered 
 
   ecsWorld.clear(true);
   pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+
+test('single scenario supports Dia/Noite/Com chuva modes, calibrated PCF street shadows, and grid-free 5:8 glyph rendering', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  const html = readFileSync(path.join(root, 'index.html'), 'utf8');
+  const asciiShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const waterShader = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
+    'utf8'
+  );
+
+  // 1. Legacy unused island noise & RPG presets removed; HTML exposes Noite / Dia / Com chuva
+  assert.equal(
+    existsSync(path.join(root, 'ascii-engine-module/src/scene/noise.ts')),
+    false,
+    'Unused legacy island noise module removed'
+  );
+  includesAll(html, [
+    'data-scene-mode="day"',
+    'data-scene-mode="night"',
+    'data-scene-mode="rain"'
+  ]);
+  assert.doesNotMatch(html, /value="sanctuary"|value="emerald"/);
+
+  // 2. Shader verification: street shader samples real-time directional PCF shadow map; ASCII shader eliminates grid seams
+  includesAll(waterShader, [
+    'uDirShadowMap',
+    'uDirShadowMatrix',
+    'sampleDirectionalShadow',
+    'unpackRGBAToDepth',
+    'uWetness',
+    'uRainIntensity',
+    'uDaylight',
+    'uAvatarPos'
+  ]);
+  includesAll(asciiShader, [
+    'uAtlasTileSize',
+    'floor(uResolution * 0.5)',
+    '0.55 / safeTileDims',
+    'smoothBackdrop',
+    'uDaylight'
+  ]);
+  assert.doesNotMatch(
+    asciiShader,
+    /clamp\(glyphUv,\s*0\.04,\s*0\.96\)|mod\(floor\(gl_FragCoord\.y\s*\*\s*0\.5\)/,
+    'Removed 4% square UV margin clamp and 2px scanline striping that caused inter-character grid lines'
+  );
+
+  // 3. Runtime verification of atmosphere modes, shadows, and 5:8 full-bleed glyph atlas
+  const fillRectCalls = [];
+  const mockCanvas = {
+    width: 0,
+    height: 0,
+    getContext: () => ({
+      clearRect: () => {},
+      fillRect: (x, y, w, h) => {
+        fillRectCalls.push({ x, y, w, h });
+      },
+      fillText: () => {},
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      fillStyle: ''
+    })
+  };
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => mockCanvas },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.deepEqual(Array.from(pkg.MapLoader.listMapIds()), ['cyberpunk-citadel']);
+
+  // Verify 5:8 proportional glyph atlas & gutter-free solid block fill (`pad = 0`)
+  const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);
+  assert.equal(atlas.tileHeight, 64);
+  assert.equal(atlas.tileWidth, 40, 'Atlas tile width matches 5:8 (0.625) monospace cell aspect');
+  const solidBlockX = (atlas.totalGlyphs - 1) * atlas.tileWidth;
+  const solidBlockFill = fillRectCalls.find(
+    (c) => c.x === solidBlockX && c.y === 0 && c.w === atlas.tileWidth && c.h === atlas.tileHeight
+  );
+  assert.ok(solidBlockFill, 'Solid 100% block tile fills 100% of tileWidth x tileHeight with zero border gap');
+  atlas.texture.dispose();
+
+  // Verify shadows & Dia / Noite / Com chuva transitions on the unified scene
+  const ecsWorld = new pkg.World();
+  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
+  const nightConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, { atmosphere: 'night' });
+  const built = pkg.PlaygroundSceneBuilder.build(mapDef, nightConfig, ecsWorld);
+
+  assert.equal(built.moonDirLight.castShadow, true, 'Primary directional light casts PCF shadows');
+  assert.equal(built.moonDirLight.shadow.mapSize.width, 1536);
+  assert.ok(built.moonDirLight.shadow.normalBias > 0, 'normalBias tuned to prevent shadow acne');
+
+  let shadowCasterCount = 0;
+  let shadowReceiverCount = 0;
+  built.scene.traverse((obj) => {
+    if (obj.isMesh && obj.castShadow) shadowCasterCount += 1;
+    if (obj.isMesh && obj.receiveShadow) shadowReceiverCount += 1;
+  });
+  assert.ok(shadowCasterCount >= 40, 'Buildings, poles, overpass, props & protagonist cast shadows');
+  assert.ok(shadowReceiverCount >= 20, 'Foundation, sidewalks, curbs & facades receive shadows');
+  assert.ok(built.waterMaterial.uniforms.uDirShadowMap.value, 'Street shader initialized with shadow map texture');
+
+  const vfx = new pkg.VfxController({
+    scene: built.scene,
+    config: nightConfig,
+    baseCameraPos: mapDef.cameraAnchor,
+    lookAtTarget: mapDef.cameraLookAt
+  });
+
+  // Night mode ("Noite"): stars visible, moderate wetness, NO rain particles or raindrop splashes
+  assert.equal(vfx.isRainActive(), false);
+  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 0);
+  assert.equal(built.waterMaterial.uniforms.uDaylight.value, 0);
+  assert.equal(built.starPoints.visible, true);
+
+  // Day mode ("Dia"): sunlit angle, stars & searchlights off, dry pavement, high-contrast solar shadows, NO rain
+  const dayConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    atmosphere: 'day',
+    palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#1E3F66', coolAmbient: '#7AD4FF' })
+  });
+  pkg.PlaygroundSceneBuilder.applyAtmosphere(built, dayConfig);
+  vfx.applyConfig(dayConfig);
+  assert.equal(vfx.isRainActive(), false);
+  assert.equal(built.waterMaterial.uniforms.uDaylight.value, 1.0);
+  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 0);
+  assert.ok(built.waterMaterial.uniforms.uWetness.value < 0.2, 'Day mode uses dry sunlit asphalt');
+  assert.equal(built.starPoints.visible, false, 'Stars hidden in Day mode');
+  assert.ok(built.moonDirLight.intensity > 2.8, 'Solar directional light intensified in Day mode');
+
+  // Rain mode ("Com chuva"): active rain streaks, flooded reflective pavement (`uWetness > 0.9`), raindrop ripples (`uRainIntensity === 1`)
+  const rainConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    atmosphere: 'rain',
+    windStrength: 1.5
+  });
+  pkg.PlaygroundSceneBuilder.applyAtmosphere(built, rainConfig);
+  vfx.applyConfig(rainConfig);
+  assert.equal(vfx.isRainActive(), true, 'Rain particles active strictly in Com chuva mode');
+  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 1.0);
+  assert.ok(built.waterMaterial.uniforms.uWetness.value > 0.9, 'Pavement mirror wetness maximized in Com chuva mode');
+  assert.ok(built.scene.fog.density > 0.02, 'Atmospheric storm mist thickens in Com chuva mode');
+
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+
+test('configurable per-object outline API is exported for on-demand targets, inactive by default, and supports optional highlightColor', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/shaders/objectOutline.ts')),
+    'objectOutline.ts module exists'
+  );
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(typeof pkg.applyObjectOutline, 'function');
+  assert.equal(typeof pkg.clearObjectOutline, 'function');
+  assert.equal(typeof pkg.getObjectOutlineState, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.setObjectOutline, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.clearObjectOutline, 'function');
+  assert.equal(typeof pkg.AsciiSceneEngine.prototype.getObjectOutlineState, 'function');
+
+  // 1. Default spawns (Playground & Tux mascot) have ZERO outlines applied globally or on Tux
+  const ecsWorld = new pkg.World();
+  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  let defaultPlaygroundOutlines = 0;
+  built.scene.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME || (obj.userData && obj.userData.__isAsciiOutlineShell)) {
+      defaultPlaygroundOutlines += 1;
+    }
+  });
+  assert.equal(defaultPlaygroundOutlines, 0, 'Playground has no global or default outline shells');
+
+  const mascotScene = new pkg.THREE.Scene();
+  const mascotEcs = new pkg.World();
+  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(mascotEcs, mascotScene, {
+    includeShowcaseRig: true
+  });
+  const bystanderBox = new pkg.THREE.Mesh(
+    new pkg.THREE.BoxGeometry(1, 1, 1),
+    new pkg.THREE.MeshStandardMaterial({ color: 0x223344 })
+  );
+  mascotScene.add(bystanderBox);
+
+  assert.equal(pkg.getObjectOutlineState(tuxRoot), null, 'Tux has no outline active by default');
+  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
+
+  // 2. On-demand application on a specific target (with default highlightColor when omitted)
+  const handle = pkg.applyObjectOutline(tuxRoot, { thickness: 1.4 });
+  const initialState = handle.getState();
+  assert.equal(initialState.enabled, true);
+  assert.equal(initialState.thickness, 1.4);
+  assert.equal(
+    initialState.highlightColor,
+    pkg.DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
+    'Uses high-visibility default highlightColor when omitted'
+  );
+  assert.ok(initialState.outlinedMeshCount >= 8, 'Outlines Tux body, head, beak, eyes, wings, feet & tail');
+
+  // Verify bystander object in the same scene is completely unaffected (strictly per-target, not global)
+  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
+  let bystanderShells = 0;
+  bystanderBox.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME) bystanderShells += 1;
+  });
+  assert.equal(bystanderShells, 0, 'Non-targeted objects in scene receive zero outline shells');
+
+  // Verify showcase pedestal plinth was skipped by default (`excludePedestal: true`)
+  const plinth = tuxRoot.getObjectByName('TuxShowcasePlinth');
+  assert.ok(plinth, 'TuxShowcasePlinth exists when includeShowcaseRig is true');
+  assert.equal(
+    plinth.children.some((c) => c.name === pkg.OUTLINE_SHELL_NAME),
+    false,
+    'Showcase floor plinth is excluded by default so only the character silhouette is outlined'
+  );
+
+  // 3. Dynamic update: custom highlightColor, width alias, and visibility toggle without reallocating shells
+  const updated = handle.update({
+    highlightColor: '#FFD166',
+    width: 2.25,
+    intensity: 2.4,
+    opacity: 0.9
+  });
+  assert.equal(updated.highlightColor, '#FFD166', 'Custom highlightColor updates cleanly');
+  assert.equal(updated.thickness, 2.25, 'width alias updates outline thickness');
+  assert.equal(updated.intensity, 2.4);
+  assert.equal(updated.opacity, 0.9);
+  assert.equal(updated.outlinedMeshCount, initialState.outlinedMeshCount, 'Idempotent update creates zero duplicate shells');
+
+  const hidden = handle.setVisible(false);
+  assert.equal(hidden.enabled, false);
+  let visibleShellsWhileHidden = 0;
+  tuxRoot.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME && obj.visible) visibleShellsWhileHidden += 1;
+  });
+  assert.equal(visibleShellsWhileHidden, 0, 'setVisible(false) hides all outline shells on target');
+
+  // 4. Welded smooth corner normals on BoxGeometry (`aOutlineNormal` has symmetric ~0.577 components)
+  pkg.applyObjectOutline(bystanderBox, { color: 0x00ffcc, thickness: 1.0 });
+  const weldedAttr = bystanderBox.geometry.getAttribute('aOutlineNormal');
+  assert.ok(weldedAttr && weldedAttr.count === 24, 'BoxGeometry receives welded smooth outline normals');
+  assert.ok(
+    Math.abs(Math.abs(weldedAttr.getX(0)) - 1 / Math.sqrt(3)) < 0.02 &&
+      Math.abs(Math.abs(weldedAttr.getY(0)) - 1 / Math.sqrt(3)) < 0.02 &&
+      Math.abs(Math.abs(weldedAttr.getZ(0)) - 1 / Math.sqrt(3)) < 0.02,
+    'Cube corner welded normal is symmetric 1/sqrt(3) miter vector (gap-free corners)'
+  );
+
+  // 5. Clean disposal removes 100% of outline shells
+  const removedCount = handle.dispose();
+  assert.equal(removedCount, initialState.outlinedMeshCount);
+  assert.equal(pkg.getObjectOutlineState(tuxRoot), null);
+  let remainingShells = 0;
+  tuxRoot.traverse((obj) => {
+    if (obj.name === pkg.OUTLINE_SHELL_NAME) remainingShells += 1;
+  });
+  assert.equal(remainingShells, 0, 'dispose() detaches all outline shells cleanly');
+
+  pkg.clearObjectOutline(bystanderBox);
+  ecsWorld.clear(true);
+  mascotEcs.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+  pkg.LifecycleManager.disposeObject3D(mascotScene);
 });

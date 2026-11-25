@@ -8,16 +8,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.cache import CacheBackend, IdempotencyStore, InMemoryTTLCache
+from app.cache import CacheBackend, IdempotencyStore, create_cache_backend
 from app.core.config import Settings, get_settings
 from app.core.security import ApiKeyVerifier, ApiPrincipal, Scope
-from app.domains.ai_workflows import AIWorkflowService
+from app.domains.ai_workflows import (
+    AIWorkflowService,
+    OpenAICompatibleInferenceAdapter,
+    StructuredInferencePort,
+)
 from app.domains.automation_n8n import N8NAutomationService, N8NClient
 from app.domains.etl import ETLService
 from app.domains.gateway import GatewayService
 from app.domains.pipelines_simulator import DEFAULT_REPO_ROOT, PipelineSimulatorService
-from app.domains.scraping import ScrapingService
-from app.queue import EventBus, InMemoryJobQueue, JobQueue
+from app.domains.scraping import HttpxPageFetcher, PageFetcherPort, ScrapingService
+from app.queue import EventBus, JobQueue, create_job_queue
 from app.workers import WorkerRegistry
 from fastapi import Depends, Header, Request
 
@@ -27,10 +31,7 @@ def get_correlation_id(request: Request) -> str:
 
 
 def get_cache_backend(settings: Settings = Depends(get_settings)) -> CacheBackend:
-    return InMemoryTTLCache(
-        default_ttl_seconds=settings.cache_default_ttl_seconds,
-        max_entries=settings.cache_max_entries,
-    )
+    return create_cache_backend(settings)
 
 
 def get_idempotency_store(settings: Settings = Depends(get_settings)) -> IdempotencyStore:
@@ -38,10 +39,7 @@ def get_idempotency_store(settings: Settings = Depends(get_settings)) -> Idempot
 
 
 def get_job_queue(settings: Settings = Depends(get_settings)) -> JobQueue:
-    return InMemoryJobQueue(
-        max_size=settings.queue_max_size,
-        default_max_retries=settings.worker_max_retries,
-    )
+    return create_job_queue(settings)
 
 
 def get_event_bus() -> EventBus:
@@ -50,6 +48,16 @@ def get_event_bus() -> EventBus:
 
 def get_worker_registry() -> WorkerRegistry:
     return WorkerRegistry()
+
+
+def get_page_fetcher(settings: Settings = Depends(get_settings)) -> PageFetcherPort:
+    return HttpxPageFetcher(settings)
+
+
+def get_inference_port(
+    settings: Settings = Depends(get_settings),
+) -> StructuredInferencePort:
+    return OpenAICompatibleInferenceAdapter(settings)
 
 
 def get_etl_service(cache: CacheBackend = Depends(get_cache_backend)) -> ETLService:
@@ -69,22 +77,45 @@ def get_n8n_client(settings: Settings = Depends(get_settings)) -> N8NClient:
 def get_n8n_service(
     client: N8NClient = Depends(get_n8n_client),
     queue: JobQueue = Depends(get_job_queue),
+    cache: CacheBackend = Depends(get_cache_backend),
+    store: IdempotencyStore = Depends(get_idempotency_store),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> N8NAutomationService:
-    return N8NAutomationService(client, queue=queue)
+    return N8NAutomationService(
+        client,
+        queue=queue,
+        cache=cache,
+        idempotency_store=store,
+        event_bus=event_bus,
+    )
 
 
 def get_scraping_service(
     settings: Settings = Depends(get_settings),
     queue: JobQueue = Depends(get_job_queue),
     cache: CacheBackend = Depends(get_cache_backend),
+    fetcher: PageFetcherPort = Depends(get_page_fetcher),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> ScrapingService:
-    return ScrapingService(settings=settings, queue=queue, cache=cache)
+    return ScrapingService(
+        settings=settings,
+        queue=queue,
+        cache=cache,
+        fetcher=fetcher,
+        event_bus=event_bus,
+    )
 
 
 def get_ai_workflow_service(
     queue: JobQueue = Depends(get_job_queue),
+    inference_port: StructuredInferencePort = Depends(get_inference_port),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> AIWorkflowService:
-    return AIWorkflowService(queue=queue)
+    return AIWorkflowService(
+        queue=queue,
+        inference_port=inference_port,
+        event_bus=event_bus,
+    )
 
 
 def get_pipeline_simulator_service(

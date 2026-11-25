@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { SceneDepthLayerName } from '../ecs/World';
-import type { ThemePalette } from '../types';
+import type { AtmosphereMode, ThemePalette } from '../types';
 
 /**
  * SceneComposerKit: Reusable procedural 3D ASCII scene composition toolkit.
@@ -28,6 +28,7 @@ export interface NeonMaterialBank {
   poleMetal: THREE.MeshStandardMaterial;
   cableMetal: THREE.MeshStandardMaterial;
   updatePalette: (palette: ThemePalette) => void;
+  setAtmosphere: (atmosphere: AtmosphereMode, palette: ThemePalette) => void;
 }
 
 export class SceneDepthRig {
@@ -147,6 +148,55 @@ export class SceneComposerKit {
         amber.emissive.set(next.warmCore);
         cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.22);
       },
+      setAtmosphere(atmosphere: AtmosphereMode, next: ThemePalette) {
+        cyan.color.set(next.coolAmbient);
+        cyan.emissive.set(next.coolAmbient);
+        magenta.color.set(next.warmLight);
+        magenta.emissive.set(next.warmLight);
+        amber.color.set(next.warmCore);
+        amber.emissive.set(next.warmCore);
+
+        if (atmosphere === 'day') {
+          // Daytime sunlit steel & concrete facades with subtle architectural accent trim
+          cyan.emissiveIntensity = 1.15;
+          magenta.emissiveIntensity = 1.15;
+          amber.emissiveIntensity = 1.25;
+          hullDark.color.setHex(0x283a52);
+          hullDark.roughness = 0.62;
+          hullMid.color.setHex(0x3a5270);
+          hullMid.roughness = 0.65;
+          poleMetal.color.setHex(0x314660);
+          poleMetal.roughness = 0.56;
+          cableMetal.color.setHex(0x38506e);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.08);
+        } else if (atmosphere === 'rain') {
+          // Storm-slicked wet metallic hulls & intense neon bloom
+          cyan.emissiveIntensity = 2.95;
+          magenta.emissiveIntensity = 2.95;
+          amber.emissiveIntensity = 2.85;
+          hullDark.color.setHex(0x0d1626);
+          hullDark.roughness = 0.34;
+          hullMid.color.setHex(0x16243b);
+          hullMid.roughness = 0.38;
+          poleMetal.color.setHex(0x152236);
+          poleMetal.roughness = 0.34;
+          cableMetal.color.setHex(0x223654);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.26);
+        } else {
+          // Clear nocturnal avenue: deep crisp hulls & vibrant balanced neon
+          cyan.emissiveIntensity = 2.65;
+          magenta.emissiveIntensity = 2.65;
+          amber.emissiveIntensity = 2.55;
+          hullDark.color.setHex(0x101929);
+          hullDark.roughness = 0.5;
+          hullMid.color.setHex(0x19273d);
+          hullMid.roughness = 0.54;
+          poleMetal.color.setHex(0x182538);
+          poleMetal.roughness = 0.48;
+          cableMetal.color.setHex(0x263b59);
+          cableMetal.emissive.set(next.coolAmbient).multiplyScalar(0.22);
+        }
+      },
     };
   }
 
@@ -211,6 +261,8 @@ export class SceneComposerKit {
       bank.hullDark
     );
     crown.position.y = spec.height + crownH * 0.5;
+    crown.castShadow = true;
+    crown.receiveShadow = true;
     bGroup.add(crown);
 
     // Rooftop glowing neon cornices ('_' horizontal silhouette lines)
@@ -286,6 +338,8 @@ export class SceneComposerKit {
         secondaryMat
       );
       awning.position.set(faceSignX * (spec.width * 0.5 + 0.44), 1.38, 0);
+      awning.castShadow = true;
+      awning.receiveShadow = true;
       bGroup.add(awning);
 
       const shopWindow = new THREE.Mesh(
@@ -366,6 +420,7 @@ export class SceneComposerKit {
       pMat
     );
     vSign.position.set(spec.inwardSign * 0.7, 0, 0);
+    vSign.castShadow = true;
     group.add(vSign);
 
     // Dark horizontal glyph-divider slats so the sign reads as segmented neon typography rather than a flat blob
@@ -409,6 +464,8 @@ export class SceneComposerKit {
 
     const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.32, 0.34), bank.hullDark);
     plinth.position.y = 0.16;
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
     group.add(plinth);
 
     const mast = new THREE.Mesh(
@@ -417,6 +474,7 @@ export class SceneComposerKit {
     );
     mast.position.y = spec.height * 0.5;
     mast.castShadow = true;
+    mast.receiveShadow = true;
     group.add(mast);
 
     // Mid-mast utility transformer box
@@ -425,14 +483,17 @@ export class SceneComposerKit {
       bank.hullMid
     );
     transformer.position.set(-inward * 0.12, spec.height * 0.62, 0);
+    transformer.castShadow = true;
     group.add(transformer);
 
     const crossArm = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.11, 0.12), bank.poleMetal);
     crossArm.position.set(inward * 0.58, spec.height - 0.18, 0);
+    crossArm.castShadow = true;
     group.add(crossArm);
 
     const lampHead = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.13, 0.26), lampNeon);
     lampHead.position.set(inward * 1.0, spec.height - 0.28, 0);
+    lampHead.castShadow = true;
     group.add(lampHead);
 
     return group;

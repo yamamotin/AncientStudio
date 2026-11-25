@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import type { PointerSnapshot } from '../input/PointerInput';
-import type { EngineConfig, ThemePalette } from '../types';
+import type { AtmosphereMode, EngineConfig } from '../types';
 
 /**
- * VfxController: Cyberpunk environmental atmosphere, wind-driven glowing rain streaks,
- * drifting street steam/embers, camera parallax (mouse + touch), and interactive cursor spotlight.
- * Zero per-frame heap allocations.
+ * VfxController: Unified scenario atmosphere, mode-gated wind-driven rain streaks ('rain'),
+ * subtle ambient vapor/motes ('night' / 'day'), camera parallax (mouse + touch on playground),
+ * and interactive cursor spotlight. Zero per-frame heap allocations.
  */
 
 type ParticleKind = 'rain' | 'spark' | 'steam';
@@ -35,6 +35,7 @@ export class VfxController {
   private particleColors: Float32Array | null = null;
   private particleSeeds: ParticleSeed[] = [];
   private centerOffset: [number, number] = [0, -4.6];
+  private currentAtmosphere: AtmosphereMode = 'night';
 
   constructor(options: {
     scene: THREE.Scene;
@@ -45,13 +46,13 @@ export class VfxController {
     particleCount?: number;
   }) {
     this.mode = options.config.mode;
+    this.currentAtmosphere = options.config.atmosphere ?? 'night';
     this.baseCameraPos.set(...options.baseCameraPos);
     this.lookAtTarget.set(...options.lookAtTarget);
     if (options.particleOrigin) {
       this.centerOffset = options.particleOrigin;
     }
 
-    // Interactive cursor/touch cyber-spotlight
     this.cursorLight = new THREE.PointLight(
       new THREE.Color(options.config.palette.cursorLight),
       options.config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 13.5),
@@ -63,28 +64,24 @@ export class VfxController {
 
     const count = options.particleCount ?? (this.mode === 'mascot' ? 16 : 240);
     if (count > 0) {
-      this.buildParticles(options.scene, options.config.palette, count);
+      this.buildParticles(options.scene, options.config, count);
     }
   }
 
-  private buildParticles(scene: THREE.Scene, palette: ThemePalette, count: number): void {
+  private buildParticles(scene: THREE.Scene, config: EngineConfig, count: number): void {
     this.particlePositions = new Float32Array(count * 3);
     this.particleColors = new Float32Array(count * 3);
-
-    const cCyan = new THREE.Color(palette.coolAmbient).lerp(new THREE.Color('#D8FFFF'), 0.28);
-    const cMagenta = new THREE.Color(palette.warmLight).lerp(new THREE.Color('#FFD0EB'), 0.22);
-    const cAmber = new THREE.Color(palette.warmCore);
 
     for (let i = 0; i < count; i++) {
       let kind: ParticleKind = 'spark';
       if (this.mode === 'playground') {
         const mod = i % 10;
-        if (mod < 6) {
-          kind = 'rain'; // 60% glowing wind-slanted rain droplets
-        } else if (mod < 8) {
-          kind = 'steam'; // 20% wind-swept street-vent mist/embers
+        if (mod < 7) {
+          kind = 'rain'; // 70% wind-slanted rain streaks (active ONLY when atmosphere === 'rain')
+        } else if (mod < 9) {
+          kind = 'steam'; // 20% street-vent vapor / sunlit motes
         } else {
-          kind = 'spark'; // 20% rising holo-sparks around portal & signs
+          kind = 'spark'; // 10% rising holo-sparks around portal
         }
       }
 
@@ -120,7 +117,7 @@ export class VfxController {
 
       const speedY =
         kind === 'rain'
-          ? -(10.8 + (i % 6) * 1.85)
+          ? -(11.4 + (i % 6) * 1.9)
           : kind === 'steam'
             ? 0.65 + (i % 4) * 0.18
             : 0.55 + (i % 5) * 0.16;
@@ -141,28 +138,10 @@ export class VfxController {
 
       this.particlePositions[i * 3] =
         kind === 'spark' ? Math.cos(angle) * radius + this.centerOffset[0] : spawnX;
-      this.particlePositions[i * 3 + 1] = y;
+      this.particlePositions[i * 3 + 1] =
+        kind === 'rain' && config.atmosphere !== 'rain' ? -120 : y;
       this.particlePositions[i * 3 + 2] =
         kind === 'spark' ? Math.sin(angle) * radius + this.centerOffset[1] : spawnZ;
-
-      const c =
-        kind === 'rain'
-          ? i % 5 === 0
-            ? cMagenta
-            : i % 7 === 0
-              ? cAmber
-              : cCyan
-          : kind === 'steam'
-            ? i % 2 === 0
-              ? cCyan
-              : cMagenta
-            : i % 2 === 0
-              ? cAmber
-              : cMagenta;
-
-      this.particleColors[i * 3] = c.r;
-      this.particleColors[i * 3 + 1] = c.g;
-      this.particleColors[i * 3 + 2] = c.b;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -173,13 +152,69 @@ export class VfxController {
       size: this.mode === 'mascot' ? 0.12 : 0.28,
       vertexColors: true,
       transparent: true,
-      opacity: this.mode === 'mascot' ? 0.65 : 0.94,
+      opacity: this.mode === 'mascot' ? 0.62 : 0.92,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
     this.particles = new THREE.Points(geo, mat);
     scene.add(this.particles);
+    this.syncParticleAtmosphere(config);
+  }
+
+  private syncParticleAtmosphere(config: EngineConfig): void {
+    this.currentAtmosphere = config.atmosphere ?? 'night';
+    if (!this.particles || !this.particleColors || !this.particlePositions) return;
+
+    const isRain = this.mode === 'playground' && this.currentAtmosphere === 'rain';
+    const isDay = this.mode === 'playground' && this.currentAtmosphere === 'day';
+
+    const cCyan = new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#E2FFFF'), 0.32);
+    const cMagenta = new THREE.Color(config.palette.warmLight).lerp(new THREE.Color('#FFD0EB'), 0.24);
+    const cAmber = new THREE.Color(config.palette.warmCore);
+    const ambientScale = isDay ? 0.35 : isRain ? 1.0 : 0.65;
+
+    for (let i = 0; i < this.particleSeeds.length; i++) {
+      const s = this.particleSeeds[i]!;
+      if (s.kind === 'rain') {
+        if (!isRain) {
+          this.particleColors[i * 3] = 0;
+          this.particleColors[i * 3 + 1] = 0;
+          this.particleColors[i * 3 + 2] = 0;
+          this.particlePositions[i * 3 + 1] = -120;
+          continue;
+        }
+        const rc = i % 5 === 0 ? cMagenta : i % 7 === 0 ? cAmber : cCyan;
+        this.particleColors[i * 3] = rc.r;
+        this.particleColors[i * 3 + 1] = rc.g;
+        this.particleColors[i * 3 + 2] = rc.b;
+      } else {
+        const ac =
+          s.kind === 'steam'
+            ? isDay
+              ? cAmber
+              : i % 2 === 0
+                ? cCyan
+                : cMagenta
+            : i % 2 === 0
+              ? cAmber
+              : cMagenta;
+        this.particleColors[i * 3] = ac.r * ambientScale;
+        this.particleColors[i * 3 + 1] = ac.g * ambientScale;
+        this.particleColors[i * 3 + 2] = ac.b * ambientScale;
+      }
+    }
+
+    const mat = this.particles.material as THREE.PointsMaterial;
+    if (this.mode === 'playground') {
+      mat.size = isRain ? 0.29 : isDay ? 0.2 : 0.24;
+      mat.opacity = isRain ? 0.95 : isDay ? 0.45 : 0.76;
+    }
+
+    const colorAttr = this.particles.geometry.getAttribute('color') as THREE.BufferAttribute;
+    colorAttr.needsUpdate = true;
+    const posAttr = this.particles.geometry.getAttribute('position') as THREE.BufferAttribute;
+    posAttr.needsUpdate = true;
   }
 
   public update(
@@ -190,34 +225,24 @@ export class VfxController {
     config: EngineConfig
   ): void {
     const damp = 1 - Math.exp(-config.parallaxSmoothing * dt);
-    const targetX = pointer.active ? pointer.normX : 0;
-    const targetY = pointer.active ? pointer.normY : 0;
-    this.smoothedPointer.x += (targetX - this.smoothedPointer.x) * damp;
-    this.smoothedPointer.y += (targetY - this.smoothedPointer.y) * damp;
 
-    this.smoothedDrag.x += (pointer.dragYaw - this.smoothedDrag.x) * damp;
-    this.smoothedDrag.y += (pointer.dragPitch - this.smoothedDrag.y) * damp;
-
-    // 1. Camera Parallax + Touch/Drag Street Orbit + Subtle Breathing Sway
-    const amp = config.parallaxIntensity;
+    // 1. Camera Parallax (Playground only — Mascot Tux stage remains 100% pointer-inert!)
     if (this.mode === 'mascot') {
-      const breathY = Math.sin(elapsed * 0.85) * 0.04;
-      camera.position.set(
-        this.baseCameraPos.x + this.smoothedPointer.x * amp * 0.25,
-        this.baseCameraPos.y + this.smoothedPointer.y * amp * 0.16 + breathY,
-        this.baseCameraPos.z
-      );
+      camera.position.set(this.baseCameraPos.x, this.baseCameraPos.y, this.baseCameraPos.z);
       camera.lookAt(this.lookAtTarget);
-
-      this.cursorLight.position.set(
-        this.smoothedPointer.x * 2.8,
-        1.25 + this.smoothedPointer.y * 1.4,
-        2.6
-      );
+      this.cursorLight.position.set(0, 1.25, 2.6);
     } else {
+      const targetX = pointer.active ? pointer.normX : 0;
+      const targetY = pointer.active ? pointer.normY : 0;
+      this.smoothedPointer.x += (targetX - this.smoothedPointer.x) * damp;
+      this.smoothedPointer.y += (targetY - this.smoothedPointer.y) * damp;
+
+      this.smoothedDrag.x += (pointer.dragYaw - this.smoothedDrag.x) * damp;
+      this.smoothedDrag.y += (pointer.dragPitch - this.smoothedDrag.y) * damp;
+
+      const amp = config.parallaxIntensity;
       const idleSwayX = Math.sin(elapsed * 0.35) * 0.3;
       const idleSwayY = Math.cos(elapsed * 0.28) * 0.12;
-      // Touch & mouse drag seamlessly pan/orbit the street camera across the avenue perspective!
       const orbitOffsetX = Math.sin(this.smoothedDrag.x * 0.55) * 2.35;
       const orbitOffsetY = -this.smoothedDrag.y * 1.45;
 
@@ -242,12 +267,12 @@ export class VfxController {
       );
     }
 
-    // 2. Wind-Driven Glowing Rain Streaks, Street-Vent Steam & Rising Holo-Sparks
+    // 2. Mode-Aware Rain Streaks ('rain' only), Street Vapor & Rising Sparks
     if (this.particles && this.particlePositions) {
       const windStr = config.windStrength ?? 1.0;
-      // Dynamic gusting lateral street wind
       const windGust =
         (0.75 + 0.38 * Math.sin(elapsed * 0.68) + 0.18 * Math.sin(elapsed * 1.95)) * windStr;
+      const rainEnabled = this.mode === 'playground' && (config.atmosphere ?? 'night') === 'rain';
 
       const count = this.particleSeeds.length;
       for (let i = 0; i < count; i++) {
@@ -255,10 +280,13 @@ export class VfxController {
         const span = s.maxY - s.minY;
 
         if (s.kind === 'rain') {
+          if (!rainEnabled) {
+            this.particlePositions[i * 3 + 1] = -120;
+            continue;
+          }
           const fall = (((s.maxY + elapsed * s.speedY - i * 0.73) % span) + span) % span;
           const y = s.minY + fall;
           const dropTravel = s.maxY - y;
-          // Wind-driven diagonal rain slant + subtle gust wave across the urban canyon
           const windOffset = dropTravel * 0.16 * windGust * s.windSensitivity;
           const wrappedX = ((((s.spawnX + windOffset + 14.0) % 28.0) + 28.0) % 28.0) - 14.0;
 
@@ -268,7 +296,6 @@ export class VfxController {
         } else if (s.kind === 'steam') {
           const rise = (((elapsed * s.speedY + i * 0.57) % span) + span) % span;
           const y = s.minY + rise;
-          // Rising street-grate vapor drifts downwind across the illuminated avenue
           const driftX = rise * 0.72 * windGust * s.windSensitivity + Math.sin(elapsed * 1.4 + i) * 0.25;
           this.particlePositions[i * 3] = s.spawnX + driftX;
           this.particlePositions[i * 3 + 1] = y;
@@ -290,38 +317,16 @@ export class VfxController {
   }
 
   public applyConfig(config: EngineConfig): void {
+    const dayScale = config.atmosphere === 'day' ? 0.55 : 1.0;
     this.cursorLight.color.set(config.palette.cursorLight);
     this.cursorLight.intensity =
-      config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 13.5);
+      config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 13.5 * dayScale);
 
-    if (this.particles && this.particleColors) {
-      const cCyan = new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#D8FFFF'), 0.28);
-      const cMagenta = new THREE.Color(config.palette.warmLight).lerp(new THREE.Color('#FFD0EB'), 0.22);
-      const cAmber = new THREE.Color(config.palette.warmCore);
+    this.syncParticleAtmosphere(config);
+  }
 
-      for (let i = 0; i < this.particleSeeds.length; i++) {
-        const s = this.particleSeeds[i]!;
-        const c =
-          s.kind === 'rain'
-            ? i % 5 === 0
-              ? cMagenta
-              : i % 7 === 0
-                ? cAmber
-                : cCyan
-            : s.kind === 'steam'
-              ? i % 2 === 0
-                ? cCyan
-                : cMagenta
-              : i % 2 === 0
-                ? cAmber
-                : cMagenta;
-        this.particleColors[i * 3] = c.r;
-        this.particleColors[i * 3 + 1] = c.g;
-        this.particleColors[i * 3 + 2] = c.b;
-      }
-      const colorAttr = this.particles.geometry.getAttribute('color') as THREE.BufferAttribute;
-      colorAttr.needsUpdate = true;
-    }
+  public isRainActive(): boolean {
+    return this.mode === 'playground' && this.currentAtmosphere === 'rain';
   }
 
   public getCursorLight(): THREE.PointLight {

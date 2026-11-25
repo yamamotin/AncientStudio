@@ -16,6 +16,8 @@ from app.queue.models import JobEnvelope, JobStatus, QueueMetrics
 class InMemoryJobQueue:
     """Bounded async job queue supporting idempotent enqueue, retries, and DLQ inspection."""
 
+    backend_name = "memory"
+
     def __init__(
         self,
         *,

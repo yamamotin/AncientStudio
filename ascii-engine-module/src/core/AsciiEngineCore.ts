@@ -18,11 +18,21 @@ import { TuxEntityFactory } from '../entities/TuxEntityFactory';
 import { KeyboardInput } from '../input/KeyboardInput';
 import { PointerInput } from '../input/PointerInput';
 import { AsciiPostProcessor } from '../shaders/AsciiPostProcessor';
+import {
+  applyObjectOutline,
+  clearObjectOutline,
+  DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
+  getObjectOutlineState,
+} from '../shaders/objectOutline';
 import type {
   EngineConfig,
   EngineLifecycleState,
   EngineStats,
+  ObjectOutlineHandle,
+  ObjectOutlineOptions,
+  OutlineTargetSelector,
   PartialEngineConfig,
+  ResolvedObjectOutlineState,
   ResolutionTier,
 } from '../types';
 import { VfxController } from '../vfx/VfxController';
@@ -51,6 +61,8 @@ export class AsciiEngineCore {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
+  private lastAutoPlaygroundFov: number | null = null;
+  private readonly outlinedTargets = new Set<THREE.Object3D>();
   private postProcessor: AsciiPostProcessor | null = null;
 
   private loop: EngineLoop | null = null;
@@ -143,18 +155,19 @@ export class AsciiEngineCore {
       // 2. Initialize Lifecycle, Input, and ECS World
       const lifecycle = new LifecycleManager(this.container);
       const pointerInput = new PointerInput(this.container, {
-        trackWindowHover: this.config.mode === 'mascot',
+        trackWindowHover: false,
       });
       const keyboardInput = new KeyboardInput({
         enabled: this.config.enableKeyboard,
         focusTarget: this.container,
       });
 
-      pointerInput.attach();
-      keyboardInput.attach();
-
-      // Passive container pointermove hook preserving backward-compatible event contract
-      this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+      // Mascot stage (`#penguin-stage`) stays 100% pointer/touch-inert; only playground attaches pointer listeners
+      if (this.config.mode !== 'mascot') {
+        pointerInput.attach();
+        keyboardInput.attach();
+        this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+      }
 
       lifecycle.registerCleanup(() => {
         this.container.removeEventListener('pointermove', this.onPassivePointerMoveBound);
@@ -173,7 +186,7 @@ export class AsciiEngineCore {
       this.systemRunner = systemRunner;
 
       if (this.config.mode === 'mascot') {
-        this.initMascotStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
+        this.initMascotStage(ecsWorld, systemRunner);
       } else {
         this.initPlaygroundStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
       }
@@ -229,10 +242,12 @@ export class AsciiEngineCore {
     this.scene = built.scene;
     this.primaryEntityId = built.avatarEntityId;
 
-    const camera = new THREE.PerspectiveCamera(46, 16 / 9, 0.5, 110);
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 46;
+    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.5, 110);
     camera.position.set(...mapDef.cameraAnchor);
     camera.lookAt(...mapDef.cameraLookAt);
     this.camera = camera;
+    this.lastAutoPlaygroundFov = typeof this.config.fov === 'number' ? null : initialFov;
 
     this.vfx = new VfxController({
       scene: built.scene,
@@ -259,9 +274,7 @@ export class AsciiEngineCore {
 
   private initMascotStage(
     ecsWorld: World,
-    systemRunner: SystemRunner,
-    pointerInput: PointerInput,
-    keyboardInput: KeyboardInput
+    systemRunner: SystemRunner
   ): void {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(this.config.palette.background);
@@ -273,6 +286,13 @@ export class AsciiEngineCore {
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.35);
     keyLight.position.set(-2.6, 4.2, 4.8);
+    if (this.config.enableShadows) {
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.width = 512;
+      keyLight.shadow.mapSize.height = 512;
+      keyLight.shadow.bias = -0.0005;
+      keyLight.shadow.normalBias = 0.02;
+    }
     scene.add(keyLight);
 
     const rimLight = new THREE.PointLight(new THREE.Color(this.config.palette.warmCore), 10.5, 12, 1.5);
@@ -282,7 +302,8 @@ export class AsciiEngineCore {
     const cameraAnchor: [number, number, number] = [0, 1.02, 4.15];
     const lookTarget: [number, number, number] = [0, 0.92, 0];
 
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.3, 40);
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 38;
+    const camera = new THREE.PerspectiveCamera(initialFov, 1, 0.3, 40);
     camera.position.set(...cameraAnchor);
     camera.lookAt(...lookTarget);
     this.camera = camera;
@@ -303,8 +324,8 @@ export class AsciiEngineCore {
       particleCount: 16,
     });
 
+    // No InputSystem on mascot stage: Tux stays pointer-free and spins smoothly on horizontal yaw
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
       .addSystem(new MovementRotationSystem(), 20)
       .addSystem(new AnimationSystem(), 30)
       .addSystem(new RenderSyncSystem(), 40);
@@ -351,40 +372,27 @@ export class AsciiEngineCore {
 
     if (!this.renderer || !this.scene || !this.postProcessor) return;
 
+    if (this.camera && typeof partialConfig.fov === 'number') {
+      this.camera.fov = partialConfig.fov;
+      this.camera.updateProjectionMatrix();
+      this.lastAutoPlaygroundFov = null;
+    }
+
     if (prevShadows !== this.config.enableShadows) {
       this.renderer.shadowMap.enabled = this.config.enableShadows;
       this.renderer.shadowMap.needsUpdate = true;
     }
 
-    // Apply live palette updates to background, fog, neon architecture, lights & water uniforms
+    // Apply live atmosphere & palette updates to sky, fog, architecture, shadows & boulevard uniforms
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.set(this.config.palette.background);
     }
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.set(this.config.palette.background);
-    }
 
     if (this.builtPlayground) {
-      const p = this.config.palette;
-      this.builtPlayground.ambientHemi.color.set(p.coolAmbient);
-      this.builtPlayground.moonDirLight.color
-        .set(p.coolAmbient)
-        .lerp(new THREE.Color('#D8F6FF'), 0.4);
-      this.builtPlayground.torchLight.color.set(p.warmLight);
-
-      // Update shared cyberpunk architectural neon material bank dynamically on preset switch
-      this.builtPlayground.materialBank.updatePalette(p);
-
-      this.builtPlayground.brazierLights.forEach((bl, idx) => {
-        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
-      });
-
-      const u = this.builtPlayground.waterMaterial.uniforms;
-      u.uDeepColor?.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
-      u.uShallowColor?.value.set(p.coolAmbient).lerp(new THREE.Color('#8be4ff'), 0.32);
-      u.uWarmColor?.value.set(p.warmLight);
-      u.uWarmCoreColor?.value.set(p.warmCore);
-      u.uCursorColor?.value.set(p.cursorLight);
+      PlaygroundSceneBuilder.applyAtmosphere(this.builtPlayground, this.config);
+      this.renderer.shadowMap.needsUpdate = true;
+    } else if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.set(this.config.palette.background);
     }
 
     this.vfx?.applyConfig(this.config);
@@ -426,6 +434,11 @@ export class AsciiEngineCore {
     this.systemRunner?.clear();
     this.systemRunner = null;
     this.windSystem = null;
+
+    for (const outlined of this.outlinedTargets) {
+      clearObjectOutline(outlined);
+    }
+    this.outlinedTargets.clear();
 
     // Dispose ECS-owned dynamic entities & lights cleanly before sweeping remaining scene graph
     this.ecsWorld?.clear(true);
@@ -499,6 +512,109 @@ export class AsciiEngineCore {
     return { yaw: t.rotY, pitch: t.rotX };
   }
 
+  /**
+   * Resolves a target selector (`THREE.Object3D`, `'primary'`, object name in scene, or ECS `EntityId`)
+   * to its underlying `THREE.Object3D` without applying any global scene effects.
+   */
+  private resolveOutlineTarget(target: OutlineTargetSelector): THREE.Object3D | null {
+    if (!target && target !== 0) return null;
+
+    if (typeof (target as THREE.Object3D).traverse === 'function') {
+      return target as THREE.Object3D;
+    }
+
+    if (target === 'primary') {
+      if (this.ecsWorld && this.primaryEntityId !== null) {
+        return this.ecsWorld.getComponent(this.primaryEntityId, 'Renderable')?.object3D ?? null;
+      }
+      return null;
+    }
+
+    if (typeof target === 'number') {
+      return this.ecsWorld?.getComponent(target as EntityId, 'Renderable')?.object3D ?? null;
+    }
+
+    if (typeof target === 'string' && this.scene) {
+      return this.scene.getObjectByName(target) ?? null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Applies or updates a configurable silhouette outline on a specific target object on demand.
+   * Accepts `thickness`/`width`, `enabled`/`visible`, `intensity`, `opacity`, and an optional
+   * `highlightColor`/`color` (defaulting to the engine's `palette.cursorLight` or `#7DF9FF` when
+   * omitted on first application so dark objects stand out against dark backgrounds).
+   */
+  public setObjectOutline(
+    target: OutlineTargetSelector,
+    options?: ObjectOutlineOptions
+  ): ObjectOutlineHandle | null {
+    if (this.state === 'destroyed') return null;
+
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return null;
+
+    const hasExisting = getObjectOutlineState(resolvedObj) !== null;
+    const mergedOptions: ObjectOutlineOptions = { ...(options ?? {}) };
+    if (
+      !hasExisting &&
+      mergedOptions.highlightColor === undefined &&
+      mergedOptions.color === undefined
+    ) {
+      mergedOptions.highlightColor =
+        this.config.palette?.cursorLight || DEFAULT_OUTLINE_HIGHLIGHT_COLOR;
+    }
+
+    const handle = applyObjectOutline(resolvedObj, mergedOptions);
+    this.outlinedTargets.add(resolvedObj);
+
+    if (this.state === 'paused') {
+      this.loop?.stepOnce(0);
+    }
+    return handle;
+  }
+
+  /**
+   * Removes and disposes the outline from a specific target (or from all outlined targets in this
+   * engine instance when `target` is omitted). Returns the number of outline shell meshes removed.
+   */
+  public clearObjectOutline(target?: OutlineTargetSelector): number {
+    if (target === undefined) {
+      let total = 0;
+      for (const obj of this.outlinedTargets) {
+        total += clearObjectOutline(obj);
+      }
+      this.outlinedTargets.clear();
+      if (this.state === 'paused') {
+        this.loop?.stepOnce(0);
+      }
+      return total;
+    }
+
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return 0;
+
+    const removed = clearObjectOutline(resolvedObj);
+    this.outlinedTargets.delete(resolvedObj);
+    if (this.state === 'paused') {
+      this.loop?.stepOnce(0);
+    }
+    return removed;
+  }
+
+  /**
+   * Returns the current outline configuration snapshot for `target`, or `null` if not outlined.
+   */
+  public getObjectOutlineState(
+    target: OutlineTargetSelector
+  ): ResolvedObjectOutlineState | null {
+    const resolvedObj = this.resolveOutlineTarget(target);
+    if (!resolvedObj) return null;
+    return getObjectOutlineState(resolvedObj);
+  }
+
   private renderFrame(dt: number, elapsed: number): void {
     if (!this.renderer || !this.scene || !this.camera || !this.postProcessor) return;
 
@@ -524,7 +640,7 @@ export class AsciiEngineCore {
 
     this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
 
-    // 3. Sync Playground Reflective Neon Canal Uniforms
+    // 3. Sync Playground Boulevard Reflections, Real-Time PCF Shadow Map & Protagonist Grounding
     if (this.builtPlayground) {
       const u = this.builtPlayground.waterMaterial.uniforms;
       if (u.uTime) u.uTime.value = elapsed;
@@ -536,6 +652,26 @@ export class AsciiEngineCore {
           this.builtPlayground.torchLight.position.z,
           this.builtPlayground.torchLight.intensity
         );
+      }
+
+      // Bind live DirectionalLight shadow map & projection matrix so street surface receives real-time shadows
+      const dirShadow = this.builtPlayground.moonDirLight.shadow;
+      if (this.config.enableShadows && dirShadow.map) {
+        if (u.uDirShadowMap) u.uDirShadowMap.value = dirShadow.map.texture;
+        if (u.uDirShadowMatrix) u.uDirShadowMatrix.value.copy(dirShadow.matrix);
+        if (u.uShadowMapSize) {
+          u.uShadowMapSize.value.set(dirShadow.mapSize.width, dirShadow.mapSize.height);
+        }
+        if (u.uShadowEnabled) u.uShadowEnabled.value = 1.0;
+      } else if (u.uShadowEnabled) {
+        u.uShadowEnabled.value = 0.0;
+      }
+
+      if (this.ecsWorld && u.uAvatarPos) {
+        const avT = this.ecsWorld.getComponent(this.builtPlayground.avatarEntityId, 'Transform');
+        if (avT) {
+          u.uAvatarPos.value.set(avT.x, avT.y, avT.z);
+        }
       }
 
       if (this.vfx) {
@@ -627,9 +763,20 @@ export class AsciiEngineCore {
 
     const aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
     this.camera.aspect = aspect;
-    // Slightly widen FOV on narrow portrait viewports or expand vista cleanly on ultrawide/fullscreen
-    if (this.config.mode === 'playground') {
-      this.camera.fov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+    // Preserve explicit custom FOV (e.g. 106°) when configured via `config.fov` or mutated on `camera.fov`;
+    // otherwise apply responsive default playground FOV
+    if (typeof this.config.fov === 'number') {
+      this.camera.fov = this.config.fov;
+      this.lastAutoPlaygroundFov = null;
+    } else if (this.config.mode === 'playground') {
+      const wasCustomizedExternally =
+        this.lastAutoPlaygroundFov !== null &&
+        Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
+      if (!wasCustomizedExternally) {
+        const autoFov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+        this.camera.fov = autoFov;
+        this.lastAutoPlaygroundFov = autoFov;
+      }
     }
     this.camera.updateProjectionMatrix();
 

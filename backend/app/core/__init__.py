@@ -19,6 +19,12 @@ from app.core.logging import (
     configure_logging,
     get_current_correlation_id,
 )
+from app.core.middleware import (
+    RateLimitMiddleware,
+    ScopedQuotaEvaluation,
+    ScopedRateLimiter,
+    SecurityHeadersMiddleware,
+)
 from app.core.security import (
     ApiKeyVerifier,
     ApiPrincipal,
@@ -48,9 +54,13 @@ __all__ = [
     "Problem",
     "RateLimitDecision",
     "RateLimitExceededError",
+    "RateLimitMiddleware",
     "RateLimitPolicy",
     "ResourceNotFoundError",
     "Scope",
+    "ScopedQuotaEvaluation",
+    "ScopedRateLimiter",
+    "SecurityHeadersMiddleware",
     "ServiceUnavailableError",
     "Settings",
     "SlidingWindowRateLimiter",

@@ -1,0 +1,76 @@
+{
+  "name": "ai-anomaly-alert",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-anomaly-alert",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-ai-alert",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "ai-anomaly-alert"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ Boolean($json.requires_alert) }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "filter-alert-severity",
+      "name": "Check Alert Threshold",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const evt = $input.first().json;\nreturn [{\n  json: {\n    executionId: $execution.id,\n    status: 'running',\n    workflowSlug: evt.workflow_slug ?? 'unknown',\n    severity: evt.severity ?? 'high',\n    dispatchedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "format-alert",
+      "name": "Format Incident Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "respond-alert-202",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [880, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Check Alert Threshold", "type": "main", "index": 0 }]]
+    },
+    "Check Alert Threshold": {
+      "main": [
+        [{ "node": "Format Incident Payload", "type": "main", "index": 0 }],
+        [{ "node": "Respond 202", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Incident Payload": {
+      "main": [[{ "node": "Respond 202", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

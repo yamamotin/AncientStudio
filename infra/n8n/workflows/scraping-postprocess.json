@@ -1,0 +1,76 @@
+{
+  "name": "scraping-postprocess",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scraping-postprocess",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-scrape",
+        "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "scraping-postprocess"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.content_sha256 ?? '' }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-digest",
+      "name": "Verify Content Digest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const doc = $input.first().json;\nreturn [{\n  json: {\n    executionId: $execution.id,\n    status: 'completed',\n    targetUrl: doc.final_url ?? doc.url ?? null,\n    title: doc.title ?? 'untitled',\n    contentSha256: doc.content_sha256,\n    indexedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "enrich-scrape",
+      "name": "Normalize Scraped Artifact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "respond-scrape-202",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [880, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Verify Content Digest", "type": "main", "index": 0 }]]
+    },
+    "Verify Content Digest": {
+      "main": [
+        [{ "node": "Normalize Scraped Artifact", "type": "main", "index": 0 }],
+        [{ "node": "Respond 202", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize Scraped Artifact": {
+      "main": [[{ "node": "Respond 202", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

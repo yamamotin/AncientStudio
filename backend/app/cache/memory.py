@@ -23,6 +23,8 @@ class _CacheItem:
 class InMemoryTTLCache:
     """Bounded LRU-ordered TTL cache backed by a monotonic clock."""
 
+    backend_name = "memory"
+
     def __init__(
         self,
         default_ttl_seconds: int = 300,

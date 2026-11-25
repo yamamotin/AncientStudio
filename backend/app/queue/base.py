@@ -15,6 +15,8 @@ EventSubscriber = Callable[[DomainEvent], Awaitable[None]]
 class JobQueue(Protocol):
     """Queue backend contract (in-memory async locally, Redis Streams/Broker in production)."""
 
+    backend_name: str
+
     async def enqueue(
         self,
         topic: str,

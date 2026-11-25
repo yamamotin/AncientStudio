@@ -44,6 +44,7 @@ class InvoiceOut(BaseModel):
 
 
 class CacheTelemetryOut(BaseModel):
+    backend: str = "memory"
     hits: int
     misses: int
     sets: int
@@ -59,6 +60,9 @@ class GatewayCapabilitiesOut(BaseModel):
     environment: str
     python_runtime: str
     architecture: Literal["modular-monolith-event-driven"]
+    cache_backend: str
+    queue_backend: str
+    workers_running: bool
     domains: list[str]
     worker_topics: list[str]
     cache: CacheTelemetryOut

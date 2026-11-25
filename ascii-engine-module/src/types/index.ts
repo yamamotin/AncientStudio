@@ -1,3 +1,5 @@
+import type * as THREE from 'three';
+
 /**
  * Strict TypeScript definitions for the modular 3D ASCII Playground & Mascot Engine.
  * Framework-agnostic contract designed for seamless integration into any DOM host.
@@ -13,10 +15,18 @@ export type DeepPartial<T> = {
 
 /**
  * Engine scene mode:
- * - 'playground': Small interactive ASCII Realms island playground (terrain, reflective lake, bridge, shrine, beacons, avatar)
- * - 'mascot': Dedicated high-contrast 3D Linux Tux stage for [ STACK // NEOFETCH ]
+ * - 'playground': Unified Cyberpunk urban boulevard scenario (`[ ASCII REALMS // SCENE ]`)
+ * - 'mascot': Dedicated high-contrast 3D Linux Tux stage for `[ STACK // NEOFETCH ]`
  */
 export type SceneMode = 'playground' | 'mascot';
+
+/**
+ * Environmental / atmospheric states supported on the unified playground scenario:
+ * - 'day': Sunlit urban avenue with clear visibility, crisp solar shadows & dry pavement
+ * - 'night': Clear nocturnal cyberpunk boulevard with stars, neon signage & moonlight shadows
+ * - 'rain': Stormy rain-drenched cyberpunk avenue with wind-slanted rain, wet mirror puddles & raindrop ripples
+ */
+export type AtmosphereMode = 'day' | 'night' | 'rain';
 
 export type ResolutionTier = 'mobile' | 'compact' | 'desktop' | 'hd' | 'uhd';
 
@@ -107,10 +117,12 @@ export interface LifecycleCallbacks {
  * Complete engine configuration contract.
  */
 export interface EngineConfig {
-  /** Scene mode ('playground' for ASCII Realms island, 'mascot' for Neofetch 3D Tux) */
+  /** Scene mode ('playground' for Cyberpunk avenue, 'mascot' for Neofetch 3D Tux) */
   mode: SceneMode;
   /** Map identifier loaded by MapLoader when mode === 'playground' (default: 'cyberpunk-citadel') */
   mapId: string;
+  /** Active atmospheric/weather state on the unified scenario ('day' | 'night' | 'rain', default: 'night') */
+  atmosphere: AtmosphereMode;
   /** Enable keyboard input capture ONLY when explicitly opted-in / focused (default: false) */
   enableKeyboard: boolean;
   /** Automatically pause when container leaves viewport via IntersectionObserver (default: true) */
@@ -159,6 +171,8 @@ export interface EngineConfig {
   pauseOnHiddenTab: boolean;
   /** Font stack used to rasterize the dynamic 2D glyph atlas */
   fontFamily: string;
+  /** Optional explicit camera vertical/configured field-of-view in degrees (preserves custom FOV such as 106° across resizes when specified) */
+  fov?: number;
   /** Optional lifecycle hooks */
   callbacks?: LifecycleCallbacks;
 }
@@ -166,3 +180,71 @@ export interface EngineConfig {
 export type PartialEngineConfig = DeepPartial<EngineConfig>;
 
 export type EngineLifecycleState = 'idle' | 'running' | 'paused' | 'destroyed';
+
+/** Accepted color formats for configurable per-object outlines (`#RRGGBB`, CSS color string, hex number, or `THREE.Color`). */
+export type OutlineColorInput = string | number | THREE.Color;
+
+/**
+ * Target selector accepted by `engine.setObjectOutline(...)`, `engine.clearObjectOutline(...)`,
+ * and `engine.getObjectOutlineState(...)`:
+ * - `THREE.Object3D`: direct Three.js Mesh or Group reference
+ * - `'primary'`: active scene's primary entity (`TuxMascotRoot` in mascot mode, `CyberNetrunnerAvatar` in playground mode)
+ * - `string`: object name resolved via `scene.getObjectByName(name)`
+ * - `number`: ECS `EntityId` resolved via its `Renderable` component
+ */
+export type OutlineTargetSelector = THREE.Object3D | string | number;
+
+/**
+ * Configurable options for on-demand per-object silhouette outlines (`applyObjectOutline` / `engine.setObjectOutline`).
+ * Designed for targeted application on specific objects (never global by default), including dark objects
+ * (such as Tux's obsidian coat) over dark backgrounds via a configurable `highlightColor`.
+ */
+export interface ObjectOutlineOptions {
+  /** Whether the outline is active/visible on the target (`default: true`). */
+  enabled?: boolean;
+  /** Alias for `enabled` controlling outline visibility (`default: true`). */
+  visible?: boolean;
+  /** Outline stroke thickness / width multiplier (`default: 1.0`, clamped to `[0.05, 8.0]`). */
+  thickness?: number;
+  /** Alias for `thickness` (stroke width multiplier). */
+  width?: number;
+  /**
+   * Optional highlight color (`string | number | THREE.Color`, e.g. `'#7DF9FF'`, `'#FFD166'`, `0x64f5ff`).
+   * Ensures strong luminance & chromatic contrast for dark meshes against dark backgrounds.
+   * Defaults to `'#7DF9FF'` (or the engine's `palette.cursorLight` when called via `engine.setObjectOutline`).
+   */
+  highlightColor?: OutlineColorInput;
+  /** Alias for `highlightColor`. */
+  color?: OutlineColorInput;
+  /** Emissive luminance multiplier (`default: 1.85`, clamped to `[0.1, 6.0]`) for crisp ASCII ramp & edge pickup. */
+  intensity?: number;
+  /** Outline alpha opacity (`default: 1.0`, clamped to `[0.0, 1.0]`). */
+  opacity?: number;
+  /** Clip-space depth bias (`default: 0.0012`) preventing interior concavities from z-fighting front surfaces. */
+  depthBias?: number;
+  /** Skips showcase plinths and flat ground rings by default (`default: true`). */
+  excludePedestal?: boolean;
+  /** Optional predicate to include/exclude specific child `THREE.Mesh` instances within the target hierarchy. */
+  meshFilter?: (mesh: THREE.Mesh) => boolean;
+}
+
+/** Snapshot of the active outline configuration on a target object. */
+export interface ResolvedObjectOutlineState {
+  enabled: boolean;
+  thickness: number;
+  highlightColor: string;
+  intensity: number;
+  opacity: number;
+  depthBias: number;
+  excludePedestal: boolean;
+  outlinedMeshCount: number;
+}
+
+/** Controller handle returned when applying an outline to a specific `THREE.Object3D`. */
+export interface ObjectOutlineHandle {
+  readonly target: THREE.Object3D;
+  getState(): ResolvedObjectOutlineState;
+  update(options: ObjectOutlineOptions): ResolvedObjectOutlineState;
+  setVisible(visible: boolean): ResolvedObjectOutlineState;
+  dispose(): number;
+}

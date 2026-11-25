@@ -24,6 +24,8 @@ class CacheStats:
 class CacheBackend(Protocol):
     """Pluggable key-value cache contract (in-memory TTL locally, Redis in multi-replica)."""
 
+    backend_name: str
+
     def get(self, key: str) -> Any | None: ...
 
     def set(self, key: str, value: Any, *, ttl_seconds: int | None = None) -> None: ...
