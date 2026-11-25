@@ -1,19 +1,34 @@
-"""n8n workflow trigger and execution query tests using httpx MockTransport."""
+"""Integration tests for n8n catalog discovery, webhook triggers, and status queries."""
 
 from __future__ import annotations
 
 import httpx
-from app.config import Settings
+import pytest
+from app.core.config import Settings
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.integration
 
-def _auth(settings: Settings) -> dict[str, str]:
-    return {"X-API-Key": settings.workflow_api_token}
+
+def test_workflow_catalog_reads_versioned_n8n_json(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = client.get("/api/v1/workflows/catalog", headers=auth_headers)
+
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) >= 1
+    enrichment = next(item for item in items if item["workflow_id"] == "invoice-enrichment")
+    assert enrichment["active"] is True
+    assert enrichment["webhook_path"] == "invoice-enrichment"
+    assert enrichment["node_count"] == 3
 
 
 def test_trigger_calls_real_webhook_with_auth(
     client: TestClient,
     settings: Settings,
+    auth_headers: dict[str, str],
     use_n8n_transport,  # noqa: ANN001
 ) -> None:
     seen: dict[str, str] = {}
@@ -27,7 +42,7 @@ def test_trigger_calls_real_webhook_with_auth(
 
     response = client.post(
         "/api/v1/workflows/invoice-enrichment/run",
-        headers=_auth(settings),
+        headers=auth_headers,
         json={"payload": {"invoice": "NFE-1"}, "request_id": "req-42"},
     )
 
@@ -49,6 +64,7 @@ def test_workflow_requires_api_key(client: TestClient) -> None:
 def test_query_execution_uses_n8n_api_key(
     client: TestClient,
     settings: Settings,
+    auth_headers: dict[str, str],
     use_n8n_transport,  # noqa: ANN001
 ) -> None:
     seen: dict[str, str] = {}
@@ -58,12 +74,16 @@ def test_query_execution_uses_n8n_api_key(
         seen["key"] = request.headers.get("X-N8N-API-KEY", "")
         return httpx.Response(
             200,
-            json={"status": "success", "finished": True, "startedAt": "2026-11-23T12:00:00Z"},
+            json={
+                "status": "success",
+                "finished": True,
+                "startedAt": "2026-11-23T12:00:00Z",
+            },
         )
 
     use_n8n_transport(httpx.MockTransport(handler))
 
-    response = client.get("/api/v1/workflows/runs/exec-77", headers=_auth(settings))
+    response = client.get("/api/v1/workflows/runs/exec-77", headers=auth_headers)
 
     assert response.status_code == 200
     body = response.json()
@@ -76,13 +96,15 @@ def test_query_execution_uses_n8n_api_key(
 
 def test_upstream_failure_becomes_502(
     client: TestClient,
-    settings: Settings,
+    auth_headers: dict[str, str],
     use_n8n_transport,  # noqa: ANN001
 ) -> None:
     use_n8n_transport(httpx.MockTransport(lambda request: httpx.Response(503)))
 
     response = client.post(
-        "/api/v1/workflows/invoice-enrichment/run", headers=_auth(settings), json={}
+        "/api/v1/workflows/invoice-enrichment/run",
+        headers=auth_headers,
+        json={},
     )
 
     assert response.status_code == 502

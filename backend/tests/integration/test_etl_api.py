@@ -1,16 +1,24 @@
-"""ETL endpoint tests over the real ledger dataset."""
+"""Integration tests for ETL endpoints over the real ledger dataset and cache layer."""
 
+from __future__ import annotations
+
+import pytest
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.integration
 
-def test_list_datasets_reads_disk(client: TestClient) -> None:
-    response = client.get("/api/v1/etl/datasets")
 
-    assert response.status_code == 200
-    datasets = response.json()
+def test_list_datasets_reads_disk_and_populates_cache(client: TestClient) -> None:
+    first = client.get("/api/v1/etl/datasets")
+    second = client.get("/api/v1/etl/datasets")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    datasets = first.json()
     assert len(datasets) == 1
     assert datasets[0]["name"] == "ledger"
     assert datasets[0]["record_count"] == 5
+    assert client.app.state.cache_backend.stats().hits >= 1
 
 
 def test_summary_normalizes_brazilian_amounts(client: TestClient) -> None:
@@ -30,7 +38,10 @@ def test_summary_normalizes_brazilian_amounts(client: TestClient) -> None:
 
 
 def test_records_are_paginated_and_normalized(client: TestClient) -> None:
-    response = client.get("/api/v1/etl/datasets/ledger/records", params={"limit": 2, "offset": 1})
+    response = client.get(
+        "/api/v1/etl/datasets/ledger/records",
+        params={"limit": 2, "offset": 1},
+    )
 
     assert response.status_code == 200
     body = response.json()

@@ -1,46 +1,35 @@
-"""Fintech/Fiscal gateway routes with real HMAC + idempotency handling."""
+"""API Gateway / BFF and Fiscal Gateway routes (HMAC + unified idempotency)."""
 
 from __future__ import annotations
 
-import json
-import time
+import platform
 
-from app.api.deps import get_correlation_id, get_gateway_service
-from app.config import Settings, get_settings
-from app.core.errors import Problem
-from app.core.security import (
-    fingerprint,
-    sha256_hex,
-    sign_body,
-    verify_hmac_signature,
+from app.api.deps import (
+    get_cache_backend,
+    get_correlation_id,
+    get_gateway_service,
+    get_job_queue,
+    get_worker_registry,
 )
-from app.schemas.gateway import InvoiceIn
-from app.services.gateway import GatewayService
+from app.cache import CacheBackend
+from app.core.config import Settings, get_settings
+from app.core.security import fingerprint, sha256_hex, verify_hmac_signature
+from app.domains import DOMAIN_MODULES
+from app.domains.gateway import (
+    CacheTelemetryOut,
+    GatewayCapabilitiesOut,
+    GatewayService,
+    InvoiceOut,
+)
+from app.queue import JobQueue
+from app.workers import WorkerRegistry
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 
 router = APIRouter(prefix="/gateway", tags=["gateway"])
 
 
-def _validate_payload(raw: bytes) -> InvoiceIn:
-    try:
-        decoded = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise Problem(422, "Validation error", "Request body must be valid UTF-8 JSON.") from exc
-
-    try:
-        return InvoiceIn.model_validate(decoded)
-    except ValidationError as exc:
-        raise Problem(
-            422,
-            "Validation error",
-            "The invoice payload is invalid.",
-            extra={"errors": exc.errors()},
-        ) from exc
-
-
-def _response(result, replayed: bool) -> JSONResponse:
+def _invoice_response(result: InvoiceOut, replayed: bool) -> JSONResponse:
     return JSONResponse(
         result.model_dump(mode="json"),
         status_code=200 if replayed else 201,
@@ -51,16 +40,52 @@ def _response(result, replayed: bool) -> JSONResponse:
     )
 
 
+@router.get(
+    "/capabilities",
+    response_model=GatewayCapabilitiesOut,
+    summary="BFF architecture, active domains, cache and queue telemetry",
+)
+def gateway_capabilities(
+    settings: Settings = Depends(get_settings),
+    cache: CacheBackend = Depends(get_cache_backend),
+    queue: JobQueue = Depends(get_job_queue),
+    workers: WorkerRegistry = Depends(get_worker_registry),
+) -> GatewayCapabilitiesOut:
+    stats = cache.stats()
+    return GatewayCapabilitiesOut(
+        service="ancientstudio-api",
+        version=settings.api_version,
+        environment=settings.environment,
+        python_runtime=platform.python_version(),
+        architecture="modular-monolith-event-driven",
+        domains=list(DOMAIN_MODULES),
+        worker_topics=workers.topics(),
+        cache=CacheTelemetryOut(
+            hits=stats.hits,
+            misses=stats.misses,
+            sets=stats.sets,
+            evictions=stats.evictions,
+            size=stats.size,
+        ),
+        queue=queue.metrics(),
+    )
+
+
 @router.post(
     "/invoices/parse",
     summary="Validate and accept a fiscal document",
-    responses={201: {"description": "Created"}, 200: {"description": "Idempotent replay"}},
+    responses={
+        201: {"description": "Created"},
+        200: {"description": "Idempotent replay"},
+    },
 )
 async def parse_invoice(
     request: Request,
     x_signature: str = Header(..., alias="X-Signature"),
     x_timestamp: str = Header(..., alias="X-Timestamp"),
-    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=120),
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=120
+    ),
     settings: Settings = Depends(get_settings),
     service: GatewayService = Depends(get_gateway_service),
     correlation_id: str = Depends(get_correlation_id),
@@ -73,45 +98,32 @@ async def parse_invoice(
         secret=settings.gateway_hmac_secret,
         max_age_seconds=settings.signature_max_age_seconds,
     )
-
-    payload = _validate_payload(raw)
+    payload = service.validate_raw_invoice(raw)
     result, replayed = service.parse_invoice(
         payload,
         idempotency_key=idempotency_key,
         fingerprint=fingerprint(sha256_hex(raw)),
     )
-    return _response(result, replayed)
+    return _invoice_response(result, replayed)
 
 
 @router.post(
     "/invoices/submit",
     summary="Browser-safe submission: server signs the payload before /parse",
-    responses={201: {"description": "Created"}, 200: {"description": "Idempotent replay"}},
+    responses={
+        201: {"description": "Created"},
+        200: {"description": "Idempotent replay"},
+    },
 )
 async def submit_invoice(
     request: Request,
     settings: Settings = Depends(get_settings),
     service: GatewayService = Depends(get_gateway_service),
 ) -> Response:
-    """Sign on the server so the browser never holds the HMAC secret.
-
-    The same verification path as /parse is still exercised before acceptance.
-    """
     raw = await request.body()
-    payload = _validate_payload(raw)
-    digest = fingerprint(sha256_hex(raw))
-    sent_at = str(int(time.time()))
-    signature = sign_body(raw, sent_at, settings.gateway_hmac_secret)
-    verify_hmac_signature(
-        body=raw,
-        timestamp=sent_at,
-        signature=signature,
+    result, replayed = service.submit_browser_invoice(
+        raw,
         secret=settings.gateway_hmac_secret,
         max_age_seconds=settings.signature_max_age_seconds,
     )
-    result, replayed = service.parse_invoice(
-        payload,
-        idempotency_key=f"browser-{digest[:32]}",
-        fingerprint=digest,
-    )
-    return _response(result, replayed)
+    return _invoice_response(result, replayed)
