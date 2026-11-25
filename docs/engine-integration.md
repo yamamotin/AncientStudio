@@ -16,9 +16,10 @@ new AsciiSceneEngine(container, config) // facade from ascii-engine-module/src/i
 ```
 
 `window.ASCIIRealms` exposes `AsciiSceneEngine`, `THREE`, `DEFAULT_ENGINE_CONFIG`,
-`DEFAULT_PALETTE`, `DEFAULT_ASCII_RAMP`, scene composition tools
-(`SceneComposerKit`, `SceneDepthRig`, `MascotStageBuilder`, `MASCOT_BACKDROP_HEX`,
-`MASCOT_FLOOR_HEX`, `EntityBlueprintRegistry`, `World`, `SystemRunner`) and
+`DEFAULT_PALETTE`, `DEFAULT_ASCII_RAMP`, GLB/Draco & scene builders
+(`GlbSceneLoader`, `UrbanGlbSceneBuilder`, `MascotStageBuilder`,
+`MASCOT_BACKDROP_HEX`, `MASCOT_FLOOR_HEX`, `World`, `SystemRunner`,
+`CharacterAnimationSystem`, `TrafficFlowSystem`, `CameraFollowSystem`) and
 standalone per-object outline helpers (`applyObjectOutline`,
 `clearObjectOutline`, `getObjectOutlineState`, `DEFAULT_OUTLINE_HIGHLIGHT_COLOR`).
 The adapter also tolerates older namespace-style engines (`mount`/`create`/`Engine`)
@@ -55,20 +56,31 @@ only when ready.
 
 ## Playground systems
 
-`[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
-the unified **Cyber Noir + Entropism** boulevard (`MapLoader` +
-`PlaygroundSceneBuilder` + `PlaygroundEntityFactory`): `#0C1217` entropic sky,
-`#1A222A` weathered ASCII floor, `#2A3540` brutalist structures/ruins,
-Techwear/Darkwear protagonist (`#14171C` / `#3B424C`) with an articulated
-cybernetic mechanical arm (`#6E7B87` / `#8A99A6`, zero glowing sword/weapon), and
-discreet `#4A7C7E` punctual accents. The camera uses a `106°` FOV centered on and
-accompanying the protagonist (`CameraFollowSystem`), while clicking or tapping on
-the ground projects onto the walkable surface (`InputSystem` +
-`NavigationTargetComponent`) and drives a smooth `deltaTime` walk cycle
-(`AnimationSystem`) that settles back to idle on arrival. All lights, emissives
-and planar reflections modulate brightness strictly through `5:8` ASCII glyph
-density without solid-block blowouts. The adapter maps the three UI buttons to
-`day`, `night` and `rain` on that single scene.
+`[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'`
+loading `./assets/models/cena_completa.glb` via `GlbSceneLoader` (`GLTFLoader` +
+self-hosted `DRACOLoader` at `./assets/draco/`, zero external CDN) and mapping
+its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):
+- `Cidade_Sketchfab_model`: static urban environment with atmosphere-reactive
+  road/sidewalk PBR wetness and building window/streetlamp emissives;
+- `Player_Rig`: controllable character moved on the XZ plane via `WASD` (and
+  click/tap sidewalk navigation), clamped to walkable sidewalk boundaries via
+  `THREE.MathUtils.clamp`, with `THREE.AnimationMixer` (`CharacterAnimationSystem`)
+  cross-fading smoothly (`crossFadeTo`) between embedded NLA clips `Idle`,
+  `Walking` and `Casting` (`THREE.LoopOnce` triggered by `E`);
+- `Carro_Grupo`: moving light-source vehicle on the left lateral avenue driven
+  by `TrafficFlowSystem` on a continuous **30-second** cycle (**8s** straight-line
+  pass with attached `SpotLight`s and `PointLight` illuminating asphalt and
+  building facades, followed by **22s** hidden out of frame with `visible = false`).
+
+A fixed-direction 3rd-person camera (`CameraFollowSystem`) accompanies
+`Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when toggled. The
+full-screen ASCII post-processing shader (`AsciiPostProcessor` + `asciiShader.ts`)
+samples sub-cell integrated luminance, linearized depth, and dual 3x3 Sobel
+normal-depth contours (`tNormal` + `tDepth`) with surface-normal curvature
+relief and soft-shoulder highlight compression so 3D volumes remain crisp and
+cohesive without blown-out blocks or oversaturation. The adapter maps the three
+UI buttons (`day`, `night`, `rain`) to lighting, fog, car headlights, pavement
+wetness and 3D rain particles.
 [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier
 engine-side tools added on that date.
 

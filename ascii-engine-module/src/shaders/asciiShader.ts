@@ -1,14 +1,16 @@
 /**
- * Custom GLSL shaders for the 3D ASCII Post-Processing Pipeline:
- * 1. Bloom Extract & Kawase Blur Shader (vivid neon/solar atmospheric bleed across neighboring cells)
- * 2. Seamless Grid-Free Adaptive ASCII Composite Shader with GPU Lighten Block-Detail Blend:
- *    - Integer-snapped center-anchored monospace cell quantization using hardware gl_FragCoord.xy
- *      and floor(uResolution * 0.5) so odd/fractional viewports never create boundary cracks
- *    - Exact half-texel atlas UV seam guard (0.5 / uAtlasTileSize) eliminating neighbor bleed AND
- *      artificial border padding/margins
- *    - Continuous screen-space atmospheric backdrop & gutter-free ~35% lighten block mass so ASCII
- *      characters flow continuously without any checkered grid between cells
- *    - Adaptive daylight vs nocturnal contrast curve supporting Day, Night, and Rain modes cleanly.
+ * Modern Full-Screen 3D-Wrapping ASCII Post-Processing Shader Pipeline (`asciiShader.ts`):
+ * - Multi-tap sub-cell supersampling (`sampleCellIntegrated`) prevents subpixel aliasing across
+ *   dense architectural textures, vehicle bodywork, and character geometry.
+ * - Linearized view-space depth (`linearizeDepth` via `uCameraNear` / `uCameraFar`) + dual 3x3
+ *   Sobel operator across both Linear Depth and View-Space Normals (`tNormal`) wraps 3D volumes
+ *   (buildings, illuminated passing car, and character) in crisp directional structural contours
+ *   (`| / \ _`) at both foreground and background distances.
+ * - View-space normal curvature relief (`uVolumeWrapStrength`) modulates glyph density subtly
+ *   along 3D surface orientation so objects read as cohesive 3D ASCII volumes.
+ * - Soft-shoulder highlight tone-mapping + contained chroma guardrail prevents blown-out blocks
+ *   (solid full-fill block tier never emitted) and prevents oversaturation, preserving the portfolio's
+ *   sober Cyber-Noir + Entropism aesthetic.
  */
 
 export const FULLSCREEN_VERTEX_SHADER = /* glsl */ `
@@ -20,72 +22,41 @@ export const FULLSCREEN_VERTEX_SHADER = /* glsl */ `
   }
 `;
 
-export const BLOOM_DOWNSAMPLE_FRAGMENT_SHADER = /* glsl */ `
+export const BLOOM_EXTRACT_FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
 
   uniform sampler2D tScene;
   uniform vec2 uTexelSize;
   uniform float uThreshold;
-  uniform float uTime;
 
   varying vec2 vUv;
 
-  float getLuma(vec3 c) {
+  float luma(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
   }
 
-  vec3 extractBright(vec3 color) {
-    float luma = getLuma(color);
-    float maxCh = max(color.r, max(color.g, color.b));
-    float minCh = min(color.r, min(color.g, color.b));
-    float neonChroma = (maxCh - minCh) * 0.66 + maxCh * 0.46;
-    float metric = max(luma, neonChroma);
-    float knee = uThreshold * 0.45 + 0.0001;
-    float soft = clamp(metric - uThreshold + knee, 0.0, 2.0 * knee);
-    soft = (soft * soft) / (4.0 * knee);
-    float contribution = max(soft, metric - uThreshold) / max(metric, 0.0001);
-    return color * clamp(contribution, 0.0, 2.8);
-  }
-
   void main() {
-    vec2 d = uTexelSize * 1.75;
-    vec3 sum = extractBright(texture2D(tScene, vUv).rgb) * 0.28;
-    sum += extractBright(texture2D(tScene, vUv + vec2( d.x,  d.y)).rgb) * 0.12;
-    sum += extractBright(texture2D(tScene, vUv + vec2(-d.x,  d.y)).rgb) * 0.12;
-    sum += extractBright(texture2D(tScene, vUv + vec2( d.x, -d.y)).rgb) * 0.12;
-    sum += extractBright(texture2D(tScene, vUv + vec2(-d.x, -d.y)).rgb) * 0.12;
-    sum += extractBright(texture2D(tScene, vUv + vec2( d.x * 2.2, 0.0)).rgb) * 0.06;
-    sum += extractBright(texture2D(tScene, vUv + vec2(-d.x * 2.2, 0.0)).rgb) * 0.06;
-    sum += extractBright(texture2D(tScene, vUv + vec2(0.0,  d.y * 2.2)).rgb) * 0.06;
-    sum += extractBright(texture2D(tScene, vUv + vec2(0.0, -d.y * 2.2)).rgb) * 0.06;
+    // 9-tap soft box downsample + soft-knee luminance extraction
+    vec3 acc = vec3(0.0);
+    acc += texture2D(tScene, vUv).rgb * 0.25;
+    acc += texture2D(tScene, vUv + vec2( uTexelSize.x,  uTexelSize.y)).rgb * 0.125;
+    acc += texture2D(tScene, vUv + vec2(-uTexelSize.x,  uTexelSize.y)).rgb * 0.125;
+    acc += texture2D(tScene, vUv + vec2( uTexelSize.x, -uTexelSize.y)).rgb * 0.125;
+    acc += texture2D(tScene, vUv + vec2(-uTexelSize.x, -uTexelSize.y)).rgb * 0.125;
+    acc += texture2D(tScene, vUv + vec2( uTexelSize.x * 2.0, 0.0)).rgb * 0.0625;
+    acc += texture2D(tScene, vUv + vec2(-uTexelSize.x * 2.0, 0.0)).rgb * 0.0625;
+    acc += texture2D(tScene, vUv + vec2(0.0,  uTexelSize.y * 2.0)).rgb * 0.0625;
+    acc += texture2D(tScene, vUv + vec2(0.0, -uTexelSize.y * 2.0)).rgb * 0.0625;
 
-    gl_FragColor = vec4(sum, 1.0);
-  }
-`;
+    float lum = luma(acc);
+    float knee = 0.24;
+    float soft = clamp(lum - uThreshold + knee, 0.0, 2.0 * knee);
+    soft = (soft * soft) / (4.0 * knee + 0.0001);
+    float contrib = max(soft, lum - uThreshold) / max(lum, 0.0001);
 
-export const BLOOM_BLUR_FRAGMENT_SHADER = /* glsl */ `
-  precision highp float;
-
-  uniform sampler2D tInput;
-  uniform vec2 uTexelSize;
-  uniform vec2 uDirection;
-
-  varying vec2 vUv;
-
-  void main() {
-    vec2 off1 = vec2(1.3846153846) * uDirection * uTexelSize;
-    vec2 off2 = vec2(3.2307692308) * uDirection * uTexelSize;
-    vec2 off3 = vec2(5.4000000000) * uDirection * uTexelSize;
-
-    vec3 color = texture2D(tInput, vUv).rgb * 0.204;
-    color += texture2D(tInput, vUv + off1).rgb * 0.244;
-    color += texture2D(tInput, vUv - off1).rgb * 0.244;
-    color += texture2D(tInput, vUv + off2).rgb * 0.112;
-    color += texture2D(tInput, vUv - off2).rgb * 0.112;
-    color += texture2D(tInput, vUv + off3).rgb * 0.042;
-    color += texture2D(tInput, vUv - off3).rgb * 0.042;
-
-    gl_FragColor = vec4(color, 1.0);
+    // Cap extracted bloom peak so bright car headlights stay atmospheric without blowing out glyphs
+    vec3 extracted = min(acc * clamp(contrib, 0.0, 1.25), vec3(1.15));
+    gl_FragColor = vec4(extracted, 1.0);
   }
 `;
 
@@ -93,225 +64,227 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
 
   uniform sampler2D tScene;
+  uniform sampler2D tNormal;
   uniform sampler2D tDepth;
   uniform sampler2D tBloom;
   uniform sampler2D tGlyphAtlas;
 
   uniform vec2 uResolution;
-  uniform vec2 uCellSize;
+  uniform vec2 uCellPixelSize;
   uniform vec2 uAtlasTileSize;
   uniform float uSubCellSpread;
-  uniform float uTransitionMix;
   uniform float uRampCount;
-  uniform float uStructuralCount;
+  uniform float uStructCount;
   uniform float uBlockCount;
   uniform float uTotalGlyphs;
-
-  uniform float uCameraNear;
-  uniform float uCameraFar;
-  uniform float uDofFocus;
-  uniform float uDofStrength;
   uniform float uEdgeStrength;
   uniform float uBlockBlendWeight;
   uniform float uBloomIntensity;
+  uniform float uDofFocus;
+  uniform float uDofStrength;
   uniform float uDaylight;
+  uniform float uCameraNear;
+  uniform float uCameraFar;
+  uniform float uVolumeWrapStrength;
   uniform vec3 uBgColor;
+  uniform vec3 uCoolTint;
+  uniform vec3 uWarmTint;
   uniform float uTime;
 
   varying vec2 vUv;
-
-  float linearizeDepth(float rawDepth) {
-    float zNdc = rawDepth * 2.0 - 1.0;
-    return (2.0 * uCameraNear * uCameraFar) /
-           (uCameraFar + uCameraNear - zNdc * (uCameraFar - uCameraNear));
-  }
 
   float getLuma(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
   }
 
-  float hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
+  /**
+   * Converts non-linear [0..1] DepthTexture sample into normalized linear view-space depth [0..1].
+   */
+  float linearizeDepth(float rawDepth) {
+    float nearP = max(0.05, uCameraNear);
+    float farP = max(nearP + 1.0, uCameraFar);
+    float zNdc = rawDepth * 2.0 - 1.0;
+    float viewZ = (2.0 * nearP * farP) / max(farP + nearP - zNdc * (farP - nearP), 0.0001);
+    return clamp((viewZ - nearP) / (farP - nearP), 0.0, 1.0);
   }
 
   /**
-   * 5-tap sub-cell rotated-grid supersampling: integrates scene radiance across the footprint
-   * of a single ASCII character cell so high-DPI 3D geometry, rain & street glints never flicker.
+   * 5-tap sub-cell area integration (center + 4 rotated-grid sub-cell offsets).
    */
-  vec3 sampleCellIntegrated(vec2 centerUv, vec2 cellStepUv, float spread) {
-    vec2 ox = vec2(cellStepUv.x * spread, cellStepUv.y * spread * 0.5);
-    vec2 oy = vec2(-cellStepUv.x * spread * 0.5, cellStepUv.y * spread);
+  vec3 sampleCellIntegrated(vec2 centerUv, vec2 cellUvSpan) {
+    vec2 o1 = vec2( uSubCellSpread,  uSubCellSpread * 0.5) * cellUvSpan;
+    vec2 o2 = vec2(-uSubCellSpread * 0.5,  uSubCellSpread) * cellUvSpan;
 
-    vec3 c0 = texture2D(tScene, centerUv).rgb * 0.36;
-    vec3 c1 = texture2D(tScene, clamp(centerUv + ox, 0.001, 0.999)).rgb * 0.16;
-    vec3 c2 = texture2D(tScene, clamp(centerUv - ox, 0.001, 0.999)).rgb * 0.16;
-    vec3 c3 = texture2D(tScene, clamp(centerUv + oy, 0.001, 0.999)).rgb * 0.16;
-    vec3 c4 = texture2D(tScene, clamp(centerUv - oy, 0.001, 0.999)).rgb * 0.16;
+    vec3 c0 = texture2D(tScene, centerUv).rgb * 0.40;
+    vec3 c1 = texture2D(tScene, clamp(centerUv + o1, 0.001, 0.999)).rgb * 0.15;
+    vec3 c2 = texture2D(tScene, clamp(centerUv - o1, 0.001, 0.999)).rgb * 0.15;
+    vec3 c3 = texture2D(tScene, clamp(centerUv + o2, 0.001, 0.999)).rgb * 0.15;
+    vec3 c4 = texture2D(tScene, clamp(centerUv - o2, 0.001, 0.999)).rgb * 0.15;
+
     return c0 + c1 + c2 + c3 + c4;
   }
 
+  /**
+   * Samples a glyph tile from the horizontal 1D atlas strip with half-texel UV clamping
+   * so adjacent characters never bleed into neighboring cells.
+   */
+  float sampleAtlasTile(float tileIndex, vec2 glyphUv) {
+    vec2 safeTileDims = max(uAtlasTileSize, vec2(16.0, 24.0));
+    vec2 inset = 0.55 / safeTileDims;
+    vec2 clampedUv = clamp(glyphUv, inset, vec2(1.0) - inset);
+    vec2 atlasUv = vec2((tileIndex + clampedUv.x) / uTotalGlyphs, clampedUv.y);
+    return texture2D(tGlyphAtlas, atlasUv).r;
+  }
+
   void main() {
-    // 1. Integer-aligned center-anchored cell quantization:
-    //    - floor(uResolution * 0.5) guarantees pixel centers (gl_FragCoord.xy = k + 0.5) never land
-    //      on exact integer 0.0 cell borders even when physicalWidth/Height is odd.
-    //    - Once resize transitions settle (uTransitionMix <= 0.001), activeCell snaps to exact integers.
-    vec2 halfRes = floor(uResolution * 0.5);
-    vec2 activeCell = uTransitionMix > 0.001 ? uCellSize : max(vec2(4.0), floor(uCellSize + 0.5));
-    vec2 centeredPx = gl_FragCoord.xy - halfRes;
-    vec2 cellCoord = centeredPx / activeCell;
-    vec2 cellIndex = floor(cellCoord);
-    vec2 localCellUv = fract(cellCoord);
-    vec2 glyphUv = vec2(localCellUv.x, 1.0 - localCellUv.y);
+    vec2 cellSize = max(uCellPixelSize, vec2(4.0, 6.0));
 
-    vec2 cellCenterUv = clamp(((cellIndex + 0.5) * activeCell + halfRes) / uResolution, 0.001, 0.999);
-    vec2 cellStepUv = activeCell / uResolution;
+    // Anchor the ASCII character grid to viewport center so resizes expand symmetrically
+    vec2 screenCenter = floor(uResolution * 0.5);
+    vec2 relFrag = gl_FragCoord.xy - screenCenter;
+    vec2 cellIndex = floor(relFrag / cellSize);
+    vec2 glyphUv = fract(relFrag / cellSize);
 
-    // 2. Depth & Depth-of-Field calculation at the cell center
+    vec2 cellCenterPx = screenCenter + (cellIndex + 0.5) * cellSize;
+    vec2 cellCenterUv = clamp(cellCenterPx / uResolution, vec2(0.001), vec2(0.999));
+    vec2 cellUvSpan = cellSize / uResolution;
+
+    // 1. Sub-cell integrated scene radiance + depth + view-space normal
+    vec3 sceneCol = sampleCellIntegrated(cellCenterUv, cellUvSpan);
+    vec3 bloomCol = texture2D(tBloom, cellCenterUv).rgb;
     float rawCenterDepth = texture2D(tDepth, cellCenterUv).r;
-    float linearDist = linearizeDepth(rawCenterDepth);
-    bool isSky = rawCenterDepth >= 0.9995;
+    float centerLinDepth = linearizeDepth(rawCenterDepth);
+    float isGeometry = step(rawCenterDepth, 0.9994);
 
-    float focalDiff = abs(linearDist - uDofFocus);
-    float coc = clamp((focalDiff - 5.2) / 18.0, 0.0, 1.0) * uDofStrength;
-    if (isSky) {
-      coc *= 0.30;
+    // 2. Depth-of-Field softening at extreme background depths
+    float depthDelta = abs(centerLinDepth - uDofFocus);
+    float dofBlurFactor = clamp(depthDelta * uDofStrength * 2.2, 0.0, 0.72) * isGeometry;
+
+    if (dofBlurFactor > 0.02) {
+      vec2 blurStep = cellUvSpan * (1.0 + dofBlurFactor * 1.4);
+      vec3 farSample = 0.25 * (
+        texture2D(tScene, clamp(cellCenterUv + vec2( blurStep.x, 0.0), 0.001, 0.999)).rgb +
+        texture2D(tScene, clamp(cellCenterUv + vec2(-blurStep.x, 0.0), 0.001, 0.999)).rgb +
+        texture2D(tScene, clamp(cellCenterUv + vec2(0.0,  blurStep.y), 0.001, 0.999)).rgb +
+        texture2D(tScene, clamp(cellCenterUv + vec2(0.0, -blurStep.y), 0.001, 0.999)).rgb
+      );
+      sceneCol = mix(sceneCol, farSample, dofBlurFactor * 0.58);
     }
 
-    // 3. Sub-cell supersampled color + optional DoF neighbor softening
-    vec3 colIntegrated = sampleCellIntegrated(cellCenterUv, cellStepUv, uSubCellSpread);
+    // 3. Dual 3x3 Sobel Edge & Crease Detection (Linear Depth + View-Space Normals)
+    vec2 stepUv = (cellSize * 0.82) / uResolution;
 
-    vec2 dofSpread = cellStepUv * (0.65 + coc * 1.25);
-    vec3 colN = texture2D(tScene, clamp(cellCenterUv + vec2(0.0, dofSpread.y), 0.001, 0.999)).rgb;
-    vec3 colS = texture2D(tScene, clamp(cellCenterUv - vec2(0.0, dofSpread.y), 0.001, 0.999)).rgb;
-    vec3 colE = texture2D(tScene, clamp(cellCenterUv + vec2(dofSpread.x, 0.0), 0.001, 0.999)).rgb;
-    vec3 colW = texture2D(tScene, clamp(cellCenterUv - vec2(dofSpread.x, 0.0), 0.001, 0.999)).rgb;
+    float dTL = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(-stepUv.x,  stepUv.y), 0.001, 0.999)).r);
+    float dTC = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( 0.0,       stepUv.y), 0.001, 0.999)).r);
+    float dTR = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( stepUv.x,  stepUv.y), 0.001, 0.999)).r);
+    float dML = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(-stepUv.x,  0.0     ), 0.001, 0.999)).r);
+    float dMR = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( stepUv.x,  0.0     ), 0.001, 0.999)).r);
+    float dBL = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(-stepUv.x, -stepUv.y), 0.001, 0.999)).r);
+    float dBC = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( 0.0,      -stepUv.y), 0.001, 0.999)).r);
+    float dBR = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( stepUv.x, -stepUv.y), 0.001, 0.999)).r);
 
-    vec3 avgNeighbors = (colN + colS + colE + colW) * 0.25;
-    vec3 cellColor = mix(colIntegrated, (colIntegrated * 0.45 + avgNeighbors * 0.55), coc);
+    float gxD = (dTR + 2.0 * dMR + dBR) - (dTL + 2.0 * dML + dBL);
+    float gyD = (dTL + 2.0 * dTC + dTR) - (dBL + 2.0 * dBC + dBR);
+    float depthEdgeMag = length(vec2(gxD, gyD)) * 11.5;
 
-    // 4. Sample multi-tap bloom buffer
-    vec3 bloomCell = texture2D(tBloom, cellCenterUv).rgb;
-    vec3 bloomSmooth = texture2D(tBloom, vUv).rgb;
-    vec3 bloomBleed = (bloomCell * 0.62 + bloomSmooth * 0.38) * uBloomIntensity;
+    vec3 nCenterEnc = texture2D(tNormal, cellCenterUv).xyz;
+    vec3 nTL = texture2D(tNormal, clamp(cellCenterUv + vec2(-stepUv.x,  stepUv.y), 0.001, 0.999)).xyz;
+    vec3 nTC = texture2D(tNormal, clamp(cellCenterUv + vec2( 0.0,       stepUv.y), 0.001, 0.999)).xyz;
+    vec3 nTR = texture2D(tNormal, clamp(cellCenterUv + vec2( stepUv.x,  stepUv.y), 0.001, 0.999)).xyz;
+    vec3 nML = texture2D(tNormal, clamp(cellCenterUv + vec2(-stepUv.x,  0.0     ), 0.001, 0.999)).xyz;
+    vec3 nMR = texture2D(tNormal, clamp(cellCenterUv + vec2( stepUv.x,  0.0     ), 0.001, 0.999)).xyz;
+    vec3 nBL = texture2D(tNormal, clamp(cellCenterUv + vec2(-stepUv.x, -stepUv.y), 0.001, 0.999)).xyz;
+    vec3 nBC = texture2D(tNormal, clamp(cellCenterUv + vec2( 0.0,      -stepUv.y), 0.001, 0.999)).xyz;
+    vec3 nBR = texture2D(tNormal, clamp(cellCenterUv + vec2( stepUv.x, -stepUv.y), 0.001, 0.999)).xyz;
 
-    vec3 litCellColor = cellColor + bloomBleed * 0.85;
-    float luma = getLuma(litCellColor);
-    float peakCh = max(litCellColor.r, max(litCellColor.g, litCellColor.b));
+    vec3 gxNVec = (nTR + 2.0 * nMR + nBR) - (nTL + 2.0 * nML + nBL);
+    vec3 gyNVec = (nTL + 2.0 * nTC + nTR) - (nBL + 2.0 * nBC + nBR);
+    float gxN = dot(gxNVec, vec3(0.38, 0.38, 0.24));
+    float gyN = dot(gyNVec, vec3(0.38, 0.38, 0.24));
+    float normalEdgeMag = length(vec2(gxN, gyN)) * 0.48 * isGeometry;
 
-    // Perceptual luminance curve: preserves shadow contrast in Day mode while lifting saturated neon in Night/Rain
-    float chromaLift = mix(0.38, 0.18, uDaylight);
-    float gammaExp = mix(0.74, 0.86, uDaylight);
-    float neonLuma = mix(luma, peakCh, chromaLift);
-    float dither = (hash12(cellIndex) - 0.5) * 0.02;
-    float perceivedLuma = clamp(pow(max(neonLuma, 0.0), gammaExp) + dither, 0.0, 1.0);
+    // Attenuate internal normal creases gently at far distance so skyline stays clean
+    float depthCreaseAtten = mix(1.0, 0.42, smoothstep(0.25, 0.85, centerLinDepth));
+    float combinedEdge = max(depthEdgeMag, normalEdgeMag * depthCreaseAtten) * uEdgeStrength * (1.0 - dofBlurFactor * 0.55);
 
-    // 5. Resolution-invariant Structural Edge Detection (Sobel on depth + luminance across 1 cell step)
-    float dN = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(0.0, cellStepUv.y), 0.001, 0.999)).r);
-    float dS = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv - vec2(0.0, cellStepUv.y), 0.001, 0.999)).r);
-    float dE = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(cellStepUv.x, 0.0), 0.001, 0.999)).r);
-    float dW = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv - vec2(cellStepUv.x, 0.0), 0.001, 0.999)).r);
+    // Choose dominant gradient axis so structural glyph ('|' '/' '\' '_') wraps along the true 3D contour
+    vec2 domGrad = depthEdgeMag >= normalEdgeMag * depthCreaseAtten ? vec2(gxD, gyD) : vec2(gxN, gyN);
 
-    float lN = getLuma(texture2D(tScene, clamp(cellCenterUv + vec2(0.0, cellStepUv.y), 0.001, 0.999)).rgb);
-    float lS = getLuma(texture2D(tScene, clamp(cellCenterUv - vec2(0.0, cellStepUv.y), 0.001, 0.999)).rgb);
-    float lE = getLuma(texture2D(tScene, clamp(cellCenterUv + vec2(cellStepUv.x, 0.0), 0.001, 0.999)).rgb);
-    float lW = getLuma(texture2D(tScene, clamp(cellCenterUv - vec2(cellStepUv.x, 0.0), 0.001, 0.999)).rgb);
+    // 4. 3D Surface-Normal Curvature Relief + Soft-Shoulder Tone Mapping (Zero Blowout)
+    vec3 viewN = normalize(nCenterEnc * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
+    float zenithCatch = clamp(viewN.y, -0.35, 0.75) * 0.048;
+    float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.1) * 0.058;
+    float volumeRelief = (zenithCatch + grazingRim) * isGeometry * uVolumeWrapStrength;
 
-    float normScale = 1.0 / max(linearDist, 1.6);
-    float gxDepth = (dE - dW) * normScale * 4.2;
-    float gyDepth = (dN - dS) * normScale * 4.2;
-    float gxLuma = (lE - lW) * 1.82;
-    float gyLuma = (lN - lS) * 1.82;
+    vec3 combinedHdr = sceneCol + bloomCol * (uBloomIntensity * 0.55);
 
-    float gx = abs(gxDepth) > abs(gxLuma) ? gxDepth : gxLuma;
-    float gy = abs(gyDepth) > abs(gyLuma) ? gyDepth : gyLuma;
-    float edgeMag = length(vec2(gx, gy));
+    // Soft-shoulder tone curve compresses bright SpotLight/PBR peaks smoothly without clipping
+    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.40)) * 1.24;
 
-    // Adaptive compact-grid silhouette boost so smaller viewports keep sharp outlines
-    float gridColsApprox = uResolution.x / max(activeCell.x, 4.0);
-    float compactEdgeBoost = mix(1.22, 1.0, clamp((gridColsApprox - 48.0) / 72.0, 0.0, 1.0));
-    float effectiveEdge = edgeMag * uEdgeStrength * compactEdgeBoost * (1.0 - coc * 0.78) * smoothstep(0.025, 0.12, perceivedLuma);
+    // Contained saturation guardrail: keep colors sober and prevent neon/texture oversaturation
+    float rawLuma = getLuma(combinedSignal);
+    float maxChroma = mix(0.46, 0.32, smoothstep(0.45, 0.92, rawLuma));
+    combinedSignal = mix(vec3(rawLuma), combinedSignal, uVolumeWrapStrength > 0.5 ? (1.0 - (1.0 - maxChroma) * 0.45) : 1.0);
 
-    // 6. Select fine typographic glyph index in the 1D horizontal atlas
-    float glyphIndex = floor(perceivedLuma * (uRampCount - 0.001));
+    float luma = clamp(pow(clamp(getLuma(combinedSignal), 0.0, 1.0), 0.84) + volumeRelief, 0.0, 1.0);
 
-    // Directional structural silhouette glyphs: [0]='/' [1]='\\' [2]='|' [3]='_' [4]='[' [5]=']'
-    if (effectiveEdge > 0.27 && uStructuralCount >= 6.0 && !isSky) {
-      float absGx = abs(gx);
-      float absGy = abs(gy);
-      float structOffset = 2.0;
+    // 5. Select Primary Detail ASCII Glyph (Luminance Ramp vs Directional Structural Contour)
+    float detailTileIndex = floor(luma * (uRampCount - 1.0) + 0.5);
+    detailTileIndex = clamp(detailTileIndex, 0.0, uRampCount - 1.0);
 
-      if (absGy > absGx * 1.95) {
+    bool useStructuralEdge = (combinedEdge > 0.30) && (luma > 0.032) && (uStructCount >= 4.0);
+    if (useStructuralEdge) {
+      float tangentAngle = atan(-domGrad.x, domGrad.y);
+      float deg = mod(degrees(tangentAngle) + 180.0, 180.0);
+
+      float structOffset = 0.0; // '|'
+      if (deg >= 22.5 && deg < 67.5) {
+        structOffset = 1.0; // '/'
+      } else if (deg >= 67.5 && deg < 112.5) {
         structOffset = 3.0; // '_'
-      } else if (absGx > absGy * 1.95) {
-        if (gxDepth > 0.18) {
-          structOffset = 4.0; // '['
-        } else if (gxDepth < -0.18) {
-          structOffset = 5.0; // ']'
-        } else {
-          structOffset = 2.0; // '|'
-        }
-      } else {
-        structOffset = (gx * gy < 0.0) ? 0.0 : 1.0; // '/' or '\\'
+      } else if (deg >= 112.5 && deg < 157.5) {
+        structOffset = 2.0; // '\'
       }
-
-      glyphIndex = uRampCount + clamp(structOffset, 0.0, uStructuralCount - 1.0);
+      detailTileIndex = uRampCount + min(structOffset, uStructCount - 1.0);
     }
 
-    // 7. Exact half-texel UV seam guard (0.5 / uAtlasTileSize):
-    //    Eliminates neighbor glyph bleed while preserving 100% edge-to-edge full-bleed block continuity (zero cell border gap!)
-    vec2 safeTileDims = max(uAtlasTileSize, vec2(32.0, 48.0));
-    vec2 halfTexel = 0.55 / safeTileDims;
-    vec2 safeGlyphUv = clamp(glyphUv, halfTexel, vec2(1.0) - halfTexel);
+    float detailGlyphMask = sampleAtlasTile(detailTileIndex, glyphUv);
 
-    float aaWidth = clamp(1.25 / max(activeCell.y, 6.0) + uTransitionMix * 0.06, 0.055, 0.24);
-    float detailAtlasU = (glyphIndex + safeGlyphUv.x) / uTotalGlyphs;
-    float rawDetailMask = texture2D(tGlyphAtlas, vec2(detailAtlasU, safeGlyphUv.y)).r;
-    float detailGlyphMask = smoothstep(0.44 - aaWidth, 0.44 + aaWidth, rawDetailMask);
+    // 6. GPU Lighten Stipple-Detail Blend (strictly capped to tiers 0..2 so strokes never wash out)
+    float compositeGlyphMask = detailGlyphMask;
+    if (uBlockCount >= 3.0 && uBlockBlendWeight > 0.001 && luma > 0.055) {
+      float blockTier = clamp(floor(smoothstep(0.06, 0.96, luma) * 3.0), 0.0, min(2.0, uBlockCount - 2.0));
+      float blockTileIndex = uRampCount + uStructCount + blockTier;
+      float blockMask = sampleAtlasTile(blockTileIndex, glyphUv) * uBlockBlendWeight;
+      compositeGlyphMask = max(detailGlyphMask, blockMask);
+    }
 
-    // Continuous screen-space radiance for seamless block-layer & backdrop (zero rectangular cell stepping!)
-    vec3 smoothSceneCol = texture2D(tScene, vUv).rgb;
-    vec3 pixelLitCol = smoothSceneCol + bloomSmooth * (0.48 * uBloomIntensity);
-    float continuousLuma = clamp(pow(max(getLuma(pixelLitCol), 0.0), gammaExp), 0.0, 1.15);
+    // 7. Calibrated Foreground Ink & Dark Terminal Substrate
+    vec3 normColor = combinedSignal / max(rawLuma, 0.065);
+    normColor = clamp(normColor, vec3(0.18), vec3(1.42));
 
-    // Single-pass GPU halftone stipple accent (clamped to stipple tiers 0..uBlockCount-2 so 100% solid rectangles never erase glyphs)
-    float maxStippleTiers = max(uBlockCount - 1.0, 1.0);
-    float blockPresence = smoothstep(0.14, 0.88, continuousLuma) * (isSky ? mix(0.16, 0.32, uDaylight) : 1.0);
-    float blockTier = floor(clamp((perceivedLuma - 0.10) / 0.86, 0.0, 0.999) * maxStippleTiers);
-    float blockIndex = uRampCount + uStructuralCount + blockTier;
-    float blockAtlasU = (blockIndex + safeGlyphUv.x) / uTotalGlyphs;
-    float rawBlockMask = uBlockCount > 0.5 ? texture2D(tGlyphAtlas, vec2(blockAtlasU, safeGlyphUv.y)).r : 0.0;
-    float sharpBlockMask = smoothstep(0.38 - aaWidth, 0.38 + aaWidth, rawBlockMask);
+    vec3 shadowGrade = mix(normColor, uCoolTint * 1.08, 0.24);
+    vec3 highlightGrade = mix(normColor, uWarmTint * 1.12, 0.16);
+    vec3 charColor = mix(shadowGrade, highlightGrade, smoothstep(0.16, 0.80, luma));
 
-    float weightedBlockLayer = sharpBlockMask * blockPresence * uBlockBlendWeight * 0.48;
-    float compositeMask = max(detailGlyphMask, clamp(weightedBlockLayer, 0.0, 0.22));
+    if (useStructuralEdge) {
+      charColor = mix(charColor, uWarmTint * 1.16, 0.20 * clamp(combinedEdge, 0.0, 1.0));
+    }
 
-    // 8. Pure-ASCII value modulation & restrained terminal substrate (zero solid light blowout)
-    float rawLuma = max(getLuma(litCellColor), 0.0001);
-    vec3 normalizedHue = mix(vec3(1.0), litCellColor / rawLuma, 0.82);
-    float boostGain = mix(1.42, 1.26, uDaylight);
-    float boostedBrightness = mix(perceivedLuma, min(1.22, rawLuma * boostGain + 0.07), 0.72);
-    vec3 glyphColor = min(normalizedHue * boostedBrightness, vec3(1.18, 1.20, 1.22));
+    float brightness = mix(0.20, 1.18, smoothstep(0.02, 0.94, luma));
+    vec3 litGlyph = charColor * brightness * compositeGlyphMask;
 
-    vec3 blockTone = glyphColor * 0.72 + bloomSmooth * (0.08 * uBloomIntensity);
-    vec3 litForeground = mix(blockTone, glyphColor, clamp(detailGlyphMask * 1.18, 0.0, 1.0));
+    // Dark substrate preserves clear separation between glyph ink and terminal backdrop
+    float substrateLift = mix(0.045, 0.105, uDaylight);
+    vec3 smoothBackdrop = mix(uBgColor, uBgColor + combinedSignal * substrateLift, smoothstep(0.03, 0.58, luma));
 
-    // Dark terminal substrate keeps high glyph-to-background contrast even at light cores and reflections
-    vec3 atmosphericMist = min(
-      bloomSmooth * (0.045 * uBloomIntensity) + smoothSceneCol * 0.025,
-      vec3(0.065)
-    );
-    vec3 smoothBackdrop = uBgColor + atmosphericMist;
+    vec2 vigUv = vUv * 2.0 - 1.0;
+    float vignette = 1.0 - dot(vigUv, vigUv) * mix(0.13, 0.06, uDaylight);
 
-    vec3 finalColor = mix(smoothBackdrop, litForeground, compositeMask);
+    vec3 finalRgb = mix(smoothBackdrop, litGlyph, clamp(compositeGlyphMask, 0.0, 1.0));
+    finalRgb += bloomCol * (uBloomIntensity * mix(0.16, 0.08, uDaylight) * (0.28 + 0.72 * compositeGlyphMask));
+    finalRgb *= clamp(vignette, 0.76, 1.0);
 
-    vec2 centeredUv = vUv - 0.5;
-    float vignette = 1.0 - dot(centeredUv, centeredUv) * mix(0.30, 0.18, uDaylight);
-    finalColor = mix(uBgColor, finalColor, clamp(vignette, 0.66, 1.0));
-
-    finalColor = finalColor / (1.0 + finalColor * 0.15);
-
-    gl_FragColor = vec4(finalColor, 1.0);
+    gl_FragColor = vec4(finalRgb, 1.0);
   }
 `;

@@ -4,7 +4,7 @@ import type { EngineConfig, PartialEngineConfig, ThemePalette } from '../types';
  * Contained Cyber Noir + Entropism + Techwear/Darkwear Base Palette:
  * - Entropic sky / nocturnal terminal substrate (`#0C1217`)
  * - Discreet oxidized verdigris accent (`#4A7C7E`), brushed steel-mist core (`#8A99A6`),
- *   cool steel-slate ambient (`#6E7B87`), and weathered ruin/structure slate (`#2A3540`).
+ *   cool steel-slate ambient (`#6E7B87`), and weathered structure slate (`#2A3540`).
  */
 export const DEFAULT_PALETTE: ThemePalette = {
   background: '#0C1217',
@@ -16,17 +16,23 @@ export const DEFAULT_PALETTE: ThemePalette = {
 };
 
 /**
- * High-resolution calibrated ASCII luminance ramp for crisp glyph modulation across
- * weathered surfaces, restrained lights, wet pavement reflections, and silhouettes.
+ * High-legibility calibrated ASCII luminance ramp for crisp glyph modulation across
+ * 3D urban facades, illuminated passing vehicles, character volumes, and wet pavement.
  */
-export const DEFAULT_ASCII_RAMP = " .'`^,:;Il!i><~+_-?][1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+export const DEFAULT_ASCII_RAMP =
+  " .'`^,:;Il!i><~+_-?][1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+
+export const DEFAULT_SCENE_MODEL_URL = './assets/models/cena_completa.glb';
+export const DEFAULT_DRACO_DECODER_PATH = './assets/draco/';
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mode: 'playground',
-  mapId: 'cyberpunk-citadel',
+  modelUrl: DEFAULT_SCENE_MODEL_URL,
+  dracoDecoderPath: DEFAULT_DRACO_DECODER_PATH,
   atmosphere: 'night',
-  fov: 106,
-  enableKeyboard: false,
+  fov: 74,
+  enableKeyboard: true,
+  autoOrbit: false,
   pauseOffscreen: true,
   palette: { ...DEFAULT_PALETTE },
   cellSize: 8,
@@ -34,15 +40,15 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   characterRamp: DEFAULT_ASCII_RAMP,
   structuralChars: '/\\|_[]',
   edgeStrength: 0.96,
-  blockBlendWeight: 0.35,
+  blockBlendWeight: 0.22,
   windStrength: 1.0,
-  bloomIntensity: 0.24,
-  bloomThreshold: 0.62,
-  dofFocusDistance: 4.1,
-  dofStrength: 0.20,
+  bloomIntensity: 0.22,
+  bloomThreshold: 0.64,
+  dofFocusDistance: 0.35,
+  dofStrength: 0.18,
   parallaxIntensity: 0.35,
-  parallaxSmoothing: 6.0,
-  cursorLightIntensity: 0.55,
+  parallaxSmoothing: 6.5,
+  cursorLightIntensity: 0.45,
   enableShadows: true,
   maxFps: 60,
   maxPixelRatio: 2,
