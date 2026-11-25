@@ -270,19 +270,19 @@ window.TP = window.TP || {};
     if (penguin) penguin.mount();
   }
 
-  function initContrast() {
-    var input = document.getElementById('contrast-control');
-    var output = document.getElementById('contrast-value');
+  function initBrightness() {
+    var input = document.getElementById('brightness-control');
+    var output = document.getElementById('brightness-value');
     if (!input) return;
 
-    var storageKey = 'tp-page-contrast';
+    var storageKey = 'tp-page-brightness';
     var min = Number(input.min) || 100;
     var max = Number(input.max) || 130;
     var fallback = Number(input.value) || 110;
 
     function apply(value, persist) {
       var amount = Math.min(max, Math.max(min, Number(value) || fallback));
-      document.documentElement.style.setProperty('--page-contrast', String(amount / 100));
+      document.documentElement.style.setProperty('--page-brightness', String(amount / 100));
       input.value = String(amount);
       if (output) output.textContent = amount + '%';
       if (persist) {
@@ -385,7 +385,7 @@ window.TP = window.TP || {};
     TP.pipeline.init();
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
-    initContrast();
+    initBrightness();
     initTypewriter();
     initTabs();
     initScene();
