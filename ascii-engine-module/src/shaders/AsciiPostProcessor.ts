@@ -145,6 +145,7 @@ export class AsciiPostProcessor {
         uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
+        uMascotStudio: { value: config.mode === 'mascot' ? 1.0 : 0.0 },
         uBgColor: { value: bgColor },
         uTime: { value: 0 },
       },
@@ -258,6 +259,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
     this.compositeMaterial.uniforms.uBlockBlendWeight.value = config.blockBlendWeight;
     this.compositeMaterial.uniforms.uDaylight.value = config.atmosphere === 'day' ? 1.0 : 0.0;
+    this.compositeMaterial.uniforms.uMascotStudio.value = config.mode === 'mascot' ? 1.0 : 0.0;
     this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
 
     return this.applyResolutionProfile(profile, config, false);

@@ -55,14 +55,14 @@ export class VfxController {
 
     this.cursorLight = new THREE.PointLight(
       new THREE.Color(options.config.palette.cursorLight),
-      options.config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 13.5),
+      this.mode === 'mascot' ? 0 : options.config.cursorLightIntensity * 13.5,
       this.mode === 'mascot' ? 10.0 : 18.0,
       1.5
     );
     this.cursorLight.position.set(0, 2.4, 4.2);
     options.scene.add(this.cursorLight);
 
-    const count = options.particleCount ?? (this.mode === 'mascot' ? 16 : 240);
+    const count = options.particleCount ?? (this.mode === 'mascot' ? 0 : 240);
     if (count > 0) {
       this.buildParticles(options.scene, options.config, count);
     }
@@ -320,7 +320,7 @@ export class VfxController {
     const dayScale = config.atmosphere === 'day' ? 0.55 : 1.0;
     this.cursorLight.color.set(config.palette.cursorLight);
     this.cursorLight.intensity =
-      config.cursorLightIntensity * (this.mode === 'mascot' ? 4.5 : 13.5 * dayScale);
+      this.mode === 'mascot' ? 0 : config.cursorLightIntensity * 13.5 * dayScale;
 
     this.syncParticleAtmosphere(config);
   }

@@ -35,6 +35,12 @@ import {
 } from './shaders/objectOutline';
 import { VfxController } from './vfx/VfxController';
 import { MapLoader } from './world/MapLoader';
+import {
+  type BuiltMascotStage,
+  MASCOT_BACKDROP_HEX,
+  MASCOT_FLOOR_HEX,
+  MascotStageBuilder,
+} from './world/MascotStageBuilder';
 import { PlaygroundSceneBuilder } from './world/PlaygroundSceneBuilder';
 import { SceneComposerKit, SceneDepthRig } from './world/SceneComposerKit';
 import type {
@@ -58,6 +64,7 @@ import type {
 
 export type {
   AtmosphereMode,
+  BuiltMascotStage,
   DeepPartial,
   EngineConfig,
   EngineLifecycleState,
@@ -103,6 +110,9 @@ export {
   NeonPulseSystem,
   RenderSyncSystem,
   MapLoader,
+  MASCOT_BACKDROP_HEX,
+  MASCOT_FLOOR_HEX,
+  MascotStageBuilder,
   PlaygroundSceneBuilder,
   SceneComposerKit,
   SceneDepthRig,

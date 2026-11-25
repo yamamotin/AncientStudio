@@ -37,6 +37,11 @@ import type {
 } from '../types';
 import { VfxController } from '../vfx/VfxController';
 import { MapLoader } from '../world/MapLoader';
+import {
+  type BuiltMascotStage,
+  MASCOT_BACKDROP_HEX,
+  MascotStageBuilder,
+} from '../world/MascotStageBuilder';
 import { type BuiltPlaygroundScene, PlaygroundSceneBuilder } from '../world/PlaygroundSceneBuilder';
 
 /**
@@ -75,6 +80,8 @@ export class AsciiEngineCore {
   private windSystem: WindSystem | null = null;
   private vfx: VfxController | null = null;
   private builtPlayground: BuiltPlaygroundScene | null = null;
+  private builtMascot: BuiltMascotStage | null = null;
+  private mascotRootObj: THREE.Group | null = null;
   private primaryEntityId: EntityId | null = null;
 
   // Viewport & telemetry state
@@ -276,31 +283,21 @@ export class AsciiEngineCore {
     ecsWorld: World,
     systemRunner: SystemRunner
   ): void {
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(this.config.palette.background);
-    this.scene = scene;
+    // Ensure post-processor backdrop matches the #13222E mascot color-theory backdrop
+    this.config = {
+      ...this.config,
+      palette: {
+        ...this.config.palette,
+        background: MASCOT_BACKDROP_HEX,
+      },
+    };
 
-    // Dedicated studio three-point lighting rig for high-contrast ASCII Tux silhouette
-    const hemi = new THREE.HemisphereLight(0xd8f3ff, 0x09111a, 1.35);
-    scene.add(hemi);
+    const builtMascot = MascotStageBuilder.build(this.config);
+    this.builtMascot = builtMascot;
+    this.scene = builtMascot.scene;
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.35);
-    keyLight.position.set(-2.6, 4.2, 4.8);
-    if (this.config.enableShadows) {
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.width = 512;
-      keyLight.shadow.mapSize.height = 512;
-      keyLight.shadow.bias = -0.0005;
-      keyLight.shadow.normalBias = 0.02;
-    }
-    scene.add(keyLight);
-
-    const rimLight = new THREE.PointLight(new THREE.Color(this.config.palette.warmCore), 10.5, 12, 1.5);
-    rimLight.position.set(2.8, 2.5, -2.2);
-    scene.add(rimLight);
-
-    const cameraAnchor: [number, number, number] = [0, 1.02, 4.15];
-    const lookTarget: [number, number, number] = [0, 0.92, 0];
+    const cameraAnchor: [number, number, number] = [0, 1.08, 4.25];
+    const lookTarget: [number, number, number] = [0, 0.9, 0];
 
     const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 38;
     const camera = new THREE.PerspectiveCamera(initialFov, 1, 0.3, 40);
@@ -308,20 +305,23 @@ export class AsciiEngineCore {
     camera.lookAt(...lookTarget);
     this.camera = camera;
 
-    const { entityId } = TuxEntityFactory.spawn(ecsWorld, scene, {
-      position: [0, -0.05, 0],
-      scale: 1.05,
-      includeShowcaseRig: true,
+    const { entityId, rootGroup } = TuxEntityFactory.spawn(ecsWorld, builtMascot.scene, {
+      position: [0, 0.04, 0],
+      scale: 1.02,
+      includeShowcaseRig: false,
+      bobAmplitude: 0.018,
     });
     this.primaryEntityId = entityId;
+    this.mascotRootObj = rootGroup;
 
+    // Zero particles & zero cursor light hotspot so the floor + backdrop stay clean and minimalist
     this.vfx = new VfxController({
-      scene,
+      scene: builtMascot.scene,
       config: this.config,
       baseCameraPos: cameraAnchor,
       lookAtTarget: lookTarget,
       particleOrigin: [0, 0],
-      particleCount: 16,
+      particleCount: 0,
     });
 
     // No InputSystem on mascot stage: Tux stays pointer-free and spins smoothly on horizontal yaw
@@ -380,10 +380,16 @@ export class AsciiEngineCore {
 
     if (prevShadows !== this.config.enableShadows) {
       this.renderer.shadowMap.enabled = this.config.enableShadows;
+      if (this.builtMascot) {
+        this.builtMascot.keyLight.castShadow = this.config.enableShadows;
+      }
       this.renderer.shadowMap.needsUpdate = true;
     }
 
     // Apply live atmosphere & palette updates to sky, fog, architecture, shadows & boulevard uniforms
+    if (this.builtMascot && !partialConfig.palette?.background) {
+      this.config.palette.background = MASCOT_BACKDROP_HEX;
+    }
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.set(this.config.palette.background);
     }
@@ -444,6 +450,8 @@ export class AsciiEngineCore {
     this.ecsWorld?.clear(true);
     this.ecsWorld = null;
     this.builtPlayground = null;
+    this.builtMascot = null;
+    this.mascotRootObj = null;
     this.vfx = null;
 
     this.lifecycle?.disposeAll(this.scene);
@@ -690,6 +698,36 @@ export class AsciiEngineCore {
           } else {
             u[key].value.set(0, 0, 0, 0);
           }
+        }
+      }
+    }
+
+    if (this.builtMascot) {
+      const mu = this.builtMascot.floorMaterial.uniforms;
+      if (mu.uCamPos) {
+        mu.uCamPos.value.copy(this.camera.position);
+      }
+
+      const keyShadow = this.builtMascot.keyLight.shadow;
+      if (this.config.enableShadows && keyShadow.map) {
+        if (mu.uDirShadowMap) mu.uDirShadowMap.value = keyShadow.map.texture;
+        if (mu.uDirShadowMatrix) mu.uDirShadowMatrix.value.copy(keyShadow.matrix);
+        if (mu.uShadowMapSize) {
+          mu.uShadowMapSize.value.set(keyShadow.mapSize.width, keyShadow.mapSize.height);
+        }
+        if (mu.uShadowEnabled) mu.uShadowEnabled.value = 1.0;
+      } else if (mu.uShadowEnabled) {
+        mu.uShadowEnabled.value = 0.0;
+      }
+
+      if (this.mascotRootObj) {
+        this.mascotRootObj.updateWorldMatrix(true, false);
+        const el = this.mascotRootObj.matrixWorld.elements;
+        if (mu.uSubjectYaw) {
+          mu.uSubjectYaw.value = Math.atan2(el[8] ?? 0, el[10] ?? 1);
+        }
+        if (mu.uSubjectPos) {
+          mu.uSubjectPos.value.set(el[12] ?? 0, 0.0, el[14] ?? 0);
         }
       }
     }
