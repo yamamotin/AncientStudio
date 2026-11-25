@@ -55,20 +55,21 @@ documentação era `7d5d2a3c09417f8ed9cfc01a47be19d4e350d2c4`.
   `thickness`, `intensity`, `opacity` e `enabled`. Não é um pós-processo global e
   não foi aplicada ao pinguim nesta data.
 
-## 4. Backend — trilha de domínios (PRs #23 e #25)
+## 4. Backend — trilha completa do Monólito Modular (PRs #23, #25 e fechamento Fases 4 e 5)
 
-- Arquitetura de monólito modular orientado a eventos, com domínios em
-  `backend/app/domains/` e configuração migrada para `backend/app/core/config.py`.
-- Fase 2: cache Redis, fila Redis, workers no lifespan da aplicação e rate limit.
-- Fase 3: scrape, pipelines de IA e ponte n8n, além dos routers `jobs`,
-  `scraping`, `ai_workflows` e `pipelines`.
-- Suíte do backend ampliada de 22 para **53 testes pytest**, com `ruff` limpo.
+- **Fase 1 (PR #23):** consolidação do monólito modular orientado a eventos em `backend/app/{core,cache,queue,workers,domains,api}`, compatibilidade estrita com Python 3.10+ (`app.core.time`), contratos de erro RFC 7807 (`problem+json`), rastreamento `X-Correlation-ID`, Gateway Fiscal com HMAC/idempotência e ETL sobre `ledger.csv`.
+- **Fase 2 (PR #25):** `RedisTTLCache` (`SET ... EX ... NX` atômico e serialização JSON/Pydantic segura sem `pickle`) e `RedisJobQueue` (Hashes, Lists, `ZSET` delayed retries e Dead-Letter Queue) com fallback automático para memória, orquestração concorrente de `AsyncWorkerRunner` via `lifespan`, `RateLimitMiddleware` por escopo/IP (`X-RateLimit-*`) e `SecurityHeadersMiddleware`.
+- **Fase 3 (PR #25):** `HttpxPageFetcher` com limite de bytes em streaming, retries e guarda SSRF em cada salto de redirect + 3 extratores reais (`StructuredMetadataExtractor`, `HttpStaticExtractor`, `SitemapXmlExtractor` sem DTD/XXE) no tópico `scraping.extract`; `OpenAICompatibleInferenceAdapter` + `AIWorkflowService` validados por schemas Pydantic no tópico `ai_workflows.execute`; 3 workflows n8n versionados (`invoice-enrichment`, `scraping-postprocess`, `ai-anomaly-alert`), ponte `EventBus -> JobQueue` e callbacks autenticados por HMAC (`POST /api/v1/workflows/callbacks/{workflow_id}`).
+- **Fase 4 (fechamento):** `RepositoryStageInspector` implementando `PipelineStageInspectorPort` no worker `pipelines.simulate` com auditorias estáticas, de AST, manifestos, bundles e Dockerfiles reais para `backend-api`, `ascii-engine` e `portfolio-static`, telemetria estruturada por estágio, **RCA verificável** (`GET /api/v1/pipelines/runs/{job_id}`) e suíte de resiliência/carga concorrente (rajada multi-worker, tempestade de idempotência, falhas transitórias, isolamento em DLQ e backpressure `503`).
+- **Fase 5 — Última (fechamento):** Console Técnico RAG em `backend/app/domains/rag_console/` e `/api/v1/rag/*` (`index/status`, `index/rebuild`, `search`, `query`, `sources/{chunk_id}`) com chunking estrutural por AST/seções Markdown sobre a documentação e o código real do repositório, recuperação híbrida **Okapi BM25 + vetores densos L2-normalizados** fundidos via **Reciprocal Rank Fusion (RRF)** e citações `[1]..[k]` com verificação `verified_on_disk` por SHA-256 da fatia de linhas (além da integração em `assets/js/api-client.js`).
+- Suíte do backend ampliada de 22 para **66 testes `pytest`** (`33` unitários + `33` integração/resiliência/carga), com `ruff` limpo.
 
 ## 5. Verificação consolidada
 
 ```text
 node --test tests/*.test.js       -> 47/47
-pytest (backend)                  -> 53 passed
+pytest (backend)                  -> 66 passed (33 unit + 33 integration)
+python3 -m unittest (legado)      -> 6 passed
 ruff check .                      -> All checks passed!
 engine typecheck / build          -> OK
 engine build:portfolio            -> OK

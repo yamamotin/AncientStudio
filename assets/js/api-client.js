@@ -94,6 +94,44 @@ window.TP = window.TP || {};
         headers: { 'X-API-Key': apiKey || '' }
       });
     },
+    pipelineTargets: function () {
+      return request('/pipelines/targets');
+    },
+    runPipeline: function (payload, apiKey) {
+      return request('/pipelines/runs', {
+        method: 'POST',
+        body: payload || {},
+        headers: { 'X-API-Key': apiKey || '' }
+      });
+    },
+    pipelineRunStatus: function (jobId, apiKey) {
+      return request('/pipelines/runs/' + encodeURIComponent(jobId), {
+        headers: { 'X-API-Key': apiKey || '' }
+      });
+    },
+    ragIndexStatus: function () {
+      return request('/rag/index/status');
+    },
+    ragRebuildIndex: function (asyncJob, apiKey) {
+      var suffix = asyncJob ? '?async_job=true' : '';
+      return request('/rag/index/rebuild' + suffix, {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey || '' }
+      });
+    },
+    ragSearch: function (payload) {
+      return request('/rag/search', { method: 'POST', body: payload || {} });
+    },
+    ragQuery: function (payload, apiKey) {
+      return request('/rag/query', {
+        method: 'POST',
+        body: payload || {},
+        headers: { 'X-API-Key': apiKey || '' }
+      });
+    },
+    ragSourceDetail: function (chunkId) {
+      return request('/rag/sources/' + encodeURIComponent(chunkId));
+    },
     describeError: function (error) {
       if (!error) return 'unknown error';
       if (error.status === 0) return 'network unreachable';
