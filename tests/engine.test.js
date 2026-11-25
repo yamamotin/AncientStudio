@@ -333,7 +333,7 @@ test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & 
   // Verify clean WebGL resource disposal & scene detachment when destroying an ECS entity
   const countBeforeDestroy = ecsWorld.getEntityCount();
   const droneRenderable = ecsWorld.getComponent(droneId, 'Renderable');
-  assert.ok(droneRenderable.object3D.parent === built.scene, 'Drone mesh attached to scene');
+  assert.ok(droneRenderable.object3D.parent !== null, 'Drone mesh attached to scene depth layer group');
   assert.equal(ecsWorld.destroyEntity(droneId, true), true);
   assert.equal(ecsWorld.getEntityCount(), countBeforeDestroy - 1);
   assert.equal(droneRenderable.object3D.parent, null, 'destroyEntity detaches and disposes Object3D');
@@ -488,6 +488,80 @@ test('GPU lighten block-detail blend (~35%), WindSystem street props, and scroll
   assert.equal(releasedSnap.active, true, 'Briefly holds view angle after finger release before smooth relax');
 
   ptr.detach();
+  ecsWorld.clear(true);
+  pkg.LifecycleManager.disposeObject3D(built.scene);
+});
+
+test('SceneComposerKit, SceneDepthRig & EntityBlueprintRegistry compose layered cyberpunk scenes cleanly', () => {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/ecs/EntityBlueprint.ts')),
+    'EntityBlueprint.ts module exists'
+  );
+  assert.ok(
+    existsSync(path.join(root, 'ascii-engine-module/src/world/SceneComposerKit.ts')),
+    'SceneComposerKit.ts module exists'
+  );
+
+  const vm = require('node:vm');
+  const sandbox = {
+    window: {},
+    self: {},
+    document: { createElement: () => ({ getContext: () => null }) },
+    navigator: { userAgent: 'node' },
+    performance: { now: () => 0 }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(typeof pkg.EntityBlueprintRegistry, 'function');
+  assert.equal(typeof pkg.SceneComposerKit, 'function');
+  assert.equal(typeof pkg.SceneDepthRig, 'function');
+
+  const ecsWorld = new pkg.World();
+  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
+  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
+
+  // 1. DepthRig groups organize foreground, midground, background & sky layers
+  assert.ok(built.depthRig.foreground.children.length > 0, 'Foreground layer populated');
+  assert.ok(built.depthRig.midground.children.length > 0, 'Midground layer populated');
+  assert.ok(built.depthRig.background.children.length > 0, 'Background layer populated');
+  assert.ok(built.depthRig.sky.children.length > 0, 'Sky layer populated');
+
+  // 2. ECS DepthLayer & Blueprint Registry queries
+  const fgEntities = ecsWorld.queryByLayer('foreground');
+  const mgEntities = ecsWorld.queryByLayer('midground');
+  assert.ok(fgEntities.includes(built.avatarEntityId), 'Central Netrunner protagonist sits in foreground layer');
+  assert.ok(mgEntities.includes(built.shrineEntityId), 'Holo-Reactor sits in midground layer');
+  assert.equal(
+    ecsWorld.getComponent(built.avatarEntityId, 'DepthLayer').contrastPriority,
+    1.0,
+    'Foreground protagonist carries top silhouette contrast priority'
+  );
+
+  // 3. Blueprint Registry lists all reusable cyberpunk prefabs & supports role-scoped disposal
+  const bpIds = built.blueprintRegistry.listIds();
+  assert.ok(bpIds.includes('cyber.netrunner-avatar'));
+  assert.ok(bpIds.includes('cyber.wind-banner'));
+  assert.ok(bpIds.includes('cyber.hover-drone'));
+
+  const removedVehicles = ecsWorld.destroyEntitiesByRole('vehicle', true);
+  assert.ok(removedVehicles >= 3, 'destroyEntitiesByRole cleanly removes and disposes all hover-spinners');
+
+  // 4. Palette live-update via NeonMaterialBank
+  built.materialBank.updatePalette({
+    background: '#020308',
+    warmLight: '#00FFAA',
+    warmCore: '#FFEE55',
+    coolAmbient: '#22CCFF',
+    foliageAccent: '#5588FF',
+    cursorLight: '#FFFFFF'
+  });
+  assert.ok(built.materialBank.magenta.color.g > 0.8, 'NeonMaterialBank updates shared emissive materials in one call');
+
   ecsWorld.clear(true);
   pkg.LifecycleManager.disposeObject3D(built.scene);
 });

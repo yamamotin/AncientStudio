@@ -223,13 +223,17 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float gy = abs(gyDepth) > abs(gyLuma) ? gyDepth : gyLuma;
     float edgeMag = length(vec2(gx, gy));
 
-    float effectiveEdge = edgeMag * uEdgeStrength * (1.0 - coc * 0.78) * smoothstep(0.025, 0.12, perceivedLuma);
+    // Adaptive compact-grid silhouette boost: when cells are coarser (fewer columns on mobile/compact views),
+    // lower the structural edge threshold slightly so character & building silhouettes stay unmistakably sharp!
+    float gridColsApprox = uResolution.x / max(uCellSize.x, 4.0);
+    float compactEdgeBoost = mix(1.22, 1.0, clamp((gridColsApprox - 48.0) / 72.0, 0.0, 1.0));
+    float effectiveEdge = edgeMag * uEdgeStrength * compactEdgeBoost * (1.0 - coc * 0.78) * smoothstep(0.025, 0.12, perceivedLuma);
 
     // 6. Select fine typographic glyph index in the 1D horizontal atlas
     float glyphIndex = floor(perceivedLuma * (uRampCount - 0.001));
 
     // Directional structural silhouette glyphs: [0]='/' [1]='\\' [2]='|' [3]='_' [4]='[' [5]=']'
-    if (effectiveEdge > 0.29 && uStructuralCount >= 6.0 && !isSky) {
+    if (effectiveEdge > 0.27 && uStructuralCount >= 6.0 && !isSky) {
       float absGx = abs(gx);
       float absGy = abs(gy);
       float structOffset = 2.0;

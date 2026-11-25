@@ -372,13 +372,8 @@ export class AsciiEngineCore {
         .lerp(new THREE.Color('#D8F6FF'), 0.4);
       this.builtPlayground.torchLight.color.set(p.warmLight);
 
-      // Update shared cyberpunk architectural neon materials dynamically on preset switch
-      this.builtPlayground.neonMaterials.cyan.color.set(p.coolAmbient);
-      this.builtPlayground.neonMaterials.cyan.emissive.set(p.coolAmbient);
-      this.builtPlayground.neonMaterials.magenta.color.set(p.warmLight);
-      this.builtPlayground.neonMaterials.magenta.emissive.set(p.warmLight);
-      this.builtPlayground.neonMaterials.amber.color.set(p.warmCore);
-      this.builtPlayground.neonMaterials.amber.emissive.set(p.warmCore);
+      // Update shared cyberpunk architectural neon material bank dynamically on preset switch
+      this.builtPlayground.materialBank.updatePalette(p);
 
       this.builtPlayground.brazierLights.forEach((bl, idx) => {
         bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);

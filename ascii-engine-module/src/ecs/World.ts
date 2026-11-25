@@ -109,6 +109,16 @@ export interface LifecycleTagComponent {
   label: string;
 }
 
+export type SceneDepthLayerName = 'foreground' | 'midground' | 'background' | 'sky';
+
+export interface DepthLayerComponent {
+  layer: SceneDepthLayerName;
+  /** Depth order index (0 = foreground focal, 1 = midground street, 2 = background skyline, 3 = sky) */
+  order: number;
+  /** Silhouette contrast priority [0..1] for readable separation */
+  contrastPriority: number;
+}
+
 export interface WindSwayComponent {
   /** Base rotation X/Y/Z before wind oscillation */
   baseRotX: number;
@@ -150,6 +160,7 @@ export interface ComponentMap {
   NeonBeacon: NeonBeaconComponent;
   PatrolPath: PatrolPathComponent;
   WindSway: WindSwayComponent;
+  DepthLayer: DepthLayerComponent;
   LifecycleTag: LifecycleTagComponent;
   InputState: InputStateComponent;
 }
@@ -168,6 +179,7 @@ export class World {
     NeonBeacon: new Map(),
     PatrolPath: new Map(),
     WindSway: new Map(),
+    DepthLayer: new Map(),
     LifecycleTag: new Map(),
     InputState: new Map(),
   };
@@ -261,6 +273,38 @@ export class World {
 
   public getEntityCount(): number {
     return this.entities.size;
+  }
+
+  /**
+   * Queries all entities belonging to a specific depth layer (`'foreground' | 'midground' | 'background' | 'sky'`).
+   */
+  public queryByLayer(layer: SceneDepthLayerName): EntityId[] {
+    const result: EntityId[] = [];
+    for (const [id, comp] of this.stores.DepthLayer.entries()) {
+      if (comp.layer === layer) {
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Destroys all entities matching a given `LifecycleTag.role` and cleanly disposes their WebGL resources.
+   */
+  public destroyEntitiesByRole(role: LifecycleTagComponent['role'], disposeGpu = true): number {
+    const toDestroy: EntityId[] = [];
+    for (const [id, tag] of this.stores.LifecycleTag.entries()) {
+      if (tag.role === role) {
+        toDestroy.push(id);
+      }
+    }
+    let count = 0;
+    for (const id of toDestroy) {
+      if (this.destroyEntity(id, disposeGpu)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /**
