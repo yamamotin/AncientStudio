@@ -70,7 +70,7 @@ window.TP = window.TP || {};
     contact: function () {
       print([
         'email:     yamah1337@gmail.com',
-        'linkedin:  linkedin.com/in/eron-yamamoto-della-justina-bb3384156',
+        'linkedin:  www.linkedin.com/in/eron-yamamoto-bb3384156',
         'github:    TODO — username não informado'
       ]);
     },

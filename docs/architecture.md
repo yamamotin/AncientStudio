@@ -15,7 +15,7 @@ AncientStudio/
 │   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
 │   │   ├── api-client.js              # Chamadas reais a /api/v1 (ETL, Gateway, n8n, Pipelines, RAG)
 │   │   ├── main.js                    # Composição da UI, fullscreen e controle de brilho (130%)
-│   │   ├── neofetch.js                # Palco Tux 3D + fallback raycaster ASCII
+│   │   ├── neofetch.js                # Palco Tux 3D + placeholder ASCII estático
 │   │   ├── pipeline.js / api.js / console.js
 │   │   ├── engine-adapter.js          # Ponte para modos day / night / rain e mascot
 │   │   └── ascii-engine.bundle.js     # Bundle IIFE gerado por ascii-engine-module
@@ -88,7 +88,7 @@ AncientStudio/
 ### Frontend e Engine 3D
 
 - `pt-br` é o idioma primário, com paridade total de chaves entre `assets/i18n/pt-br.json`, `en.json` e o dicionário embutido em `assets/js/i18n.js` para funcionamento inclusive via `file://`.
-- Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações (`[github]`, `[ curriculo-pt-br ]`, `[ curriculo-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
+- Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações no padrão `[ termo ]` (`[ github ]`, `[ linkedin ]`, `[ contato ]`/`[ contact ]`, `[ curriculo-pt-br ]`/`[ resume-pt-br ]` e `[ curriculo-en ]`/`[ resume-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
 - `[ ASCII REALMS // SCENE ]` expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D girando continuamente em `yaw`, isolado de eventos de mouse/toque.
 - `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend.
 - `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, workflows n8n, simulador de pipelines e console RAG), sem respostas simuladas.

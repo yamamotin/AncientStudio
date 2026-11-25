@@ -157,14 +157,78 @@ test('page brightness defaults to 130%, allows up to 150%, and updates live', ()
   assert.doesNotMatch(main, /page-contrast|contrast-control/i);
 });
 
-test('fallback penguin yaw advances from elapsed time without pointer events', () => {
+test('contact button uses email on mobile and WhatsApp on other devices', () => {
+  function loadContactApi(profile) {
+    const sandbox = {
+      console,
+      document: {
+        readyState: 'loading',
+        addEventListener() {},
+        getElementById: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => []
+      }
+    };
+    sandbox.window = {
+      TP: {},
+      navigator: profile.navigator || {},
+      matchMedia: (query) => ({
+        matches: Boolean(profile.matches && profile.matches[query])
+      }),
+      addEventListener() {}
+    };
+    sandbox.TP = sandbox.window.TP;
+    vm.createContext(sandbox);
+    vm.runInContext(main, sandbox);
+    return sandbox.TP.contact;
+  }
+
+  const email = 'mailto:yamah1337@gmail.com';
+  const whatsapp = 'https://api.whatsapp.com/send/?phone=5544920009249';
+
+  const iphone = loadContactApi({ navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)' } });
+  assert.equal(iphone.isMobile(), true);
+  assert.equal(iphone.destination(), email);
+
+  const smallTouch = loadContactApi({
+    matches: { '(pointer: coarse)': true, '(max-width: 900px)': true }
+  });
+  assert.equal(smallTouch.destination(), email);
+
+  const desktop = loadContactApi({ navigator: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' } });
+  assert.equal(desktop.isMobile(), false);
+  assert.equal(desktop.destination(), whatsapp);
+
+  const touchLaptop = loadContactApi({ matches: { '(pointer: coarse)': true } });
+  assert.equal(touchLaptop.destination(), whatsapp);
+
+  includesAll(main, [
+    'CONTACT_EMAIL_URL',
+    'CONTACT_WHATSAPP_URL',
+    '(pointer: coarse)',
+    '(max-width: 900px)',
+    'initContactButton();'
+  ]);
+  const initStart = main.indexOf('function init()');
+  const initEnd = main.indexOf('function scheduleUiIntegrations');
+  assert.ok(
+    main.indexOf('initContactButton();', initStart) < initEnd,
+    'contact href is synced during init, before deferred UI wiring'
+  );
+  assert.match(html, /id="contact-button"[^>]*href="mailto:yamah1337@gmail\.com"/);
+});
+
+test('fallback penguin is static ASCII art without pointer events or RAF', () => {
   let queuedFrame = null;
+  let sceneModeHandler = null;
   const frame = {
     attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; },
     getAttribute(name) { return this.attrs[name] || null; },
     getBoundingClientRect() { return { width: 420, height: 240, left: 0, top: 0 }; },
-    addEventListener() {}
+    addEventListener(type, handler) {
+      if (type === 'tp:scene-mode') sceneModeHandler = handler;
+    }
   };
   const logo = { style: {}, textContent: '' };
   const sandbox = {
@@ -198,18 +262,35 @@ test('fallback penguin yaw advances from elapsed time without pointer events', (
   vm.runInContext(neofetch, sandbox);
   sandbox.TP.neofetch.init();
 
-  const initialYaw = sandbox.TP.neofetch.getState().yaw;
-  for (let index = 1; index <= 6; index += 1) {
-    const callback = queuedFrame;
-    assert.equal(typeof callback, 'function', 'RAF loop is scheduled');
-    queuedFrame = null;
-    callback(index * 100);
-  }
-  const finalYaw = sandbox.TP.neofetch.getState().yaw;
+  const staticArt = logo.textContent;
+  assert.match(staticArt, /o o/, 'friendly eyes are legible');
+  assert.match(staticArt, />/, 'wide beak is legible');
+  assert.match(staticArt, /-----/, 'belly is legible');
+  assert.ok(staticArt.includes('/_\\'), 'webbed feet are legible');
+  assert.equal(queuedFrame, null, 'no fallback RAF loop is scheduled');
+  assert.equal(sandbox.TP.neofetch.getState().autoSpin, false);
+  assert.equal(frame.getAttribute('data-auto-spin'), 'false');
 
-  assert.ok(finalYaw > initialYaw + 0.05, `yaw did not advance: ${initialYaw} -> ${finalYaw}`);
-  assert.equal(frame.getAttribute('data-auto-spin'), 'true');
+  // API compatibility: yaw can be recorded, but the placeholder never re-renders.
+  sandbox.TP.neofetch.setYaw(1.2);
+  assert.equal(sandbox.TP.neofetch.getState().yaw, 1.2);
+  assert.equal(logo.textContent, staticArt, 'static art does not react to setYaw');
+
+  // Engine ready: the fallback is left untouched and no animation loop is started.
+  assert.equal(typeof sceneModeHandler, 'function');
+  sceneModeHandler({ detail: { mode: 'engine' } });
+  assert.equal(sandbox.TP.neofetch.getState().engineActive, true);
+  assert.equal(logo.textContent, staticArt);
+  assert.equal(queuedFrame, null);
+
+  // Engine failure: the same static art remains as a safe fallback.
+  sceneModeHandler({ detail: { mode: 'fallback' } });
+  assert.equal(sandbox.TP.neofetch.getState().engineActive, false);
+  assert.equal(logo.textContent, staticArt);
+  assert.equal(queuedFrame, null);
+
   assert.equal(sandbox.TP.neofetch.getState().pitch, undefined, 'no pitch state remains');
+  assert.doesNotMatch(neofetch, /requestAnimationFrame|AUTO_SPIN_RAD_PER_SEC|state\.yaw \+=/);
   assert.doesNotMatch(neofetch, /angleBadge|neofetch-penguin-telemetry|state\.pitch/);
 });
 

@@ -95,3 +95,26 @@ nenhum código de contorno foi adicionado ao frontend.
 - Brilho: padrão alterado de `110%` para `130%` e máximo de `130%` para `150%`
   (`--page-brightness: 1.3`, `value="130"`, `max="150"`). Controles de cenário e
   pinguim permanecem inalterados.
+
+## 8. Placeholder ASCII do Neofetch
+
+- O fallback rotacionado por raycaster em `assets/js/neofetch.js` foi substituído
+  por uma arte ASCII estática de pinguim (olhos, bico e pés legíveis), exibida
+  enquanto `engineActive === false` ou após falha da engine.
+- Nenhum `requestAnimationFrame`, avanço de `yaw` ou listener de ponteiro existe
+  no placeholder. `data-mode="engine"` / `tp:scene-mode` apenas oculta o placeholder
+  via CSS; o pinguim 3D ativo mantém sua rotação horizontal original.
+- API preservada: `init`, `computeFallbackGrid`, `setYaw`, `getState` e o ajuste
+  adaptativo de fonte/container para desktop e mobile.
+
+## 9. Botões de ação
+
+- Rótulos padronizados no formato `[ termo ]`, sem `--` ou `github` colado:
+  `pt-br` usa `[ contato ]` e `[ curriculo-* ]`; `en` usa `[ contact ]` e
+  `[ resume-* ]`. Dicionários standalone e embutidos permanecem idênticos.
+- LinkedIn corrigido para `https://www.linkedin.com/in/eron-yamamoto-bb3384156`,
+  inclusive no comando `contact` do console.
+- Contato continua sendo um `<a>` acessível: em mobile abre `mailto:`, em
+  desktop/telas não-mobile direciona para
+  `https://api.whatsapp.com/send/?phone=5544920009249`. A detecção combina UA,
+  `userAgentData.mobile` e media queries de ponteiro/largura, sem listeners de mouse.

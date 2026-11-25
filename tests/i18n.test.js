@@ -26,6 +26,30 @@ test('embedded dictionaries match the standalone translation files', () => {
   assert.deepEqual(Object.keys(bundled.en).sort(), Object.keys(en).sort());
 });
 
+test('action labels use the [ term ] pattern and match the active language', () => {
+  const keys = ['actions.cvPt', 'actions.cvEn', 'actions.github', 'actions.linkedin', 'actions.contact'];
+  for (const key of keys) {
+    for (const [lang, dictionary] of [['pt-br', pt], ['en', en]]) {
+      assert.match(dictionary[key], /^\[ [^\]]+ \]$/, `${lang}.${key} must be bracketed with inner spaces`);
+    }
+  }
+  assert.deepEqual(keys.map((key) => pt[key]), [
+    '[ curriculo-pt-br ]',
+    '[ curriculo-en ]',
+    '[ github ]',
+    '[ linkedin ]',
+    '[ contato ]'
+  ]);
+  assert.deepEqual(keys.map((key) => en[key]), [
+    '[ resume-pt-br ]',
+    '[ resume-en ]',
+    '[ github ]',
+    '[ linkedin ]',
+    '[ contact ]'
+  ]);
+  assert.doesNotMatch(JSON.stringify({ pt, en }), /\[--|\[github\]|\[ --/);
+});
+
 test('HTML carries data-i18n hooks for labels and attributes', () => {
   assert.match(html, /id="lang-toggle"/);
   assert.match(html, /data-i18n-attr="data-text:hero.role"/);
