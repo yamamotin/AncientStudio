@@ -23,6 +23,7 @@ test('HTML carries data-i18n hooks for labels and attributes', () => {
   assert.match(html, /data-i18n-attr="data-text:hero.role"/);
   assert.match(html, /data-i18n="actions.cvPt"/);
   assert.match(html, /data-i18n="actions.cvEn"/);
+  assert.match(html, /data-i18n-attr="alt:hero.portraitAlt"/);
   assert.match(html, /id="workflow-token"/);
 });
 

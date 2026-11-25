@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Merge an open PR into main only after every required check is SUCCESS for its
-# exact head SHA. No PR approval is attempted: GitHub rejects self-approval,
-# and this repository does not require reviews to merge.
+# Full agent pipeline for a green PR. Permanent order:
+#   merge (resolving conflicts when needed) -> delete branch -> redeploy.
+# Conflict resolution is part of the MERGE phase: GitHub cannot merge a dirty PR,
+# so `update-branch` runs before the merge call and the checks are re-evaluated.
+# No PR approval is attempted: GitHub rejects self-approval, and this repository
+# does not require reviews to merge.
 set -euo pipefail
 
 REPO="${REPO:-${GITHUB_REPOSITORY:-yamamotin/AncientStudio}}"
-HEAD_SHA="${HEAD_SHA:-}"
+REQUESTED_HEAD="${HEAD_SHA:-}"
 PR_NUMBER="${PR_NUMBER:-}"
 REQUIRED_CHECKS="${REQUIRED_CHECKS:-verify,test,Ruff + pytest,Docker build}"
 WAIT_SECONDS="${WAIT_SECONDS:-900}"
 DRY_RUN="${DRY_RUN:-0}"
+MAX_RESOLVE_ATTEMPTS="${MAX_RESOLVE_ATTEMPTS:-3}"
+MAX_READY_ATTEMPTS="${MAX_READY_ATTEMPTS:-20}"
+PROTECTED_BRANCHES="${PROTECTED_BRANCHES:-main,dev/portfolio,dev/engine}"
+DEPLOY_WORKFLOWS="${DEPLOY_WORKFLOWS:-pages.yml,ci-cd.yml}"
+PERMANENT_ORDER="merge,resolve-conflicts,delete-branch,redeploy"
 
 export GH_REPO="$REPO"
 export GH_PROMPT_DISABLED=1
@@ -21,26 +29,39 @@ fi
 export GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
 
 log() { printf '%s\n' "$*"; }
+log "Pipeline order: $PERMANENT_ORDER"
+pr_field() { gh api "repos/$REPO/pulls/$PR_NUMBER" --jq "$1"; }
+main_sha() { gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha'; }
+
+is_protected() {
+  local branch="$1"
+  case ",$PROTECTED_BRANCHES," in
+    *",$branch,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
 if [ -z "$PR_NUMBER" ]; then
-  if [ -z "$HEAD_SHA" ]; then
+  if [ -z "$REQUESTED_HEAD" ]; then
     echo "HEAD_SHA or PR_NUMBER is required." >&2
     exit 2
   fi
-  PR_NUMBER=$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls?per_page=100" \
+  PR_NUMBER=$(gh api "repos/$REPO/commits/$REQUESTED_HEAD/pulls?per_page=100" \
     --jq '[.[] | select(.state == "open" and .base.ref == "main") | .number][0] // empty')
 fi
 
 if [ -z "$PR_NUMBER" ]; then
-  log "No open PR against main for ${HEAD_SHA:-PR $PR_NUMBER}; nothing to merge."
+  log "No open PR against main for ${REQUESTED_HEAD:-PR $PR_NUMBER}; nothing to do."
   exit 0
 fi
 
-state=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state')
-base=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.base.ref')
-draft=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.draft')
-head_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
-head_repo=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.repo.full_name // ""')
+state=$(pr_field '.state')
+base=$(pr_field '.base.ref')
+draft=$(pr_field '.draft')
+head_repo=$(pr_field '.head.repo.full_name // ""')
 
 if [ "$state" != "open" ] || [ "$base" != "main" ] || [ "$draft" != "false" ]; then
   log "Skipping #$PR_NUMBER: state=$state base=$base draft=$draft."
@@ -52,19 +73,18 @@ if [ -n "$head_repo" ] && [ "$head_repo" != "$REPO" ]; then
   exit 0
 fi
 
-if [ -n "$HEAD_SHA" ] && [ "$head_sha" != "$HEAD_SHA" ]; then
-  log "Skipping #$PR_NUMBER: head moved from $HEAD_SHA to $head_sha."
-  exit 0
-fi
+# ---------------------------------------------------------------------------
+# 1) Wait for every required check on the exact head SHA.
+# ---------------------------------------------------------------------------
+wait_for_checks() {
+  local sha="$1"
+  local deadline=$((SECONDS + WAIT_SECONDS))
+  local report summary
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+  while :; do
+    gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" > "$tmp/checks.json"
 
-deadline=$((SECONDS + WAIT_SECONDS))
-while :; do
-  gh api "repos/$REPO/commits/$head_sha/check-runs?per_page=100" > "$tmp/checks.json"
-
-  report=$(python3 - "$tmp/checks.json" "$REQUIRED_CHECKS" <<'PY'
+    report=$(python3 - "$tmp/checks.json" "$REQUIRED_CHECKS" <<'PY'
 import json
 import sys
 
@@ -101,51 +121,166 @@ else:
     print("SUMMARY\tREADY")
 PY
 )
-  printf '%s\n' "$report"
+    printf '%s\n' "$report"
+    summary=$(printf '%s\n' "$report" | sed -n 's/^SUMMARY\t//p')
 
-  summary=$(printf '%s\n' "$report" | sed -n 's/^SUMMARY\t//p')
-  case "$summary" in
-    READY) break ;;
-    FAIL)
+    case "$summary" in
+      READY)
+        CHECK_RESULT=READY
+        return 0
+        ;;
+      FAIL)
+        CHECK_RESULT=FAIL
+        return 1
+        ;;
+      *)
+        if (( SECONDS >= deadline )); then
+          CHECK_RESULT=TIMEOUT
+          return 1
+        fi
+        sleep 20
+        ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# PHASE 1/3 — MERGE. Conflicts are resolved inside this phase via the official
+# "update branch" API (no local rewrite of user changes), then the PR is merged.
+# ---------------------------------------------------------------------------
+resolve_branch() {
+  local expected="$1"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN: would update PR #$PR_NUMBER branch from main (expected=$expected)."
+    return 0
+  fi
+  if ! gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
+      -F expected_head_sha="$expected" >/dev/null; then
+    echo "::error::Could not auto-resolve #$PR_NUMBER from main (real conflict or stale SHA)." >&2
+    return 1
+  fi
+  log "Updated #$PR_NUMBER from main; re-running required checks on the new head."
+}
+
+resolve_attempts=0
+ready_attempts=0
+while :; do
+  if [ "$(pr_field '.state')" = "MERGED" ]; then
+    log "PR #$PR_NUMBER is already merged; another helper run owns cleanup/deploy."
+    exit 0
+  fi
+
+  head_sha=$(pr_field '.head.sha')
+  head_ref=$(pr_field '.head.ref')
+
+  if [ -n "$REQUESTED_HEAD" ] && [ "$head_sha" != "$REQUESTED_HEAD" ] && [ "$resolve_attempts" -eq 0 ]; then
+    log "Skipping #$PR_NUMBER: head moved from $REQUESTED_HEAD to $head_sha before resolution."
+    exit 0
+  fi
+
+  if ! wait_for_checks "$head_sha"; then
+    if [ "$CHECK_RESULT" = "FAIL" ]; then
       echo "::error::Required checks failed for #$PR_NUMBER ($head_sha). Not merging." >&2
-      exit 1
-      ;;
-    *)
-      if (( SECONDS >= deadline )); then
-        echo "::error::Timed out waiting for required checks on #$PR_NUMBER ($head_sha)." >&2
-        exit 1
-      fi
-      sleep 20
-      ;;
-  esac
-done
+    else
+      echo "::error::Timed out waiting for required checks on #$PR_NUMBER ($head_sha)." >&2
+    fi
+    exit 1
+  fi
 
-for _ in 1 2 3 4 5; do
   IFS=$'\t' read -r mergeable merge_state pr_head <<<"$(gh pr view "$PR_NUMBER" \
     --json mergeable,mergeStateStatus,headRefOid \
     --jq '[.mergeable, .mergeStateStatus, .headRefOid] | @tsv')"
 
   if [ "$mergeable" = "MERGEABLE" ] && [ "$merge_state" = "CLEAN" ]; then
+    if [ "$pr_head" != "$head_sha" ]; then
+      log "PR #$PR_NUMBER changed while checks were running ($pr_head). Re-evaluating."
+      REQUESTED_HEAD=""
+      continue
+    fi
     break
+  fi
+
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; } \
+      && [ "$resolve_attempts" -lt "$MAX_RESOLVE_ATTEMPTS" ]; then
+    resolve_branch "$pr_head"
+    resolve_attempts=$((resolve_attempts + 1))
+    REQUESTED_HEAD=""
+    sleep 10
+    continue
+  fi
+
+  ready_attempts=$((ready_attempts + 1))
+  if [ "$ready_attempts" -ge "$MAX_READY_ATTEMPTS" ]; then
+    echo "::error::PR #$PR_NUMBER still blocked ($mergeable/$merge_state) after resolution attempts." >&2
+    exit 1
   fi
   log "PR #$PR_NUMBER not ready yet: mergeable=$mergeable state=$merge_state."
   sleep 10
 done
 
-if [ "$mergeable" != "MERGEABLE" ] || [ "$merge_state" != "CLEAN" ]; then
-  log "PR #$PR_NUMBER still has merge blockers ($mergeable/$merge_state); leaving it open."
-  exit 0
-fi
-
-if [ "$pr_head" != "$head_sha" ]; then
-  log "PR #$PR_NUMBER changed while checks were running ($pr_head). Not merging a stale SHA."
-  exit 0
-fi
-
 if [ "$DRY_RUN" = "1" ]; then
-  log "DRY_RUN: would merge #$PR_NUMBER ($head_sha) with 'gh pr merge --merge'."
+  log "DRY_RUN: would merge #$PR_NUMBER ($head_sha), delete $head_ref and dispatch $DEPLOY_WORKFLOWS."
   exit 0
 fi
 
-gh pr merge "$PR_NUMBER" --merge
+# ---------------------------------------------------------------------------
+# PHASE 1/3 — MERGE (conflicts already resolved above when present).
+# ---------------------------------------------------------------------------
+old_main=$(main_sha)
+if ! gh pr merge "$PR_NUMBER" --merge; then
+  # GitHub can answer "Merge already in progress" for a merge that succeeded.
+  # Verify the final state instead of aborting and skipping cleanup/deploy.
+  merged=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ "$(pr_field '.state')" = "MERGED" ] && { merged=1; break; }
+    sleep 3
+  done
+  if [ "$merged" -ne 1 ]; then
+    echo "::error::Merge of #$PR_NUMBER failed; skipping cleanup and deploys." >&2
+    exit 1
+  fi
+  log "GitHub reported a merge race, but #$PR_NUMBER is MERGED."
+fi
 log "Merged #$PR_NUMBER ($head_sha) into main."
+
+merged_main="$old_main"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  merged_main=$(main_sha)
+  [ "$merged_main" != "$old_main" ] && break
+  sleep 3
+done
+log "main=$merged_main"
+
+# ---------------------------------------------------------------------------
+# PHASE 2/3 — DELETE BRANCH (never delete protected/persistent branches).
+# ---------------------------------------------------------------------------
+delete_merged_branch() {
+  local branch="$1"
+  if is_protected "$branch"; then
+    log "Protected branch '$branch' kept."
+  elif gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" >/dev/null 2>&1; then
+    log "Deleted merged branch '$branch'."
+  else
+    log "Merged branch '$branch' was already deleted or could not be removed."
+  fi
+}
+delete_merged_branch "$head_ref"
+
+# ---------------------------------------------------------------------------
+# PHASE 3/3 — REDEPLOY. GITHUB_TOKEN merges emit no push runs, so both deploy
+# workflows are dispatched explicitly with the exact merged main SHA.
+# ---------------------------------------------------------------------------
+redeploy() {
+  local sha="$1"
+  local workflow
+  for workflow in $(printf '%s' "$DEPLOY_WORKFLOWS" | tr ',' ' '); do
+    [ -n "$workflow" ] || continue
+    if gh workflow run "$workflow" --ref main -f sha="$sha" >/dev/null; then
+      log "Dispatched $workflow for $sha."
+    else
+      echo "::error::Failed to dispatch $workflow for $sha." >&2
+      exit 1
+    fi
+  done
+}
+redeploy "$merged_main"

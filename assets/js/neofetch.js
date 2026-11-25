@@ -46,12 +46,10 @@ window.TP = window.TP || {};
   var state = {
     frameEl: null,
     logoEl: null,
-    angleBadgeEl: null,
     cols: 34,
     rows: 20,
     fontPx: 9.5,
     yaw: 0.14,
-    pitch: 0,
     spinLast: 0,
     visible: true,
     engineActive: false,
@@ -137,17 +135,11 @@ window.TP = window.TP || {};
     return t > 0 ? t : -1;
   }
 
-  function renderPenguinAscii(yaw, pitch, timeSec) {
+  function renderPenguinAscii(yaw) {
     var cols = state.cols;
     var rows = state.rows;
-    var tSec = timeSec || 0;
-    var breathe = Math.sin(tSec * 2.1) * 0.025;
-    var wingSway = Math.sin(tSec * 2.6) * 0.035;
-
     var cosY = Math.cos(yaw);
     var sinY = Math.sin(yaw);
-    var cosX = Math.cos(pitch);
-    var sinX = Math.sin(pitch);
 
     var lx = -0.46;
     var ly = 0.64;
@@ -156,11 +148,11 @@ window.TP = window.TP || {};
     var lines = [];
 
     for (var row = 0; row < rows; row += 1) {
-      var sy = (((rows - 1) * 0.5 - row) / (rows * 0.44)) * (1 - breathe);
+      var sy = ((rows - 1) * 0.5 - row) / (rows * 0.44);
       var rowChars = '';
 
       for (var col = 0; col < cols; col += 1) {
-        var sx = ((col - (cols - 1) * 0.5) / (cols * 0.44 * (ASPECT_Y * 0.52))) * (1 + breathe * 0.5);
+        var sx = (col - (cols - 1) * 0.5) / (cols * 0.44 * (ASPECT_Y * 0.52));
 
         var wox = sx * 1.18;
         var woy = sy * 1.32 - 0.06;
@@ -174,23 +166,20 @@ window.TP = window.TP || {};
         wdy /= wLen;
         wdz /= wLen;
 
-        var oy1 = woy * cosX + woz * sinX;
-        var oz1 = -woy * sinX + woz * cosX;
-        var ox = wox * cosY - oz1 * sinY;
-        var oy = oy1;
-        var oz = wox * sinY + oz1 * cosY;
+        // Fixed vertical axis: only yaw changes; pitch stays exactly zero.
+        var ox = wox * cosY - woz * sinY;
+        var oy = woy;
+        var oz = wox * sinY + woz * cosY;
 
-        var dy1 = wdy * cosX + wdz * sinX;
-        var dz1 = -wdy * sinX + wdz * cosX;
-        var dx = wdx * cosY - dz1 * sinY;
-        var dy = dy1;
-        var dz = wdx * sinY + dz1 * cosY;
+        var dx = wdx * cosY - wdz * sinY;
+        var dy = wdy;
+        var dz = wdx * sinY + wdz * cosY;
 
         var bestT = 1e9;
         var bestPart = null;
 
         for (var i = 0; i < PARTS.length; i += 1) {
-          var t = intersectPart(ox, oy, oz, dx, dy, dz, PARTS[i], wingSway);
+          var t = intersectPart(ox, oy, oz, dx, dy, dz, PARTS[i], 0);
           if (t > 0 && t < bestT) {
             bestT = t;
             bestPart = PARTS[i];
@@ -206,8 +195,8 @@ window.TP = window.TP || {};
         var hy = oy + dy * bestT;
         var hz = oz + dz * bestT;
 
-        var pcx = bestPart.cx + (bestPart.wing ? bestPart.wing * wingSway : 0);
-        var pcy = bestPart.cy + (bestPart.wing ? Math.abs(wingSway) * 0.35 : 0);
+        var pcx = bestPart.cx;
+        var pcy = bestPart.cy;
 
         var lnx = (hx - pcx) / (bestPart.rx * bestPart.rx);
         var lny = (hy - pcy) / (bestPart.ry * bestPart.ry);
@@ -217,11 +206,9 @@ window.TP = window.TP || {};
         lny /= nLen;
         lnz /= nLen;
 
-        var nx1 = lnx * cosY + lnz * sinY;
-        var nz1 = -lnx * sinY + lnz * cosY;
-        var wnx = nx1;
-        var wny = lny * cosX - nz1 * sinX;
-        var wnz = lny * sinX + nz1 * cosX;
+        var wnx = lnx * cosY + lnz * sinY;
+        var wny = lny;
+        var wnz = -lnx * sinY + lnz * cosY;
 
         var ndotl = Math.max(0, wnx * lx + wny * ly + wnz * lz);
 
@@ -269,21 +256,13 @@ window.TP = window.TP || {};
     var delta = state.spinLast ? Math.min(0.05, tSec - state.spinLast) : 0;
     state.spinLast = tSec;
 
-    // Continuous, pointer-independent yaw. Pitch stays a gentle breathing bob.
+    // Fixed vertical axis: only yaw advances; pitch/badge do not exist.
     state.yaw += delta * AUTO_SPIN_RAD_PER_SEC;
-    state.pitch = Math.sin(tSec * 0.65) * 0.06;
 
-    var ascii = renderPenguinAscii(state.yaw, state.pitch, tSec);
+    var ascii = renderPenguinAscii(state.yaw);
     if (ascii !== state.lastRenderedText) {
       state.logoEl.textContent = ascii;
       state.lastRenderedText = ascii;
-    }
-
-    if (state.angleBadgeEl) {
-      var degYaw = Math.round((state.yaw * 180) / Math.PI);
-      var degPitch = Math.round((-state.pitch * 180) / Math.PI);
-      state.angleBadgeEl.textContent =
-        'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch ' + (degPitch >= 0 ? '+' : '') + degPitch + '°';
     }
 
     state.rafId = window.requestAnimationFrame(tick);
@@ -315,7 +294,6 @@ window.TP = window.TP || {};
 
     state.logoEl = logoEl;
     state.frameEl = frameEl;
-    state.angleBadgeEl = document.getElementById('neofetch-penguin-telemetry');
     frameEl.setAttribute('data-penguin-ready', 'true');
     frameEl.setAttribute('data-auto-spin', 'true');
 
@@ -328,7 +306,7 @@ window.TP = window.TP || {};
         if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
           applyAdaptiveGrid(entry.contentRect.width, entry.contentRect.height);
           if (!state.engineActive && state.logoEl && TP.utils && TP.utils.reducedMotion) {
-            state.logoEl.textContent = renderPenguinAscii(state.yaw, state.pitch, 0);
+            state.logoEl.textContent = renderPenguinAscii(state.yaw);
           }
         }
       });
@@ -345,7 +323,7 @@ window.TP = window.TP || {};
       }
     });
 
-    state.logoEl.textContent = renderPenguinAscii(0.14, -0.04, 0);
+    state.logoEl.textContent = renderPenguinAscii(state.yaw);
 
     // Reduced-motion users get a static Tux; no pointer listeners are installed
     // in either mode, so mouse/touch never changes the penguin angle.
@@ -373,18 +351,16 @@ window.TP = window.TP || {};
   TP.neofetch = {
     init: init,
     computeFallbackGrid: computeFallbackGrid,
-    setAngles: function (yawRad, pitchRad) {
+    setYaw: function (yawRad) {
       // Programmatic positioning only (used by automated checks); no pointer event is bound.
       state.yaw = yawRad;
-      state.pitch = pitchRad;
       if (state.logoEl && !state.engineActive) {
-        state.logoEl.textContent = renderPenguinAscii(yawRad, pitchRad, 0);
+        state.logoEl.textContent = renderPenguinAscii(yawRad);
       }
     },
     getState: function () {
       return {
         yaw: state.yaw,
-        pitch: state.pitch,
         cols: state.cols,
         rows: state.rows,
         autoSpin: true,

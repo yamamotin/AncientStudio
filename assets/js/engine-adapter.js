@@ -134,7 +134,6 @@ window.TP = window.TP || {};
       lastUserPointer: 0,
       mascotSpinGroup: null,
       mascotSpinLast: 0,
-      mascotPointerBlockers: [],
       telemetryRaf: null,
       weather: null,
       weatherRaf: null,
@@ -207,19 +206,8 @@ window.TP = window.TP || {};
       var tSec = (now || performance.now()) * 0.001;
       var delta = state.mascotSpinLast ? Math.min(0.05, tSec - state.mascotSpinLast) : 0;
       state.mascotSpinLast = tSec;
+      // Integration-only wrapper: yaw only, with no pitch/badge updates.
       if (state.mascotSpinGroup) state.mascotSpinGroup.rotation.y += delta * 0.55;
-
-      var badge = document.getElementById('neofetch-penguin-telemetry');
-      if (badge) {
-        var yaw = state.mascotSpinGroup
-          ? state.mascotSpinGroup.rotation.y
-          : (typeof state.instance.getPrimaryEntityAngles === 'function'
-              ? (state.instance.getPrimaryEntityAngles() || {}).yaw
-              : 0) || 0;
-        var degYaw = Math.round((yaw * 180) / Math.PI);
-        badge.textContent =
-          'yaw ' + (degYaw >= 0 ? '+' : '') + degYaw + '° · pitch +0°';
-      }
 
       state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
     }
@@ -488,25 +476,16 @@ window.TP = window.TP || {};
         container.removeEventListener('touchmove', state.pointerListener);
         state.pointerListener = null;
       }
-      state.mascotPointerBlockers.forEach(function (entry) {
-        container.removeEventListener(entry.type, entry.handler, { capture: true });
-      });
-      state.mascotPointerBlockers = [];
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
       state.instance = null;
       state.engine = null;
       emit('fallback');
     }
 
-    /* The engine core registers passive pointer & touch listeners during mount(). Capture
-       them on the mascot container before mount so no mouse/touch event ever
-       reaches the Tux entity. This does not call preventDefault, so scroll is unaffected. */
+    /* The mascot stage is pointer-inert via CSS (`pointer-events: none`), so no
+       mouse/touch event reaches the Tux entity. Only the scene stage keeps
+       pointer tracking; the marker below documents that contract. */
     if (isMascot) {
-      ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave', 'pointerenter', 'pointerout', 'pointerover', 'touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
-        var blocker = function (event) { event.stopImmediatePropagation(); };
-        container.addEventListener(type, blocker, { capture: true, passive: true });
-        state.mascotPointerBlockers.push({ type: type, handler: blocker });
-      });
       container.setAttribute('data-pointer-locked', 'true');
     } else {
       state.pointerListener = function (event) {

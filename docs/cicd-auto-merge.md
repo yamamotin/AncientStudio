@@ -12,15 +12,30 @@ Os workflows continuam disparando automaticamente:
 | `pr-tests.yml` | `pull_request`, `push` em `main`, `workflow_dispatch` |
 | `auto-merge.yml` | `workflow_run` completando nos três workflows de teste + `workflow_dispatch` |
 
-`auto-merge.yml` chama `scripts/auto-merge-verified.sh`, que:
+`auto-merge.yml` chama `scripts/auto-merge-verified.sh`, que executa o fluxo completo.
+
+**Ordem permanente:** `merge` (com `resolve-conflicts` dentro desta fase) → `delete-branch` → `redeploy`. Isso vale para toda atividade pronta e não deve ser invertido: o pinguim/layout e quaisquer outros arquivos só são publicados depois que o merge existe, a branch foi limpa e os dois deploys foram disparados novamente.
 
 1. encontra o PR aberto contra `main` pelo SHA exato do commit;
 2. ignora PRs de fork, drafts e commits que mudaram depois do check;
 3. espera que **todos** os checks exigidos estejam `SUCCESS`: `verify`, `test`, `Ruff + pytest`, `Docker build`;
 4. recusa `FAILURE`, `SKIPPED`, `CANCELLED`, `TIMED_OUT` e `ACTION_REQUIRED`;
-5. confirma `MERGEABLE` / `CLEAN` e só então executa `gh pr merge <n> --merge`.
+5. se o PR estiver `CONFLICTING`/`DIRTY`, chama `PUT /pulls/<n>/update-branch` para mesclar `main` na branch do PR sem reescrever alterações, e reaplica os checks no novo SHA;
+6. confirma `MERGEABLE` / `CLEAN` e executa `gh pr merge <n> --merge`;
+7. apaga a branch mesclada via API (`main`, `dev/portfolio` e `dev/engine` são protegidas);
+8. dispara `pages.yml` e `ci-cd.yml` com `workflow_dispatch` e o SHA exato do merge.
 
 Não há aprovação automática: o GitHub impede aprovar o próprio PR (`Review Can not approve your own pull request`) e uma branch protection com required reviews continuaria bloqueando o merge. O merge é feito pelo `GITHUB_TOKEN`, que tem `pull-requests: write` concedido explicitamente no workflow.
+
+## Por que o deploy parou após merges automáticos
+
+GitHub **não inicia novos workflow runs** para eventos gerados pelo `GITHUB_TOKEN` (a exceção é `workflow_dispatch`/`repository_dispatch`). Assim, quando o auto-merge mesclava um PR, o push resultante em `main` não disparava `pages.yml` nem o job de deploy da Vercel: o Pages ficou preso em `df9cb70` enquanto a Vercel, que usa webhook Git próprio, já estava em `9e22e14`.
+
+A correção é o passo 8 acima: depois de mesclar e apagar a branch, o helper dispara explicitamente os dois workflows de deploy pelo SHA do merge. Ambos aceitam o input `sha` e fazem checkout/commit exato, então não há corrida com um push posterior. O `auto-merge.yml` concede `actions: write` ao `GITHUB_TOKEN`, sem o qual `gh workflow run` falha com 403 após o merge.
+
+Se duas execuções do helper observarem o mesmo PR, a que perder a corrida vê o estado `MERGED` e sai sem duplicar limpeza ou deploy. O fluxo completo é verificado com um PR de validação: após os checks, o próprio `auto-merge.yml` mescla, apaga a branch e dispara os dois deploys sem intervenção humana.
+
+A Vercel também é publicada pelo GitHub Action `ci-cd.yml` quando `VERCEL_TOKEN`, `VERCEL_ORG_ID` e `VERCEL_PROJECT_ID` existem; sem esses secrets, o job registra `notice` e a integração Git nativa da Vercel continua fazendo o deploy.
 
 ## Configurações exatas no GitHub
 

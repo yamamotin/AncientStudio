@@ -1,6 +1,6 @@
 'use strict';
 
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -17,6 +17,10 @@ const css = read('assets/css/style.css');
 const i18n = read('assets/js/i18n.js');
 const pt = JSON.parse(read('assets/i18n/pt-br.json'));
 const en = JSON.parse(read('assets/i18n/en.json'));
+const stackSection = html.slice(
+  html.indexOf('<section id="stack"'),
+  html.indexOf('<!-- 6. INTERACTIVE CONSOLE -->')
+);
 
 test('scene controls include a bilingual fullscreen button', () => {
   includesAll(html, [
@@ -49,10 +53,40 @@ test('fullscreen uses the native API with a CSS fallback and simple exit', () =>
   includesAll(css, ['#scene:fullscreen', '#scene.is-scene-fullscreen', 'body.scene-fullscreen-active']);
 });
 
-test('penguin copy no longer advertises drag interaction', () => {
-  assert.doesNotMatch(html, /Arraste com o mouse|mouse ou toque para girar|Drag with mouse/i);
-  assert.match(pt['stack.penguinAria'], /automaticamente/);
-  assert.match(en['stack.penguinAria'], /automatically/);
+test('uploaded portrait is a local, responsive asset with bilingual alt text', () => {
+  assert.ok(existsSync(path.join(root, 'assets/img/eron-portrait-ascii.png')), 'portrait asset exists');
+  includesAll(html, [
+    'src="assets/img/eron-portrait-ascii.png"',
+    'width="892"',
+    'height="1184"',
+    'alt="Retrato em arte ASCII de Eron Yamamoto com casaco escuro sobre fundo preto."',
+    'data-i18n-attr="alt:hero.portraitAlt"',
+    'loading="lazy"'
+  ]);
+  assert.ok(pt['hero.portraitAlt'] && en['hero.portraitAlt'], 'portrait alt is translated');
+  includesAll(css, ['.hero-portrait', 'aspect-ratio: 892 / 1184', 'object-fit: cover', 'float: right']);
+});
+
+test('stack section shows only the penguin and the exact requested rows', () => {
+  assert.doesNotMatch(stackSection, /neofetch-penguin-telemetry|engine-hint|sr-only|yaw|pitch/i);
+  assert.equal((stackSection.match(/<dt/g) || []).length, 7);
+  assert.equal((stackSection.match(/<dd/g) || []).length, 7);
+
+  const text = stackSection
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const rows = [
+    'User eron@production',
+    'OS Linux Production (Troubleshooting N3 & RCA)',
+    'Languages Python, SQL, Bash',
+    'DevOps Docker, GitHub Actions (CI/CD), Git',
+    'Data & AI ETL Pipelines, Pandas, NumPy, n8n, Web Scraping',
+    'Certifications Harvard CS50, Microsoft SC-900, UFPR Machine Learning',
+    'Education [B.Sc](http://B.Sc). Electrical Engineering (IFPR) + Erasmus+ International Program'
+  ];
+  rows.forEach((row) => assert.ok(text.includes(row), `missing exact row: ${row}`));
 });
 
 test('fallback penguin yaw advances from elapsed time without pointer events', () => {
@@ -65,7 +99,6 @@ test('fallback penguin yaw advances from elapsed time without pointer events', (
     addEventListener() {}
   };
   const logo = { style: {}, textContent: '' };
-  const badge = { textContent: '' };
   const sandbox = {
     console,
     Math,
@@ -74,7 +107,6 @@ test('fallback penguin yaw advances from elapsed time without pointer events', (
     document: {
       getElementById(id) {
         if (id === 'penguin-stage') return frame;
-        if (id === 'neofetch-penguin-telemetry') return badge;
         return null;
       },
       querySelector(selector) {
@@ -109,16 +141,17 @@ test('fallback penguin yaw advances from elapsed time without pointer events', (
 
   assert.ok(finalYaw > initialYaw + 0.05, `yaw did not advance: ${initialYaw} -> ${finalYaw}`);
   assert.equal(frame.getAttribute('data-auto-spin'), 'true');
-  assert.match(badge.textContent, /^yaw [+-]\d+° · pitch/);
+  assert.equal(sandbox.TP.neofetch.getState().pitch, undefined, 'no pitch state remains');
+  assert.doesNotMatch(neofetch, /angleBadge|neofetch-penguin-telemetry|state\.pitch/);
 });
 
 test('engine mascot rotation is pointer-free and single-instance', () => {
   includesAll(adapter, [
     "getObjectByName('TuxMascotRoot')",
     "group.name = 'TuxAutoSpin'",
-    'stopImmediatePropagation',
-    'capture: true',
-    'passive: true'
+    'data-pointer-locked',
+    'getScene'
   ]);
-  assert.doesNotMatch(adapter, /fromPointer|targetYaw|targetPitch/);
+  assert.doesNotMatch(adapter, /fromPointer|targetYaw|targetPitch|mascotPointerBlockers|stopImmediatePropagation/);
+  assert.match(css, /#penguin-stage[^}]*pointer-events: none/s);
 });

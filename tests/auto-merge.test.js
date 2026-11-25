@@ -11,6 +11,7 @@ const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
 const workflow = read('.github/workflows/auto-merge.yml');
 const helper = read('scripts/auto-merge-verified.sh');
 const pages = read('.github/workflows/pages.yml');
+const ciCd = read('.github/workflows/ci-cd.yml');
 const ci = read('.github/workflows/ci.yml');
 const prTests = read('.github/workflows/pr-tests.yml');
 const docs = read('docs/cicd-auto-merge.md');
@@ -31,23 +32,61 @@ test('auto-merge has explicit write permissions and no approval step', () => {
     'contents: write',
     'pull-requests: write',
     'checks: read',
+    'actions: write',
     'scripts/auto-merge-verified.sh'
   ]);
   assert.doesNotMatch(workflow, /pr review\s+.*approve|gh pr review/i);
 });
 
-test('helper only merges after required checks pass for the exact head SHA', () => {
+test('helper merges only after checks and resolves conflicts via update-branch', () => {
   includesAll(helper, [
     'verify,test,Ruff + pytest,Docker build',
     'head_sha',
     'SUMMARY\\tREADY',
     'MERGEABLE',
     'CLEAN',
+    'update-branch',
     'gh pr merge',
     '--merge'
   ]);
   assert.match(helper, /conclusion != "SUCCESS"/);
   assert.doesNotMatch(helper, /pr review\s+.*approve|gh pr review/i);
+});
+
+test('agent pipeline deletes the merged branch and dispatches both deploys', () => {
+  includesAll(helper, [
+    'PROTECTED_BRANCHES',
+    'dev/portfolio',
+    'dev/engine',
+    'git/refs/heads',
+    'DEPLOY_WORKFLOWS',
+    'pages.yml,ci-cd.yml',
+    'gh workflow run',
+    '--ref main',
+    '-f sha=',
+    'Merge already in progress',
+    'skipping cleanup and deploys',
+    'already merged'
+  ]);
+});
+
+test('permanent order is merge, resolve conflicts, delete branch, redeploy', () => {
+  includesAll(helper, [
+    'PERMANENT_ORDER="merge,resolve-conflicts,delete-branch,redeploy"',
+    'PHASE 1/3 — MERGE',
+    'PHASE 2/3 — DELETE BRANCH',
+    'PHASE 3/3 — REDEPLOY',
+    'delete_merged_branch "$head_ref"',
+    'redeploy "$merged_main"'
+  ]);
+
+  const markers = [
+    'PHASE 1/3 — MERGE',
+    'PHASE 2/3 — DELETE BRANCH',
+    'PHASE 3/3 — REDEPLOY'
+  ].map((marker) => helper.indexOf(marker));
+  assert.ok(markers[0] >= 0 && markers[0] < markers[1] && markers[1] < markers[2], 'phase order');
+  assert.match(docs, /Ordem permanente:.*merge.*resolve-conflicts.*delete-branch.*redeploy/s);
 });
 
 test('Pages workflow uses official actions with explicit permissions and environment', () => {
@@ -60,8 +99,9 @@ test('Pages workflow uses official actions with explicit permissions and environ
     'actions/configure-pages@v5',
     'actions/upload-pages-artifact@v3',
     'actions/deploy-pages@v4',
-    '?v=$GITHUB_SHA',
-    'workflow_dispatch:'
+    '?v=$DEPLOY_SHA',
+    'workflow_dispatch:',
+    'DEPLOY_SHA'
   ]);
 });
 
@@ -79,6 +119,17 @@ test('Pages artifact root includes parity SHA and browser assets', () => {
 test('CI workflows are manually dispatchable', () => {
   includesAll(ci, ['workflow_dispatch:', 'permissions:', 'contents: read']);
   includesAll(prTests, ['workflow_dispatch:', 'permissions:', 'contents: read']);
+});
+
+test('both deploy workflows accept an exact SHA from the auto-merge helper', () => {
+  includesAll(pages, ['sha:', 'description: "Exact commit to publish', 'ref: ${{ env.DEPLOY_SHA }}']);
+  includesAll(ciCd, [
+    'sha:',
+    'description: "Exact commit to build/deploy',
+    'ref: ${{ env.DEPLOY_SHA }}',
+    "github.event_name == 'workflow_dispatch'",
+    'github.ref == \'refs/heads/main\''
+  ]);
 });
 
 test('docs explain the one-time GitHub settings still outside the repository', () => {
