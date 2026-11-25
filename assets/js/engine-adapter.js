@@ -1,6 +1,7 @@
 /* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
    Connects:
-   1. `#ascii-scene` -> Lightweight interactive ASCII Realms Playground (`mode: 'playground'`)
+   1. `#ascii-scene` -> Unified Cyberpunk Boulevard scenario (`mode: 'playground'`)
+      with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Com chuva")
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
    Zero framework dependencies. The playground keeps scroll-safe passive pointer input;
    the mascot has no pointer interaction and spins on its own via a single RAF loop. */
@@ -12,27 +13,65 @@ window.TP = window.TP || {};
   var controllers = [];
 
   // The UI exposes one scene with exactly three modes: day, night and rain.
-  // These are palette/weather states only; engine internals are untouched.
   var DEFAULT_MODE = 'night';
   var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
     night: {
-      palette: { background: '#05060D', warmLight: '#FF2A85', warmCore: '#FFC145', coolAmbient: '#00F0FF', foliageAccent: '#8A5CFF', cursorLight: '#64F5FF' },
-      bloomIntensity: 1.48, dofStrength: 0.36, edgeStrength: 0.96, blockBlendWeight: 0.35, windStrength: 1.0, parallaxIntensity: 1.65
+      palette: {
+        background: '#05070F',
+        warmLight: '#FF2A85',
+        warmCore: '#FFC145',
+        coolAmbient: '#00F0FF',
+        foliageAccent: '#8A5CFF',
+        cursorLight: '#64F5FF'
+      },
+      bloomIntensity: 1.42,
+      dofStrength: 0.34,
+      edgeStrength: 0.96,
+      blockBlendWeight: 0.35,
+      windStrength: 0.62,
+      parallaxIntensity: 1.6
     },
     day: {
-      palette: { background: '#08101C', warmLight: '#FF8E3C', warmCore: '#FFEE99', coolAmbient: '#5CEEFF', foliageAccent: '#4895EF', cursorLight: '#E0FBFC' },
-      bloomIntensity: 1.02, dofStrength: 0.28, edgeStrength: 0.88, blockBlendWeight: 0.33, windStrength: 0.72, parallaxIntensity: 1.3
+      palette: {
+        background: '#1E3F66',
+        warmLight: '#FF8A3D',
+        warmCore: '#FFF1A8',
+        coolAmbient: '#7AD4FF',
+        foliageAccent: '#4895EF',
+        cursorLight: '#FFF6D6'
+      },
+      bloomIntensity: 0.78,
+      dofStrength: 0.24,
+      edgeStrength: 0.94,
+      blockBlendWeight: 0.32,
+      windStrength: 0.45,
+      parallaxIntensity: 1.4
     },
     rain: {
-      palette: { background: '#04050B', warmLight: '#FF1E6E', warmCore: '#FF9F1C', coolAmbient: '#00C8F0', foliageAccent: '#560BAD', cursorLight: '#90E0EF' },
-      bloomIntensity: 1.82, dofStrength: 0.46, edgeStrength: 0.98, blockBlendWeight: 0.38, windStrength: 1.65, parallaxIntensity: 1.8
-    },
+      palette: {
+        background: '#04060D',
+        warmLight: '#FF1E75',
+        warmCore: '#FFB703',
+        coolAmbient: '#00D8FF',
+        foliageAccent: '#6930C3',
+        cursorLight: '#8CF4FF'
+      },
+      bloomIntensity: 1.72,
+      dofStrength: 0.44,
+      edgeStrength: 0.98,
+      blockBlendWeight: 0.37,
+      windStrength: 1.52,
+      parallaxIntensity: 1.75
+    }
   };
 
   function configFor(name) {
-    var preset = PRESETS[name] || PRESETS[DEFAULT_MODE];
+    var mode = SCENE_MODES.indexOf(name) >= 0 ? name : DEFAULT_MODE;
+    var preset = PRESETS[mode] || PRESETS[DEFAULT_MODE];
+    var atmosphere = mode !== 'rain' ? mode : 'rain';
     return {
+      atmosphere: atmosphere,
       palette: Object.assign({}, preset.palette),
       bloomIntensity: preset.bloomIntensity,
       dofStrength: preset.dofStrength,
@@ -101,15 +140,11 @@ window.TP = window.TP || {};
         ? (options && options.preset)
         : DEFAULT_MODE,
       paused: false,
-      weatherEnabled: !isMascot && (!options || options.weather !== false),
       orbitTimer: null,
       lastUserPointer: 0,
       mascotSpinGroup: null,
       mascotSpinLast: 0,
       telemetryRaf: null,
-      weather: null,
-      weatherRaf: null,
-      weatherMode: '',
       observer: null,
       resizeRaf: null,
       fullscreenListener: null,
@@ -135,8 +170,8 @@ window.TP = window.TP || {};
     }
 
     /* Wrap the Tux root in an integration-only group. The ECS still owns its
-       Transform; rotating the wrapper gives a continuous spin without touching
-       the engine core, ECS systems or shaders. */
+       Transform; rotating the wrapper gives a continuous horizontal spin without
+       mouse/touch reaction or yaw/pitch telemetry. */
     function ensureMascotSpinGroup() {
       if (state.mascotSpinGroup) return;
       var scene = getThreeScene();
@@ -178,7 +213,7 @@ window.TP = window.TP || {};
       var tSec = (now || performance.now()) * 0.001;
       var delta = state.mascotSpinLast ? Math.min(0.05, tSec - state.mascotSpinLast) : 0;
       state.mascotSpinLast = tSec;
-      // Integration-only wrapper: yaw only, with no pitch/badge updates.
+      // Integration-only wrapper: horizontal yaw only, with no pitch/badge updates.
       if (state.mascotSpinGroup) state.mascotSpinGroup.rotation.y += delta * 0.55;
 
       state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
@@ -188,74 +223,6 @@ window.TP = window.TP || {};
       if (!isMascot || state.paused || state.telemetryRaf) return;
       state.mascotSpinLast = 0;
       state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
-    }
-
-    function removeWeather() {
-      if (state.weatherRaf) window.cancelAnimationFrame(state.weatherRaf);
-      state.weatherRaf = null;
-      if (!state.weather) return;
-      if (state.weather.points.parent) state.weather.points.parent.remove(state.weather.points);
-      state.weather.points.geometry.dispose();
-      state.weather.points.material.dispose();
-      state.weather = null;
-    }
-
-    function setWeather(mode) {
-      if (!state.weatherEnabled) return;
-      if (state.weatherMode === mode && state.weather) return;
-      removeWeather();
-      state.weatherMode = mode;
-
-      var THREE = state.engine && state.engine.THREE;
-      var scene = getThreeScene();
-      if (!THREE || !scene || mode !== 'rain') return;
-
-      var count = 180;
-      var positions = new Float32Array(count * 3);
-      var speeds = new Float32Array(count);
-
-      for (var index = 0; index < count; index += 1) {
-        positions[index * 3] = (Math.random() - 0.5) * 26;
-        positions[index * 3 + 1] = Math.random() * 18 - 1;
-        positions[index * 3 + 2] = (Math.random() - 0.5) * 22 - 3;
-        speeds[index] = 7 + Math.random() * 8;
-      }
-
-      var geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      var material = new THREE.PointsMaterial({
-        color: 0x9fc6e8,
-        size: 0.16,
-        transparent: true,
-        opacity: 0.55,
-        sizeAttenuation: true,
-        depthWrite: false
-      });
-      var points = new THREE.Points(geometry, material);
-      scene.add(points);
-      state.weather = { points: points, speeds: speeds, last: performance.now() };
-      if (!state.paused) state.weatherRaf = window.requestAnimationFrame(stepWeather);
-    }
-
-    function stepWeather(now) {
-      var weather = state.weather;
-      if (!weather || state.paused) return;
-      var delta = Math.min(0.05, (now - weather.last) / 1000);
-      weather.last = now;
-      var attribute = weather.points.geometry.getAttribute('position');
-      var values = attribute.array;
-
-      for (var index = 0; index < weather.speeds.length; index += 1) {
-        var y = index * 3 + 1;
-        values[y] -= weather.speeds[index] * delta;
-        if (values[y] < -2) {
-          values[y] = 16;
-          values[index * 3] = (Math.random() - 0.5) * 26;
-          values[index * 3 + 2] = (Math.random() - 0.5) * 22 - 3;
-        }
-      }
-      attribute.needsUpdate = true;
-      state.weatherRaf = window.requestAnimationFrame(stepWeather);
     }
 
     function stopOrbit() {
@@ -287,22 +254,18 @@ window.TP = window.TP || {};
         if (typeof state.instance.pause === 'function') state.instance.pause();
         if (state.telemetryRaf) window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;
-        if (state.weatherRaf) window.cancelAnimationFrame(state.weatherRaf);
-        state.weatherRaf = null;
       } else {
         if (typeof state.instance.resume === 'function') state.instance.resume();
         if (isMascot) startMascotSpin();
-        if (state.weather && !state.weatherRaf) {
-          state.weather.last = performance.now();
-          state.weatherRaf = window.requestAnimationFrame(stepWeather);
-        }
       }
     }
 
     function setPreset(name) {
-      state.preset = name;
-      applyConfig(configFor(name));
-      if (state.weatherEnabled) setWeather(name === 'rain' ? 'rain' : 'ambient');
+      var mode = SCENE_MODES.indexOf(name) >= 0 ? name : DEFAULT_MODE;
+      state.preset = mode;
+      if (!isMascot) {
+        applyConfig(configFor(mode));
+      }
     }
 
     function scheduleSmoothResize(width, height) {
@@ -347,6 +310,7 @@ window.TP = window.TP || {};
         var modeDefaults = isMascot
           ? {
               mode: 'mascot',
+              atmosphere: 'night',
               cellSize: 8,
               autoResponsiveDensity: true,
               maxPixelRatio: 2,
@@ -361,6 +325,7 @@ window.TP = window.TP || {};
               mapId: 'cyberpunk-citadel',
               cellSize: 8,
               autoResponsiveDensity: true,
+              enableShadows: true,
               maxPixelRatio: 2
             };
 
@@ -385,7 +350,6 @@ window.TP = window.TP || {};
 
         emit('engine');
         if (isMascot) startMascotSpin();
-        if (state.weatherEnabled) setWeather(state.preset === 'rain' ? 'rain' : 'ambient');
         observe();
         setPaused(state.paused);
         if (!isMascot) setAutoOrbit(true);
@@ -400,7 +364,6 @@ window.TP = window.TP || {};
 
     function destroy() {
       stopOrbit();
-      removeWeather();
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;

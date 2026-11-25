@@ -23,6 +23,7 @@ export const DEFAULT_ASCII_RAMP = " .'`^,:;Il!i><~+_-?][1)(|/tfjrxnuvczXYUJCLQ0O
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mode: 'playground',
   mapId: 'cyberpunk-citadel',
+  atmosphere: 'night',
   enableKeyboard: false,
   pauseOffscreen: true,
   palette: { ...DEFAULT_PALETTE },
