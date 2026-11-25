@@ -322,10 +322,10 @@ window.TP = window.TP || {};
               cellSize: 8,
               autoResponsiveDensity: true,
               maxPixelRatio: 2,
-              bloomIntensity: 0.22,
+              bloomIntensity: 0.08,
               dofStrength: 0.0,
               edgeStrength: 0.96,
-              blockBlendWeight: 0.28,
+              blockBlendWeight: 0.0,
               enableShadows: true
             }
           : {

@@ -3,7 +3,7 @@ import type { PointerSnapshot } from '../input/PointerInput';
 import type { AtmosphereMode, EngineConfig } from '../types';
 
 /**
- * VfxController: Unified scenario atmosphere, mode-gated wind-driven rain streaks ('rain'),
+ * VfxController: Playground scenario atmosphere, mode-gated wind-driven rain streaks ('rain'),
  * subtle ambient vapor/motes ('night' / 'day'), camera parallax (mouse + touch on playground),
  * and interactive cursor spotlight. Zero per-frame heap allocations.
  */
@@ -56,14 +56,16 @@ export class VfxController {
     this.cursorLight = new THREE.PointLight(
       new THREE.Color(options.config.palette.cursorLight),
       this.mode === 'mascot' ? 0 : options.config.cursorLightIntensity * 13.5,
-      this.mode === 'mascot' ? 10.0 : 18.0,
+      18.0,
       1.5
     );
     this.cursorLight.position.set(0, 2.4, 4.2);
-    options.scene.add(this.cursorLight);
+    if (this.mode !== 'mascot') {
+      options.scene.add(this.cursorLight);
+    }
 
     const count = options.particleCount ?? (this.mode === 'mascot' ? 0 : 240);
-    if (count > 0) {
+    if (count > 0 && this.mode !== 'mascot') {
       this.buildParticles(options.scene, options.config, count);
     }
   }
@@ -73,38 +75,18 @@ export class VfxController {
     this.particleColors = new Float32Array(count * 3);
 
     for (let i = 0; i < count; i++) {
-      let kind: ParticleKind = 'spark';
-      if (this.mode === 'playground') {
-        const mod = i % 10;
-        if (mod < 7) {
-          kind = 'rain'; // 70% wind-slanted rain streaks (active ONLY when atmosphere === 'rain')
-        } else if (mod < 9) {
-          kind = 'steam'; // 20% street-vent vapor / sunlit motes
-        } else {
-          kind = 'spark'; // 10% rising holo-sparks around portal
-        }
-      }
+      const mod = i % 10;
+      const kind: ParticleKind = mod < 7 ? 'rain' : mod < 9 ? 'steam' : 'spark';
 
       const h1 = Math.sin(i * 91.3 + 1.7) * 43758.5453;
       const h2 = Math.sin(i * 217.9 + 5.3) * 43758.5453;
       const r1 = h1 - Math.floor(h1);
       const r2 = h2 - Math.floor(h2);
 
-      const radius =
-        this.mode === 'mascot'
-          ? 0.9 + ((i * 1.37) % 1.4)
-          : 0.7 + r1 * 5.6;
+      const radius = 0.7 + r1 * 5.6;
       const angle = i * 2.39996;
-
-      const minY = this.mode === 'mascot' ? -0.2 : kind === 'rain' ? -0.2 : 0.15;
-      const maxY =
-        this.mode === 'mascot'
-          ? 2.4
-          : kind === 'rain'
-            ? 16.5
-            : kind === 'steam'
-              ? 4.2
-              : 8.4;
+      const minY = kind === 'rain' ? -0.2 : 0.15;
+      const maxY = kind === 'rain' ? 16.5 : kind === 'steam' ? 4.2 : 8.4;
 
       const spawnX =
         kind === 'steam'
@@ -149,10 +131,10 @@ export class VfxController {
     geo.setAttribute('color', new THREE.BufferAttribute(this.particleColors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: this.mode === 'mascot' ? 0.12 : 0.28,
+      size: 0.28,
       vertexColors: true,
       transparent: true,
-      opacity: this.mode === 'mascot' ? 0.62 : 0.92,
+      opacity: 0.92,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -206,10 +188,8 @@ export class VfxController {
     }
 
     const mat = this.particles.material as THREE.PointsMaterial;
-    if (this.mode === 'playground') {
-      mat.size = isRain ? 0.29 : isDay ? 0.2 : 0.24;
-      mat.opacity = isRain ? 0.95 : isDay ? 0.45 : 0.76;
-    }
+    mat.size = isRain ? 0.29 : isDay ? 0.2 : 0.24;
+    mat.opacity = isRain ? 0.95 : isDay ? 0.45 : 0.76;
 
     const colorAttr = this.particles.geometry.getAttribute('color') as THREE.BufferAttribute;
     colorAttr.needsUpdate = true;
@@ -224,55 +204,53 @@ export class VfxController {
     camera: THREE.PerspectiveCamera,
     config: EngineConfig
   ): void {
-    const damp = 1 - Math.exp(-config.parallaxSmoothing * dt);
-
-    // 1. Camera Parallax (Playground only — Mascot Tux stage remains 100% pointer-inert!)
     if (this.mode === 'mascot') {
-      camera.position.set(this.baseCameraPos.x, this.baseCameraPos.y, this.baseCameraPos.z);
+      camera.position.copy(this.baseCameraPos);
       camera.lookAt(this.lookAtTarget);
-      this.cursorLight.position.set(0, 1.25, 2.6);
-    } else {
-      const targetX = pointer.active ? pointer.normX : 0;
-      const targetY = pointer.active ? pointer.normY : 0;
-      this.smoothedPointer.x += (targetX - this.smoothedPointer.x) * damp;
-      this.smoothedPointer.y += (targetY - this.smoothedPointer.y) * damp;
-
-      this.smoothedDrag.x += (pointer.dragYaw - this.smoothedDrag.x) * damp;
-      this.smoothedDrag.y += (pointer.dragPitch - this.smoothedDrag.y) * damp;
-
-      const amp = config.parallaxIntensity;
-      const idleSwayX = Math.sin(elapsed * 0.35) * 0.3;
-      const idleSwayY = Math.cos(elapsed * 0.28) * 0.12;
-      const orbitOffsetX = Math.sin(this.smoothedDrag.x * 0.55) * 2.35;
-      const orbitOffsetY = -this.smoothedDrag.y * 1.45;
-
-      camera.position.set(
-        this.baseCameraPos.x + this.smoothedPointer.x * amp + orbitOffsetX + idleSwayX,
-        Math.max(
-          1.15,
-          this.baseCameraPos.y + this.smoothedPointer.y * (amp * 0.48) + orbitOffsetY + idleSwayY
-        ),
-        this.baseCameraPos.z - Math.abs(this.smoothedPointer.x + orbitOffsetX * 0.25) * 0.45
-      );
-      camera.lookAt(
-        this.lookAtTarget.x + this.smoothedPointer.x * 0.75 + this.smoothedDrag.x * 1.25,
-        this.lookAtTarget.y + this.smoothedPointer.y * 0.42 - this.smoothedDrag.y * 0.85,
-        this.lookAtTarget.z
-      );
-
-      this.cursorLight.position.set(
-        this.smoothedPointer.x * 5.8 + orbitOffsetX * 0.6,
-        2.1 + this.smoothedPointer.y * 1.8,
-        3.6 - this.smoothedPointer.y * 3.5
-      );
+      return;
     }
 
-    // 2. Mode-Aware Rain Streaks ('rain' only), Street Vapor & Rising Sparks
+    const damp = 1 - Math.exp(-config.parallaxSmoothing * dt);
+
+    const targetX = pointer.active ? pointer.normX : 0;
+    const targetY = pointer.active ? pointer.normY : 0;
+    this.smoothedPointer.x += (targetX - this.smoothedPointer.x) * damp;
+    this.smoothedPointer.y += (targetY - this.smoothedPointer.y) * damp;
+
+    this.smoothedDrag.x += (pointer.dragYaw - this.smoothedDrag.x) * damp;
+    this.smoothedDrag.y += (pointer.dragPitch - this.smoothedDrag.y) * damp;
+
+    const amp = config.parallaxIntensity;
+    const idleSwayX = Math.sin(elapsed * 0.35) * 0.3;
+    const idleSwayY = Math.cos(elapsed * 0.28) * 0.12;
+    const orbitOffsetX = Math.sin(this.smoothedDrag.x * 0.55) * 2.35;
+    const orbitOffsetY = -this.smoothedDrag.y * 1.45;
+
+    camera.position.set(
+      this.baseCameraPos.x + this.smoothedPointer.x * amp + orbitOffsetX + idleSwayX,
+      Math.max(
+        1.15,
+        this.baseCameraPos.y + this.smoothedPointer.y * (amp * 0.48) + orbitOffsetY + idleSwayY
+      ),
+      this.baseCameraPos.z - Math.abs(this.smoothedPointer.x + orbitOffsetX * 0.25) * 0.45
+    );
+    camera.lookAt(
+      this.lookAtTarget.x + this.smoothedPointer.x * 0.75 + this.smoothedDrag.x * 1.25,
+      this.lookAtTarget.y + this.smoothedPointer.y * 0.42 - this.smoothedDrag.y * 0.85,
+      this.lookAtTarget.z
+    );
+
+    this.cursorLight.position.set(
+      this.smoothedPointer.x * 5.8 + orbitOffsetX * 0.6,
+      2.1 + this.smoothedPointer.y * 1.8,
+      3.6 - this.smoothedPointer.y * 3.5
+    );
+
     if (this.particles && this.particlePositions) {
       const windStr = config.windStrength ?? 1.0;
       const windGust =
         (0.75 + 0.38 * Math.sin(elapsed * 0.68) + 0.18 * Math.sin(elapsed * 1.95)) * windStr;
-      const rainEnabled = this.mode === 'playground' && (config.atmosphere ?? 'night') === 'rain';
+      const rainEnabled = (config.atmosphere ?? 'night') === 'rain';
 
       const count = this.particleSeeds.length;
       for (let i = 0; i < count; i++) {

@@ -46,7 +46,7 @@ test('playground exposes exactly three scene modes', () => {
     'atmosphere: atmosphere',
     'blockBlendWeight: preset.blockBlendWeight',
     'windStrength: preset.windStrength',
-    'blockBlendWeight: 0.28',
+    'blockBlendWeight: 0.0',
     'cellSize: 8',
     'touchstart',
     'touchmove'
@@ -923,41 +923,51 @@ test('neofetch mascot stage builds minimalist #13222E backdrop + #1D2B36 floor w
   assert.equal('#' + flCol.getHexString().toUpperCase(), '#1D2B36');
   const bgLuma = 0.2126 * bgCol.r + 0.7152 * bgCol.g + 0.0722 * bgCol.b;
   const flLuma = 0.2126 * flCol.r + 0.7152 * flCol.g + 0.0722 * flCol.b;
-  const torsoMesh = tuxRoot.children.find((c) => c.isMesh);
-  const coatCol = torsoMesh.material.color;
+  const torsoMesh = tuxRoot.getObjectByName('TuxTorso');
+  const headMesh = tuxRoot.getObjectByName('TuxHead');
+  assert.ok(torsoMesh && headMesh, 'Tux exposes unified TuxTorso and smooth TuxHead');
+  const coatCol = headMesh.material.color;
   const coatLuma = 0.2126 * coatCol.r + 0.7152 * coatCol.g + 0.0722 * coatCol.b;
   assert.ok(coatLuma < bgLuma && bgLuma < flLuma, 'Color-theory value order holds: Tux coat < #13222E backdrop < #1D2B36 floor');
 
-  // 3. Smooth facet-free Tux geometry & non-intersecting belly envelope (zero hard facets or Z-fighting blotches)
-  const tuxMeshes = tuxRoot.children.filter((c) => c.isMesh);
-  const bellyMesh = tuxMeshes[1];
-  assert.equal(torsoMesh.material.flatShading, false, 'Torso uses smooth normal shading (no hard facets)');
-  assert.equal(bellyMesh.material.flatShading, false, 'Belly uses smooth normal shading (no hard facets)');
-  const torsoFrontZ = torsoMesh.position.z + torsoMesh.geometry.parameters.radius * torsoMesh.scale.z;
-  const bellyFrontZ = bellyMesh.position.z + bellyMesh.geometry.parameters.radius * bellyMesh.scale.z;
-  assert.ok(bellyFrontZ > torsoFrontZ + 0.04, 'Belly apex sits cleanly proud of torso front to eliminate blotchy Z-cutouts');
+  // 3. Pure-ASCII unified smooth Tux body: single vertex-colored torso (zero intersecting belly sphere, zero flatShading, zero self-shadow blotches)
+  assert.equal(torsoMesh.material.vertexColors, true, 'Unified torso uses smooth vertex-colored plumage instead of intersecting belly mesh');
+  assert.ok(torsoMesh.geometry.getAttribute('color'), 'Torso geometry carries smooth per-vertex plumage colors');
+  const directRootMeshes = tuxRoot.children.filter((c) => c.isMesh);
+  assert.equal(directRootMeshes.length, 2, 'Root holds only unified TuxTorso + smooth tail (no intersecting belly sphere)');
+  tuxRoot.traverse((obj) => {
+    if (obj.isMesh) {
+      assert.equal(Boolean(obj.material.flatShading), false, `Mesh ${obj.name || 'part'} uses smooth shading (zero hard facets)`);
+      assert.equal(obj.receiveShadow, false, `Tux mesh ${obj.name || 'part'} disables self-shadowing to prevent belly blotches`);
+    }
+  });
 
-  // 4. Full-viewport ASCII floor & backdrop composite + balanced key/fill/rim lights, soft shadow & diffused reflection
+  // 4. Single unified pure-ASCII shader pipeline (parallel non-ASCII uMascotStudio / surfaceSrgb / solid block overrides removed)
   const asciiShaderSrc = readFileSync(
     path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
     'utf8'
   );
-  includesAll(asciiShaderSrc, [
-    'uMascotStudio',
-    'mascotGlyphMask',
-    'mascotCompositeMask',
-    'floorWeave',
-    'cellSubstrate',
-    'glyphInk',
-    'depthEdgeMag'
-  ]);
+  const tuxFactorySrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/entities/TuxEntityFactory.ts'),
+    'utf8'
+  );
+  assert.doesNotMatch(
+    asciiShaderSrc,
+    /uMascotStudio|mascotBlockMask|mascotCompositeMask|surfaceSrgb|cellSubstrate|linearToSrgb/,
+    'Removed parallel non-ASCII override pass and raw pixel/block bleed from asciiShader.ts'
+  );
+  assert.doesNotMatch(
+    tuxFactorySrc,
+    /flatShading:\s*true|facePatch/,
+    'Removed hard-faceted materials and overlapping facePatch spheres from TuxEntityFactory.ts'
+  );
   assert.equal(stage.keyLight.castShadow, true, 'Main key light casts soft floor shadow');
-  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light prevents belly blotches');
+  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light keeps belly illumination smooth');
   assert.ok(stage.rimLight && stage.rimLight.intensity > 0 && stage.rimLight.intensity < 1.5, 'Discreet rim light separates dark edges');
   includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
-  // 5. Adapter + CSS keep exact palette, shadows enabled, and pointer-inert stage
-  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'enableShadows: true']);
+  // 5. Adapter + CSS keep exact palette, pure-ASCII zero block fill (blockBlendWeight: 0.0), shadows enabled, and pointer-inert stage
+  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'blockBlendWeight: 0.0', 'enableShadows: true']);
   includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
 
   ecs.clear(true);

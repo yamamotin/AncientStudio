@@ -4,7 +4,7 @@ import type { EngineConfig } from '../types';
 /**
  * Color-theory reference palette for `[ STACK // NEOFETCH ]`:
  * - Backdrop (`#13222E` / `rgb(19, 34, 46)`): dark desaturated slate/petrol blue with higher value
- *   than Tux's charcoal-black coat (`~#080C11`) and cool chromatic contrast against his amber beak.
+ *   than Tux's charcoal-black coat (`#080D14`) and cool chromatic contrast against his amber beak.
  * - Floor (`#1D2B36` / `rgb(29, 43, 54)`): medium-low value, low-saturation blue-slate that separates
  *   cleanly from the backdrop wall and frames both dark and bright parts of Tux.
  */
@@ -44,15 +44,15 @@ const MASCOT_BACKDROP_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vWorldPos;
 
   void main() {
-    // Studio lighting gradient centered behind Tux so the ASCII ramp articulates organic glyph density
-    // around the #13222E (rgb(19, 34, 46)) reference without flat raw blocks or harsh halos
+    // Calibrated directly for the single canonical ASCII composite pass:
+    // maps #13222E into calm atmospheric ASCII stipple (',' ':' ';') over the dark slate substrate
+    vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
     vec2 focus = vec2(vWorldPos.x * 0.24, (vWorldPos.y - 1.05) * 0.34);
     float studioPool = exp(-dot(focus, focus) * 1.45);
-    float verticalFalloff = clamp(1.04 - max(vWorldPos.y, 0.0) * 0.055, 0.84, 1.04);
-    float factor = clamp(verticalFalloff * 0.90 + studioPool * 0.24, 0.85, 1.15);
+    float verticalFalloff = clamp(1.04 - max(vWorldPos.y, 0.0) * 0.055, 0.88, 1.04);
+    float radianceScale = clamp(verticalFalloff * 0.255 + studioPool * 0.070, 0.24, 0.33);
 
-    vec3 col = uBackdropColor * factor;
-    gl_FragColor = vec4(col, 1.0);
+    gl_FragColor = vec4(backdropBase * radianceScale, 1.0);
   }
 `;
 
@@ -126,11 +126,14 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
       relXz.x * sinY + relXz.y * cosY
     );
 
-    // 1. Perspective studio light distribution on #1D2B36 floor so ASCII glyphs grade naturally across depth
+    vec3 floorBase = pow(max(uFloorColor, vec3(0.0001)), vec3(1.0 / 2.2));
+    vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
+
+    // 1. Calibrated #1D2B36 floor radiance so the canonical ASCII ramp selects horizontal weave ('~' '+' '_' '-')
     float radialDist = length(relXz * vec2(0.38, 0.46));
     float depthGrade = clamp((vWorldPos.z - uHorizonZ) / 6.2, 0.0, 1.0);
-    float floorLight = clamp(0.90 + depthGrade * 0.12 + exp(-radialDist * radialDist * 1.1) * 0.14, 0.88, 1.15);
-    vec3 color = uFloorColor * floorLight;
+    float floorLight = clamp(0.71 + depthGrade * 0.09 + exp(-radialDist * radialDist * 1.1) * 0.08, 0.70, 0.88);
+    vec3 color = floorBase * floorLight;
 
     // 2. Soft grounding shadow under Tux (5-tap PCF directional shadow + smooth elliptical contact AO)
     float pcfLit = sampleSoftKeyShadow(vWorldPos);
@@ -144,13 +147,13 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
       (1.0 - smoothstep(0.14, 1.04, footRDist)) * 0.52;
 
     float combinedOcclusion = clamp(
-      max(bodyContactAo * 0.34 + feetContactAo * 0.16, (1.0 - pcfLit) * 0.32),
+      max(bodyContactAo * 0.42 + feetContactAo * 0.18, (1.0 - pcfLit) * 0.40),
       0.0,
-      0.38
+      0.48
     );
     color *= (1.0 - combinedOcclusion);
 
-    // 3. Subtle, diffused planar reflection integrated into the ASCII floor quantization
+    // 3. Subtle, diffused planar reflection quantized through the same ASCII pass
     vec3 viewInc = normalize(vWorldPos - uCamPos);
     vec3 reflDir = reflect(viewInc, vec3(0.0, 1.0, 0.0));
     float rHoriz2 = max(dot(reflDir.xz, reflDir.xz), 0.0001);
@@ -167,25 +170,22 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
           qRel.x * sinY + qRel.y * cosY
         );
 
-        float blur = 0.16 + max(qy, 0.0) * 0.28;
-        float heightFade = exp(-max(qy, 0.0) * 1.22);
-        float floorProxFade = exp(-length(relXz) * 0.52);
+        float blur = 0.18 + max(qy, 0.0) * 0.28;
+        float heightFade = exp(-max(qy, 0.0) * 1.25);
+        float floorProxFade = exp(-length(relXz) * 0.55);
         float reflEnvelope = heightFade * floorProxFade;
 
-        // Dark charcoal dorsal coat silhouette reflection
         vec2 coatEllip = vec2(qLocal.x / (0.72 + blur), (qy - 0.88) / (0.98 + blur));
         float coatMask = (1.0 - smoothstep(0.55, 1.08, length(coatEllip))) * reflEnvelope;
         float coatRim = smoothstep(0.54, 0.94, length(coatEllip)) * coatMask;
-        color *= (1.0 - coatMask * 0.09);
-        color += uReflectRimColor * (coatRim * 0.055);
+        color *= (1.0 - coatMask * 0.10);
+        color += uReflectRimColor * (coatRim * 0.032);
 
-        // Snow-white belly reflection (modulated smoothly as Tux's chest rotates forward)
         float frontFacing = smoothstep(-0.15, 0.65, cos(uSubjectYaw));
         vec2 bellyEllip = vec2(qLocal.x / (0.50 + blur), (qy - 0.76) / (0.82 + blur));
         float bellyMask = (1.0 - smoothstep(0.42, 1.02, length(bellyEllip))) * frontFacing * reflEnvelope;
-        color += uReflectBellyColor * (bellyMask * 0.11);
+        color += uReflectBellyColor * (bellyMask * 0.065);
 
-        // Warm amber webbed feet reflection near the floor contact plane
         vec2 footLRefl = vec2((qLocal.x + 0.34) / (0.26 + blur * 0.65), (qy - 0.10) / (0.22 + blur * 0.65));
         vec2 footRRefl = vec2((qLocal.x - 0.34) / (0.26 + blur * 0.65), (qy - 0.10) / (0.22 + blur * 0.65));
         float footVisL = smoothstep(-0.35, 0.55, qLocal.y + 0.32);
@@ -193,18 +193,16 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
           (1.0 - smoothstep(0.35, 1.05, length(footLRefl))) +
           (1.0 - smoothstep(0.35, 1.05, length(footRRefl)))
         ) * footVisL * reflEnvelope;
-        color += uReflectAmberColor * (clamp(feetReflMask, 0.0, 1.15) * 0.095);
+        color += uReflectAmberColor * (clamp(feetReflMask, 0.0, 1.15) * 0.055);
       }
     }
 
-    // Restrained grazing sheen
     float ndotv = clamp(dot(-viewInc, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
     float fresnel = pow(1.0 - ndotv, 4.0);
-    color += uReflectRimColor * (fresnel * 0.028);
+    color += uReflectRimColor * (fresnel * 0.018);
 
-    // Crisp horizon plane separation (tight 0.04 transition so floor #1D2B36 and wall #13222E stay distinct)
     float horizonSeam = smoothstep(uHorizonZ + 0.045, uHorizonZ - 0.005, vWorldPos.z);
-    color = mix(color, uBackdropColor * 0.90, horizonSeam);
+    color = mix(color, backdropBase * 0.26, horizonSeam);
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -225,12 +223,12 @@ function getMascotShadowPlaceholder(): THREE.DataTexture {
 }
 
 /**
- * MascotStageBuilder: Builds the minimalist, ASCII-integrated 3D showcase stage
+ * MascotStageBuilder: Builds the minimalist, pure-ASCII-calibrated 3D showcase stage
  * around Tux for `[ STACK // NEOFETCH ]`:
  * 1. Continuous backdrop plane (`#13222E` / `rgb(19, 34, 46)`)
  * 2. Horizontal ground floor plane (`#1D2B36` / `rgb(29, 43, 54)`)
  * 3. Balanced studio lighting (soft main key + front-right fill + cool hemi + discreet rim lights)
- * 4. Soft PCF + contact shadow & diffused yaw-synced floor reflection quantized coherently in ASCII
+ * 4. Soft PCF + contact shadow & diffused yaw-synced floor reflection quantized through the single ASCII pipeline
  */
 export class MascotStageBuilder {
   public static build(config: EngineConfig): BuiltMascotStage {
@@ -290,12 +288,12 @@ export class MascotStageBuilder {
     floorMesh.userData.skipObjectOutline = true;
     scene.add(floorMesh);
 
-    // 3. Balanced Studio Lighting Rig (Soft Key + Soft Front Fill + Cool Hemi + Discreet Dual Rim)
-    const hemiLight = new THREE.HemisphereLight(0xc8e0f0, 0x182632, 0.78);
+    // 3. Balanced Studio Lighting Rig (Soft Key + Soft Front Fill + Ground-Bounce Hemi + Discreet Dual Rim)
+    const hemiLight = new THREE.HemisphereLight(0xd4e9f7, 0x354c5e, 0.92);
     hemiLight.name = 'MascotHemiLight';
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xf4f8fc, 1.28);
+    const keyLight = new THREE.DirectionalLight(0xf6faff, 1.24);
     keyLight.name = 'MascotKeyLight';
     keyLight.position.set(-2.1, 3.6, 4.1);
     if (config.enableShadows) {
@@ -315,19 +313,17 @@ export class MascotStageBuilder {
     }
     scene.add(keyLight);
 
-    // Soft front-right fill keeps Tux's white belly evenly luminous without harsh shadow blotches
-    const fillLight = new THREE.DirectionalLight(0xd6e8f5, 0.44);
+    const fillLight = new THREE.DirectionalLight(0xdcecf8, 0.56);
     fillLight.name = 'MascotFillLight';
-    fillLight.position.set(2.4, 1.8, 3.4);
+    fillLight.position.set(2.4, 1.9, 3.5);
     scene.add(fillLight);
 
-    // Discreet rear-right & rear-left rim lights separating Tux's dark dorsal coat from #13222E across 360 deg spin
-    const rimLight = new THREE.DirectionalLight(0x9ad0f0, 0.78);
+    const rimLight = new THREE.DirectionalLight(0x9ad0f0, 0.82);
     rimLight.name = 'MascotRimLight';
     rimLight.position.set(2.35, 2.25, -2.9);
     scene.add(rimLight);
 
-    const backLeftRimLight = new THREE.DirectionalLight(0x88bede, 0.56);
+    const backLeftRimLight = new THREE.DirectionalLight(0x88bede, 0.60);
     backLeftRimLight.name = 'MascotBackLeftRimLight';
     backLeftRimLight.position.set(-2.25, 2.1, -2.8);
     scene.add(backLeftRimLight);

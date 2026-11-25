@@ -106,7 +106,16 @@ export class AsciiEngineCore {
     }
 
     this.container = container;
-    this.config = mergeEngineConfig(DEFAULT_ENGINE_CONFIG, initialConfig);
+    const baseDefaults =
+      initialConfig?.mode === 'mascot'
+        ? mergeEngineConfig(DEFAULT_ENGINE_CONFIG, {
+            bloomIntensity: 0.08,
+            dofStrength: 0.0,
+            blockBlendWeight: 0.0,
+            palette: { background: MASCOT_BACKDROP_HEX },
+          })
+        : DEFAULT_ENGINE_CONFIG;
+    this.config = mergeEngineConfig(baseDefaults, initialConfig);
 
     this.onPassivePointerMoveBound = this.handlePassiveContainerMove.bind(this);
     this.onContextLostBound = this.handleContextLost.bind(this);
@@ -313,18 +322,9 @@ export class AsciiEngineCore {
     });
     this.primaryEntityId = entityId;
     this.mascotRootObj = rootGroup;
+    this.vfx = null;
 
-    // Zero particles & zero cursor light hotspot so the floor + backdrop stay clean and minimalist
-    this.vfx = new VfxController({
-      scene: builtMascot.scene,
-      config: this.config,
-      baseCameraPos: cameraAnchor,
-      lookAtTarget: lookTarget,
-      particleOrigin: [0, 0],
-      particleCount: 0,
-    });
-
-    // No InputSystem on mascot stage: Tux stays pointer-free and spins smoothly on horizontal yaw
+    // No InputSystem or VfxController on mascot stage: Tux stays pointer-free and minimalist
     systemRunner
       .addSystem(new MovementRotationSystem(), 20)
       .addSystem(new AnimationSystem(), 30)
