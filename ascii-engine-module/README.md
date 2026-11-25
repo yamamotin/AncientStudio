@@ -1,13 +1,16 @@
 # `@ancientstudio/ascii-engine-module`
 
-Motor gráfico **3D ASCII em tempo real** (WebGL2 + Three.js + Post-Processing GLSL Shaders customizados), projetado com arquitetura **100% desacoplada e agnóstica a frameworks** (zero dependência de React, Vue ou globais externas) para acoplamento limpo em portfólios modernos ou aplicações web interativas.
+Motor gráfico **3D ASCII em tempo real** (WebGL2 + Three.js + Post-Processing GLSL Shaders customizados + ECS modular), projetado com arquitetura **100% desacoplada e agnóstica a frameworks** (zero dependência de React, Vue ou globais externas) para acoplamento limpo no portfólio estático (`assets/js/ascii-engine.bundle.js`) ou em aplicações web modernas.
 
-Inspirado na direção de arte de *ASCII Realms* e *Asciify Engine*, o motor renderiza um santuário tridimensional noturno completo com:
-- **Atlas tipográfico dinâmico em Canvas 2D**: rampa de luminância calibrada (` .,:;-=+*#%@`) combinada com glifos estruturais direcionais (`/ \ | _ [ ]`) selecionados via detecção de bordas Sobel (profundidade + luminância).
-- **Iluminação dinâmica colorida & Sombras projetadas**: fundo noturno profundo (`#050508`), tochas/braseiros âmbar oscilantes (`#FF8C24`), luar ciano frio (`#2E6F95`), vegetação esmeralda (`#3A7D5C`) e lanterna interativa acoplada ao cursor.
-- **Multi-pass ASCII Bloom**: fontes de luz quente sofrem extração *bright-pass* e *Kawase/Gaussian blur* separável antes da quantização tipográfica, permitindo que o brilho difuso "vaze" organicamente sobre os glifos adjacentes.
-- **Profundidade de Campo (DoF)**: linearização do `DepthTexture` da câmera para suavizar silhuetas em primeiro plano e montanhas distantes mantendo o ponto focal nítido.
-- **Prevenção estrita contra *Memory Leaks***: `ResizeObserver` restrito ao container, hibernação via `pause()`/`resume()` sem saltos de `deltaTime`, e `.dispose()` completo de geometrias, materiais, *shadow maps*, *render targets* e listeners em `destroy()`.
+O pacote entrega dois modos nativos (`mode: 'playground' | 'mascot'`) sobre o mesmo núcleo determinístico:
+
+- **Cyberpunk Neo-Sector Boulevard (`mode: 'playground'`)**: metrópole tridimensional em camadas de profundidade com viaduto elevado e trem *maglev*, torres neon e hologramas, árvores cibernéticas animadas por vento (`WindSystem`), veículos flutuantes e drones em rotas (`PatrolSystem`), asfalto reflexivo com poças (`waterShader.ts`) e três atmosferas coesas em um único cenário: **`day`** (*Dia*), **`night`** (*Noite*) e **`rain`** (*Com chuva*, incluindo precipitação ASCII).
+- **Mascote Linux Tux 3D (`mode: 'mascot'`)**: pinguim Tux articulado de alto contraste (`TuxEntityFactory`) sobre pedestal (`TuxShowcasePlinth`), com rotação autônoma suave ou orientação por entidade primária.
+- **Atlas tipográfico proporcional `5:8` sem linhas de grade**: células monoespaçadas renderizadas em Canvas 2D (`glyphAtlas.ts`) com rampa de luminância calibrada combinada a glifos estruturais direcionais (`/ \ | _ [ ]`) selecionados via detecção de bordas Sobel (profundidade + luminância), **sem divisórias/emendas entre células** e com *blend* GPU `max()` (~35% `blockBlendWeight`) para preservar detalhes geométricos finos.
+- **Iluminação colorida, Sombras de Rua PCF 5-tap, ASCII Bloom & DoF**: *shadow mapping* `PCFSoftShadowMap` projetado por torres, arcos e veículos sobre a avenida; *bright-pass* + *Kawase/Gaussian blur* multi-pass antes da quantização ASCII; e linearização do `DepthTexture` para profundidade de campo suave.
+- **Resolução Adaptativa HiDPI (`ResolutionController.ts`)**: suporte a `devicePixelRatio` até `2.0`, detecção automática de *tier* de resolução e transições exponenciais suaves de densidade de células ao redimensionar ou alternar *fullscreen*.
+- **API de Contorno de Silhueta por Objeto sob Demanda (`objectOutline.ts`)**: malha *inverted-hull* com normais soldadas (`ensureWeldedOutlineNormals`) ativada **apenas sob demanda** por objeto/entidade (`setObjectOutline` / `applyObjectOutline`), aceitando `thickness`/`width`, `intensity`, `opacity`, `enabled`/`visible` e `highlightColor`/`color` opcional (ignorando automaticamente sub-malhas marcadas com `skipObjectOutline: true`, como `TuxShowcasePlinth`). **Inativa por padrão** — nunca atua como pós-processamento global.
+- **Prevenção estrita contra *Memory Leaks* e Scroll Hijacking**: `PointerInput` 100% passivo (`{ passive: true }`) que preserva a rolagem vertical em desktop e mobile, `KeyboardInput` *opt-in* isolado por foco, hibernação via `pause()`/`resume()` sem saltos de `deltaTime`, e `.dispose()` completo de geometrias, materiais, *shadow maps*, *render targets*, *outlines* e listeners em `destroy()`.
 
 ---
 
@@ -18,154 +21,134 @@ Inspirado na direção de arte de *ASCII Realms* e *Asciify Engine*, o motor ren
 ├── /src
 │   ├── /core/
 │   │   ├── AsciiEngineCore.ts        # Orquestrador modular (modes: 'playground' | 'mascot')
-│   │   ├── EngineLoop.ts             # Agendador rAF determinístico com deltaTime clamp e telemetria FPS
-│   │   ├── LifecycleManager.ts       # ResizeObserver, IntersectionObserver, Visibility e .dispose() GPU
-│   │   └── defaultConfig.ts          # Paleta padrão, rampa de alto contraste e merge imutável
+│   │   ├── EngineLoop.ts             # Agendador rAF determinístico com deltaTime clamp e FPS
+│   │   ├── LifecycleManager.ts       # ResizeObserver, visibilidade de aba e .dispose() GPU
+│   │   ├── ResolutionController.ts   # Tiers HiDPI (DPR <= 2.0) e transição suave de cellSize
+│   │   └── defaultConfig.ts          # Paletas (day/night/rain), rampa ASCII e merge preservando fov
 │   ├── /ecs/
 │   │   ├── World.ts                  # Registro enxuto de entidades e componentes puros de dados
-│   │   └── SystemRunner.ts           # Pipeline ECS (Input, MovementRotation, Animation, RenderSync)
+│   │   ├── EntityBlueprint.ts        # EntityBlueprintRegistry declarativo para spawn reutilizável
+│   │   └── SystemRunner.ts           # Pipeline ECS ordenado (Input, Patrol, MovementRotation,
+│   │                                 # Wind, Animation, NeonPulse, RenderSync)
 │   ├── /world/
-│   │   ├── MapLoader.ts              # Definição declarativa leve do mapa ('sanctuary-isle')
-│   │   └── PlaygroundSceneBuilder.ts # Terreno 3D, lago com reflexos, ponte de pedras, ruínas e vegetação
+│   │   ├── MapLoader.ts              # Definição declarativa do cenário Cyberpunk Neo-Sector
+│   │   ├── PlaygroundSceneBuilder.ts # Avenida, torres neon, viaduto, sombras PCF e atmosferas
+│   │   └── SceneComposerKit.ts       # SceneComposerKit + SceneDepthRig para camadas de cena
 │   ├── /entities/
-│   │   ├── TuxEntityFactory.ts       # Pinguim Linux Tux 3D articulado de alto contraste ([ STACK // NEOFETCH ])
-│   │   └── PlaygroundEntityFactory.ts# Cristal rúnico, braseiros oscilantes e explorador Wayfarer
+│   │   ├── TuxEntityFactory.ts       # Mascote Linux Tux 3D articulado + TuxShowcasePlinth
+│   │   └── PlaygroundEntityFactory.ts# Drones, hover-cars, trem maglev, hologramas e cyber-trees
 │   ├── /animation/
-│   │   └── AnimationSystem.ts        # Respiração orgânica, flutuação e articulação de asas/membros
+│   │   └── AnimationSystem.ts        # Flutuação orgânica, respiração e articulação de membros
 │   ├── /vfx/
-│   │   └── VfxController.ts          # Parallax suave da câmera, lanterna do cursor e partículas
+│   │   └── VfxController.ts          # Parallax/pan suave da câmera, lanterna 3D e chuva/partículas
 │   ├── /input/
 │   │   ├── PointerInput.ts           # Rastreamento passivo ({ passive: true }) de mouse e toque
-│   │   └── KeyboardInput.ts          # Teclado opt-in isolado por foco para exploração futura sem roubar scroll
-│   ├── /scene/
-│   │   └── noise.ts                  # Value Noise / fBm / Ridged fBm determinístico
+│   │   └── KeyboardInput.ts          # Teclado opt-in isolado por foco sem roubar scroll da página
 │   ├── /shaders/
-│   │   ├── AsciiPostProcessor.ts     # Pipeline multi-pass (Scene + Depth -> Bloom -> ASCII Composite)
-│   │   ├── asciiShader.ts            # Vertex & Fragment Shaders GLSL customizados
-│   │   ├── waterShader.ts            # Shader GLSL de água reflexiva com ondulações e trilhas de luz
-│   │   └── glyphAtlas.ts             # Gerador de atlas tipográfico monoespaçado em Canvas 2D
+│   │   ├── AsciiPostProcessor.ts     # Pipeline multi-pass (Scene + Depth -> Bloom -> ASCII 5:8)
+│   │   ├── asciiShader.ts            # Shaders GLSL sem grade com Sobel e lighten block blend (~35%)
+│   │   ├── waterShader.ts            # Shader GLSL de asfalto molhado / reflexos especulares
+│   │   ├── glyphAtlas.ts             # Gerador de atlas tipográfico 5:8 em Canvas 2D
+│   │   └── objectOutline.ts          # API sob demanda de contorno por objeto (applyObjectOutline)
 │   ├── /types/
-│   │   └── index.ts                  # Interfaces estritas (EngineConfig, SceneMode, ThemePalette)
-│   └── index.ts                      # Facade pública exportando `AsciiSceneEngine` e módulos
-├── integration-entry.ts              # Entrypoint IIFE para o bundle `assets/js/ascii-engine.bundle.js`
-├── /demo                             # Sandbox HTML/CSS/TS isolado com HUD sobreposta e controles
+│   │   └── index.ts                  # Contratos TypeScript estritos (EngineConfig, Outline, ECS)
+│   └── index.ts                      # Facade pública exportando AsciiSceneEngine e utilitários
+├── integration-entry.ts              # Entrypoint IIFE para `window.ASCIIRealms` no portfólio
+├── /demo                             # Sandbox HTML/CSS/TS isolado para inspeção visual
 ├── package.json
 ├── tsconfig.json
-└── vite.config.ts
+├── vite.config.ts                    # Build ESM/CJS da biblioteca (`dist/`)
+├── vite.portfolio.config.ts          # Build IIFE de produção (`../assets/js/ascii-engine.bundle.js`)
+└── vite.demo.config.ts               # Build estático do sandbox (`demo-dist/`)
 ```
 
 ---
 
-## Como Executar o Sandbox de Validação (`/demo`)
+## Comandos de Desenvolvimento e Build
 
 ```bash
 cd ascii-engine-module
 npm install
+
+# Sandbox interativo local (/demo)
 npm run dev
-```
 
-Para validar tipagem estrita e compilar o pacote de biblioteca (`ESM` + `CJS`):
-
-```bash
+# Checagem estrita de tipos TypeScript
 npm run typecheck
+
+# Compila biblioteca isolada (ESM + CJS em dist/)
 npm run build
+
+# Gera o bundle IIFE consumido pelo portfólio (../assets/js/ascii-engine.bundle.js)
+npm run build:portfolio
+
+# Compila o sandbox estático (demo-dist/)
+npm run build:demo
 ```
 
 ---
 
-## Como Importar e Acoplar no Portfólio Principal
+## Uso da Facade (`AsciiSceneEngine`)
 
-### 1. HTML / Container Host (com HUD sobreposta)
-O canvas WebGL é injetado automaticamente com `position: absolute; inset: 0; z-index: 0; pointer-events: none`. Qualquer conteúdo HTML dentro do container com `z-index >= 1` permanece clicável e selecionável sem conflito, enquanto o movimento do mouse relativo ao container alimenta o parallax e a lanterna 3D.
-
-```html
-<section id="hero-ascii-container" style="position: relative; width: 100%; height: 85vh; overflow: hidden;">
-  <div style="position: relative; z-index: 2;">
-    <h1>Eron Yamamoto</h1>
-    <a href="mailto:contato@exemplo.com">Entrar em contato</a>
-  </div>
-</section>
-```
-
-### 2. Instanciação em TypeScript / JavaScript Vanilla
+### 1. Cenário Cyberpunk com Atmosferas (`day` | `night` | `rain`)
 
 ```ts
-import { AsciiSceneEngine } from './ascii-engine-module/src';
+import { AsciiSceneEngine } from '@ancientstudio/ascii-engine-module';
 
-const heroEl = document.getElementById('hero-ascii-container')!;
+const stageEl = document.getElementById('ascii-scene')!;
 
-const engine = new AsciiSceneEngine(heroEl, {
-  cellSize: 10,
+const engine = new AsciiSceneEngine(stageEl, {
+  mode: 'playground',
+  atmosphere: 'night',
   autoResponsiveDensity: true,
-  bloomIntensity: 1.2,
-  parallaxIntensity: 1.45,
-  palette: {
-    background: '#050508',
-    warmLight: '#FF8C24',
-    coolAmbient: '#2E6F95',
-    foliageAccent: '#3A7D5C',
-  },
+  blockBlendWeight: 0.35,
+  bloomIntensity: 1.42,
+  dofStrength: 0.34,
+  windStrength: 0.62,
 });
 
-// 1. Inicializa o WebGL, ResizeObserver e inicia o loop
 engine.mount();
 
-// 2. Economia automática de GPU quando a Hero Section sai da viewport (IntersectionObserver)
-const observer = new IntersectionObserver(
-  ([entry]) => {
-    if (entry?.isIntersecting) {
-      engine.resume();
-    } else {
-      engine.pause();
-    }
-  },
-  { threshold: 0.05 }
-);
-observer.observe(heroEl);
-
-// 3. Alteração dinâmica em tempo real (ex.: troca de tema ou modo econômico)
-engine.updateConfig({
-  bloomIntensity: 1.5,
-  cellSize: 12,
-});
-
-// 4. Desmontagem limpa em rotas SPA (zero vazamento de VRAM ou listeners)
-window.addEventListener('pagehide', () => {
-  observer.disconnect();
-  engine.destroy();
-});
+// Troca de atmosfera em tempo real mantendo o mesmo cenário (Dia / Noite / Com chuva)
+engine.updateConfig({ atmosphere: 'rain', windStrength: 1.52, bloomIntensity: 1.72 });
 ```
 
-### 3. Exemplo de Hook Desacoplado (Caso o futuro portfólio utilize React/Next.js)
+### 2. Contorno de Silhueta por Objeto sob Demanda (`setObjectOutline`)
 
-```tsx
-import { useEffect, useRef } from 'react';
-import { AsciiSceneEngine, type PartialEngineConfig } from '@ancientstudio/ascii-engine-module';
+O contorno nunca é ligado globalmente por padrão. Quando desejado em um objeto específico (`THREE.Object3D`, `'primary'`, nome na cena ou `EntityId` do ECS):
 
-export function AsciiHeroCanvas({ config }: { config?: PartialEngineConfig }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const engineRef = useRef<AsciiSceneEngine | null>(null);
+```ts
+// Aplica contorno na entidade primária (ex.: Tux no modo 'mascot') com cor de destaque customizada
+engine.setObjectOutline('primary', {
+  enabled: true,
+  thickness: 0.045,
+  intensity: 1.35,
+  opacity: 0.95,
+  highlightColor: '#00F0FF',
+});
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const instance = new AsciiSceneEngine(containerRef.current, config);
-    instance.mount();
-    engineRef.current = instance;
+// Inspeciona o estado atual do contorno
+const state = engine.getObjectOutlineState('primary');
 
-    return () => {
-      instance.destroy();
-      engineRef.current = null;
-    };
-  }, []);
+// Remove e libera recursos GPU do contorno
+engine.clearObjectOutline('primary');
+```
 
-  useEffect(() => {
-    if (config) {
-      engineRef.current?.updateConfig(config);
-    }
-  }, [config]);
+Também é possível usar os helpers puros diretamente sobre qualquer `THREE.Object3D`:
 
-  return <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }} />;
-}
+```ts
+import {
+  applyObjectOutline,
+  getObjectOutlineState,
+  clearObjectOutline,
+} from '@ancientstudio/ascii-engine-module';
+
+const handle = applyObjectOutline(myObject3D, {
+  thickness: 0.04,
+  highlightColor: '#FFC145',
+});
+handle.update({ intensity: 1.5 });
+clearObjectOutline(myObject3D);
 ```
 
 ---
@@ -174,10 +157,19 @@ export function AsciiHeroCanvas({ config }: { config?: PartialEngineConfig }) {
 
 | Método | Assinatura | Descrição |
 | :--- | :--- | :--- |
-| `mount` | `mount(): void` | Cria o contexto WebGL no container, observa redimensionamentos via `ResizeObserver`, compila os shaders GLSL e inicia o loop. |
-| `pause` | `pause(): void` | Cancela o `requestAnimationFrame` imediatamente para poupar GPU (ex.: scroll fora da Hero ou aba oculta). |
-| `resume` | `resume(): void` | Retoma o loop redefinindo o acumulador temporal para evitar saltos bruscos de `deltaTime`. |
-| `updateConfig` | `updateConfig(partial: PartialEngineConfig): void` | Atualiza paleta de cores, densidade (`cellSize`), `bloomIntensity`, `dofStrength` ou rampa de caracteres em tempo real. |
-| `destroy` | `destroy(): void` | Remove o `<canvas>` do DOM, desconecta `ResizeObserver` e listeners, e executa `.dispose()` em todas as geometrias, materiais, texturas e *render targets*. |
+| `mount` | `mount(): void` | Inicializa o contexto WebGL2, constrói a cena e o pipeline ASCII, registra observadores e inicia o loop. |
+| `pause` | `pause(): void` | Cancela o `requestAnimationFrame` imediatamente preservando o estado da cena. |
+| `resume` | `resume(): void` | Retoma o loop sem salto de `deltaTime`. |
+| `resize` | `resize(dimensions: { width: number; height: number }, immediate?: boolean): void` | Atualiza dimensões e densidade de células suavemente (ou imediatamente quando `immediate = true`). |
+| `updateConfig` | `updateConfig(partial: PartialEngineConfig): void` | Atualiza atmosfera (`day`/`night`/`rain`), paleta, `cellSize`, `bloomIntensity`, `dofStrength`, `windStrength`, `blockBlendWeight` ou `fov` em tempo real. |
+| `setPlayableKeyboardEnabled` | `setPlayableKeyboardEnabled(enabled: boolean): void` | Habilita ou desabilita captura opcional de teclado isolada por foco. |
+| `setObjectOutline` | `setObjectOutline(target: OutlineTargetSelector, options?: ObjectOutlineOptions): ObjectOutlineHandle \| null` | Aplica ou atualiza contorno de silhueta sob demanda em um alvo específico (`Object3D`, `'primary'`, nome ou `EntityId`). |
+| `clearObjectOutline` | `clearObjectOutline(target?: OutlineTargetSelector): number` | Remove e faz `.dispose()` do contorno de um alvo específico (ou de todos os alvos se omitido). |
+| `getObjectOutlineState` | `getObjectOutlineState(target: OutlineTargetSelector): ResolvedObjectOutlineState \| null` | Retorna snapshot imutável da configuração ativa de contorno do alvo, ou `null`. |
+| `destroy` | `destroy(): void` | Remove o `<canvas>`, desconecta observadores/listeners e executa `.dispose()` completo de recursos GPU. |
 | `getState` | `getState(): 'idle' \| 'running' \| 'paused' \| 'destroyed'` | Retorna o estado atual do ciclo de vida. |
-| `getStats` | `getStats(): EngineStats` | Retorna FPS suavizado, `frameTimeMs`, tamanho ativo da célula e dimensões da grade ASCII (`columns` × `rows`). |
+| `getConfig` | `getConfig(): EngineConfig` | Retorna snapshot imutável da configuração ativa. |
+| `getStats` | `getStats(): EngineStats` | Retorna FPS suavizado, `frameTimeMs`, `cellSize`, dimensões da grade (`columns` × `rows`) e total de entidades ECS. |
+| `getScene` | `getScene(): THREE.Scene \| null` | Acesso somente-leitura à `THREE.Scene` montada. |
+| `getCamera` | `getCamera(): THREE.PerspectiveCamera \| null` | Acesso somente-leitura à `THREE.PerspectiveCamera` ativa. |
+| `getPrimaryEntityAngles` | `getPrimaryEntityAngles(): { yaw: number; pitch: number } \| null` | Retorna `{ yaw, pitch }` em radianos da entidade primária (ex.: Tux no modo `'mascot'`). |

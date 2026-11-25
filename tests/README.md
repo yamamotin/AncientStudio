@@ -1,17 +1,19 @@
-# Suítes de Teste da Raiz (Node nativo + Python unittest)
+# Test base (Node's built-in test runner + Python suites)
 
-Estrutura modular executada automaticamente em PRs e pushes para `main` (`.github/workflows/pr-tests.yml` e `.github/workflows/ci.yml`), sem dependências externas de runner:
+Zero external JS test framework dependencies and no build step required:
+`node --test tests/*.test.js` runs every frontend, engine, i18n, and CI/CD contract suite (47 tests).
 
 ```text
 tests/
-├── helpers/            # Asserções reutilizáveis para as suítes Node
-├── auto-merge.test.js  # Invariantes da ordem permanente (merge -> delete-branch -> redeploy) e workflows
-├── ci.test.js          # Contratos de publicação do GitHub Pages, paridade SHA e Dockerfile raiz
-├── engine.test.js      # Fachada pública, ECS, Tux 3D, modos Dia/Noite/Chuva, sombras PCF e contorno por objeto
-├── i18n.test.js        # Paridade pt-br/en, hooks data-i18n e cliente real /api/v1 sem simulações
-├── static.test.js      # Caminhos relativos seguros para file://, seções obrigatórias e zero trackers/CDN
-├── ui.test.js          # Fullscreen, retrato no hero, modos de cena, brilho (110%) e rotação autônoma do Tux
-└── test_api.py         # Contratos legados do servidor estático api/server.py (python3 -m unittest)
+├── helpers/              # reusable assertions / fixtures
+├── auto-merge.test.js    # permanent merge -> resolve-conflicts -> delete-branch -> redeploy invariants
+├── ci.test.js            # GitHub Pages, Vercel parity, and workflow trigger contracts
+├── engine.test.js        # AsciiSceneEngine facade, ECS, modes (day/night/rain), and per-object outline API
+├── i18n.test.js          # pt-br / en dictionary parity, translation coverage, and real /api/v1 client checks
+├── static.test.js        # static site invariants (local assets, sections, no external trackers/CDNs)
+├── ui.test.js            # hero left-margin portrait, page brightness (110%), scene buttons, inert Tux stage
+└── test_api.py           # legacy api/server.py unittest suite (6 tests) for root Dockerfile compatibility
 ```
 
-Os testes do backend FastAPI modular (66 testes `unit` e `integration`, incluindo resiliência/carga, simulador de pipelines e Console RAG) residem em `backend/tests/` e são executados com `cd backend && pytest` e `ruff check .`.
+Backend Modular Monolith suites (Phases 1–5: 66 `unit` and `integration` tests covering Redis/in-memory cache & queues, resilience/load bursts, live CI/CD & Docker pipeline inspectors + RCA, and hybrid/vector Console RAG) live in `backend/tests/` (`cd backend && pytest` + `ruff check .`).
+Every suite runs automatically on pull requests and pushes to `main` via `.github/workflows/pr-tests.yml`, `.github/workflows/ci.yml`, and `.github/workflows/ci-cd.yml`.

@@ -9,20 +9,23 @@ AncientStudio/
 ├── index.html                         # SPA estática de terminal, hooks data-i18n
 ├── assets/
 │   ├── css/style.css                  # Layout, retrato no hero, modos de cena e brilho
+│   ├── img/eron-portrait-ascii.png    # Retrato ASCII do hero à esquerda
 │   ├── js/
 │   │   ├── core.js                    # Helpers, prefers-reduced-motion
-│   │   ├── i18n.js                    # Alternância pt-br ↔ en sem reload + dicionário embutido
-│   │   ├── api-client.js              # Integração real com /api/v1 (ETL, Gateway, n8n, Pipelines, RAG)
-│   │   ├── main.js                    # Composição de UI, fullscreen, brilho e carregamento diferido
-│   │   ├── pipeline.js / api.js / console.js / neofetch.js
-│   │   ├── engine-adapter.js          # Ponte entre a SPA e o bundle WebGL2/ECS
-│   │   └── ascii-engine.bundle.js     # Bundle IIFE gerado a partir de ascii-engine-module/
-│   ├── img/eron-portrait-ascii.png    # Retrato local responsivo
-│   ├── i18n/{pt-br,en}.json           # Dicionários sincronizados (paridade de chaves testada)
-│   ├── cv/                            # PDFs autorizados (PT-BR e EN)
+│   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
+│   │   ├── api-client.js              # Chamadas reais a /api/v1 (ETL, Gateway, n8n, Pipelines, RAG)
+│   │   ├── main.js                    # Composição da UI, fullscreen e controle de brilho (110%)
+│   │   ├── neofetch.js                # Palco Tux 3D + fallback raycaster ASCII
+│   │   ├── pipeline.js / api.js / console.js
+│   │   ├── engine-adapter.js          # Ponte para modos day / night / rain e mascot
+│   │   └── ascii-engine.bundle.js     # Bundle IIFE gerado por ascii-engine-module
+│   ├── i18n/
+│   │   ├── pt-br.json                 # Idioma primário
+│   │   └── en.json                    # Inglês internacional
+│   ├── cv/                            # PDFs originais autorizados (PT-BR e EN)
 │   └── fonts/                         # JetBrains Mono self-hosted (zero CDN)
 │
-├── ascii-engine-module/               # Motor 3D WebGL2/ECS isolado (TypeScript strict + Three.js)
+├── ascii-engine-module/               # Pacote TypeScript/WebGL2 3D ASCII + ECS [agente 3D]
 │   ├── src/                           # Core, ECS, World, Entities, Shaders (PCF, water, objectOutline), VFX
 │   ├── demo/                          # Demo standalone de desenvolvimento
 │   └── integration-entry.ts           # Fachada pública exportada para o bundle do portfólio
@@ -57,22 +60,23 @@ AncientStudio/
 │   └── n8n/workflows/                 # Workflows versionados (invoice-enrichment, scraping-postprocess, ai-anomaly-alert)
 │
 ├── .github/workflows/
-│   ├── ci.yml                         # Matriz completa (backend, engine 3D e integridade do portfólio)
-│   ├── ci-cd.yml                      # Ruff, pytest, Docker build e deploy
-│   ├── pr-tests.yml                   # Testes modulares Node (node --test)
-│   ├── pages.yml                      # Publicação no GitHub Pages + verificação não-bloqueante de paridade
-│   └── auto-merge.yml                 # Merge verificado -> exclusão da branch -> dispatch explícito de deploys
+│   ├── auto-merge.yml                 # Merge verificado -> delete-branch -> redeploy
+│   ├── ci.yml                         # Matriz completa (Node, engine TS, ruff + pytest)
+│   ├── ci-cd.yml                      # Ruff, pytest, Docker build e deploy Vercel
+│   ├── pages.yml                      # Deploy estático GitHub Pages + parity check não-bloqueante
+│   └── pr-tests.yml                   # Testes estáticos e contratos do frontend/engine
+│
+├── scripts/
+│   ├── auto-merge-verified.sh         # Helper de merge, resolução de conflito, limpeza de branch e redeploy
+│   └── verify-pages-parity.sh         # Validação de paridade de SHA (Pages vs Vercel)
 │
 ├── docs/
 │   ├── architecture.md                # Este documento
-│   ├── changelog-2026-11-25.md        # Registro consolidado das entregas de 2026-11-25
-│   ├── cicd-auto-merge.md             # Pipeline permanente merge -> delete-branch -> redeploy
-│   ├── engine-integration.md          # Contrato de integração da engine ASCII 3D
-│   └── pages-recovery.md              # Diagnóstico e paridade GitHub Pages ↔ Vercel
+│   ├── changelog-2026-11-25.md        # Consolidação das entregas de 2026-11-25
+│   ├── cicd-auto-merge.md             # Fluxo de auto-merge e configurações do GitHub
+│   ├── engine-integration.md          # Contrato de integração do motor 3D [agente 3D]
+│   └── pages-recovery.md              # Diagnóstico e recuperação do GitHub Pages
 │
-├── scripts/
-│   ├── auto-merge-verified.sh         # Automação verificada de merge, limpeza de branch e redeploy
-│   └── verify-pages-parity.sh         # Sonda de paridade SHA com cache-busting
 ├── docker-compose.yml                 # Subida local de api + n8n com segredos obrigatórios via .env
 ├── .env.example                       # Variáveis documentadas e higienizadas (sem credenciais reais)
 ├── Dockerfile                         # Host estático legado usado na Vercel atual (api/server.py)
