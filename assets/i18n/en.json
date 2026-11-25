@@ -76,5 +76,8 @@
   "scene.fullscreen": "[ fullscreen ]",
   "scene.exitFullscreen": "[ exit fullscreen ]",
   "scene.fullscreenAria": "Expand the ASCII REALMS section",
-  "scene.exitFullscreenAria": "Restore the ASCII REALMS section"
+  "scene.exitFullscreenAria": "Restore the ASCII REALMS section",
+  "scene.modeNight": "Night",
+  "scene.modeDay": "Day",
+  "scene.modeRain": "With rain"
 }

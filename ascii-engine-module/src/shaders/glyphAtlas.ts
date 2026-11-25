@@ -6,24 +6,31 @@ export interface GlyphAtlasData {
   rampCount: number;
   /** Number of directional structural edge characters */
   structuralCount: number;
-  /** Number of block-mass density tiles (`░▒▓█`) used for ~35% GPU `lighten` composition */
+  /** Number of seamless block-mass density tiles (`░▒▓█`) used for ~35% GPU `lighten` composition */
   blockCount: number;
   /** Total columns in the 1D horizontal strip */
   totalGlyphs: number;
-  /** Tile pixel resolution used when rasterizing this atlas */
+  /** Tile height in pixels (backward-compatible alias for `tileHeight`) */
   tileSize: number;
+  /** Exact integer pixel width of each monospace tile (`tileHeight * 0.625`, e.g. 40 or 60) */
+  tileWidth: number;
+  /** Exact integer pixel height of each monospace tile (multiple of 8, e.g. 64 or 96) */
+  tileHeight: number;
 }
 
 const DEFAULT_FONT_STACK =
   '"JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
 
 /**
- * Generates a crisp, high-DPI single-row 2D Canvas texture containing three contiguous bands:
- *  1. `[0 .. rampCount - 1]`: calibrated fine luminance glyphs (texture, rain, wet reflections, window grids)
+ * Generates a crisp, gutter-free 1D horizontal 2D Canvas glyph atlas with authentic 5:8 (`0.625`)
+ * monospace terminal tile proportions (`40x64` @ 1x, `60x96` @ HiDPI):
+ *  1. `[0 .. rampCount - 1]`: calibrated luminance glyphs sized at 90% of tile height so characters
+ *     naturally span ~86-90% of cell width/height with zero hollow box gaps between columns or rows.
  *  2. `[rampCount .. rampCount + structuralCount - 1]`: directional structural glyphs (`/ \ | _ [ ]`)
- *  3. `[rampCount + structuralCount .. totalGlyphs - 1]`: 4 calibrated halftone/solid block mass tiles
- *     (25% light stipple, 50% medium dither, 75% dense weave, 100% solid core block) enabling single-pass
- *     GPU `lighten` (`max(detailMask, blockMask * blockBlendWeight)`) at ~35% weight with zero CPU overhead!
+ *     sized at 96% of tile height so silhouettes connect smoothly across cell boundaries.
+ *  3. `[rampCount + structuralCount .. totalGlyphs - 1]`: 4 full-bleed (`pad = 0`, zero gutter)
+ *     ordered halftone & solid block tiles (`░▒▓█`) that tile edge-to-edge across cells without
+ *     producing any rectangular grid lines!
  */
 export function createGlyphAtlas(
   characterRamp: string,
@@ -40,12 +47,16 @@ export function createGlyphAtlas(
   const textGlyphCount = safeRamp.length + safeStructural.length;
   const totalGlyphs = textGlyphCount + blockCount;
 
-  const resolvedTile = Math.max(48, Math.min(128, Math.round(tileSize)));
-  const fontPx = Math.round(resolvedTile * 0.76);
+  // Snap tileHeight to a multiple of 8 (e.g. 64 or 96) so 5:8 tileWidth (40 or 60) is an exact integer multiple of 4!
+  const tileHeight = Math.max(48, Math.min(128, Math.round(tileSize / 8) * 8));
+  const tileWidth = Math.round(tileHeight * 0.625);
+
+  const rampFontPx = Math.round(tileHeight * 0.9);
+  const structFontPx = Math.round(tileHeight * 0.96);
 
   const canvas = document.createElement('canvas');
-  canvas.width = resolvedTile * totalGlyphs;
-  canvas.height = resolvedTile;
+  canvas.width = tileWidth * totalGlyphs;
+  canvas.height = tileHeight;
 
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) {
@@ -56,7 +67,6 @@ export function createGlyphAtlas(
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const family = fontFamily || DEFAULT_FONT_STACK;
-  ctx.font = `700 ${fontPx}px ${family}`;
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -65,44 +75,54 @@ export function createGlyphAtlas(
   for (let i = 0; i < textGlyphCount; i++) {
     const ch = combinedText[i] ?? ' ';
     if (ch === ' ') continue;
-    const centerX = i * resolvedTile + resolvedTile * 0.5;
-    const centerY = resolvedTile * 0.53;
-    ctx.fillText(ch, centerX, centerY);
+
+    const isStructural = i >= safeRamp.length;
+    ctx.font = `700 ${isStructural ? structFontPx : rampFontPx}px ${family}`;
+
+    // Clip drawing strictly to this glyph's rectangular tile so wide strokes never bleed into adjacent tiles
+    if (typeof ctx.save === 'function' && typeof ctx.beginPath === 'function' && typeof ctx.clip === 'function') {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(i * tileWidth + 1, 0, tileWidth - 2, tileHeight);
+      ctx.clip();
+      ctx.fillText(ch, i * tileWidth + tileWidth * 0.5, tileHeight * 0.52);
+      ctx.restore();
+    } else {
+      ctx.fillText(ch, i * tileWidth + tileWidth * 0.5, tileHeight * 0.52);
+    }
   }
 
-  // Rasterize 4 deterministic procedural block-shade tiles (`░`, `▒`, `▓`, `█` equivalents)
-  // directly with crisp geometric sub-cells so block mass never depends on OS font fallback!
-  const pad = Math.max(2, Math.round(resolvedTile * 0.06));
-  const innerW = resolvedTile - pad * 2;
-  const innerH = resolvedTile - pad * 2;
-  const subGrid = 8;
-  const cellW = innerW / subGrid;
-  const cellH = innerH / subGrid;
+  // Rasterize 4 deterministic FULL-BLEED (`pad = 0`, zero border/gutter!) block-shade tiles (`░`, `▒`, `▓`, `█`)
+  // using exact integer sub-cell divisors (`subGridX = 4`, `subGridY = 8`) so adjacent cells tile
+  // seamlessly without any checkered grid or inter-cell gap!
+  const subGridX = 4;
+  const subGridY = 8;
+  const subW = tileWidth / subGridX;
+  const subH = tileHeight / subGridY;
 
   for (let b = 0; b < blockCount; b++) {
-    const tileOriginX = (textGlyphCount + b) * resolvedTile + pad;
-    const tileOriginY = pad;
+    const tileOriginX = (textGlyphCount + b) * tileWidth;
 
     if (b === 3) {
-      // 100% solid luminous block (`█`) with crisp 1px cell gutter for authentic terminal block feel
+      // 100% continuous edge-to-edge solid block (`█`) — zero margin/gutter!
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(tileOriginX, tileOriginY, innerW, innerH);
+      ctx.fillRect(tileOriginX, 0, tileWidth, tileHeight);
       continue;
     }
 
-    // Ordered Bayer-like halftone thresholds for b=0 (~28% `░`), b=1 (~52% `▒`), b=2 (~78% `▓`)
+    // Ordered Bayer halftone thresholds for b=0 (~28% `░`), b=1 (~54% `▒`), b=2 (~80% `▓`)
     const density = b === 0 ? 0.28 : b === 1 ? 0.54 : 0.8;
     ctx.fillStyle = '#FFFFFF';
-    for (let gy = 0; gy < subGrid; gy++) {
-      for (let gx = 0; gx < subGrid; gx++) {
+    for (let gy = 0; gy < subGridY; gy++) {
+      for (let gx = 0; gx < subGridX; gx++) {
         const bayer4 =
           (((gx & 1) << 2) | ((gy & 1) << 3) | ((gx & 2) >> 1) | (gy & 2)) / 16.0;
         if (bayer4 < density) {
           ctx.fillRect(
-            Math.round(tileOriginX + gx * cellW),
-            Math.round(tileOriginY + gy * cellH),
-            Math.max(1, Math.ceil(cellW - 0.5)),
-            Math.max(1, Math.ceil(cellH - 0.5))
+            Math.round(tileOriginX + gx * subW),
+            Math.round(gy * subH),
+            Math.ceil(subW),
+            Math.ceil(subH)
           );
         }
       }
@@ -123,6 +143,8 @@ export function createGlyphAtlas(
     structuralCount: safeStructural.length,
     blockCount,
     totalGlyphs,
-    tileSize: resolvedTile,
+    tileSize: tileHeight,
+    tileWidth,
+    tileHeight,
   };
 }

@@ -13,10 +13,18 @@ export type DeepPartial<T> = {
 
 /**
  * Engine scene mode:
- * - 'playground': Small interactive ASCII Realms island playground (terrain, reflective lake, bridge, shrine, beacons, avatar)
- * - 'mascot': Dedicated high-contrast 3D Linux Tux stage for [ STACK // NEOFETCH ]
+ * - 'playground': Unified Cyberpunk urban boulevard scenario (`[ ASCII REALMS // SCENE ]`)
+ * - 'mascot': Dedicated high-contrast 3D Linux Tux stage for `[ STACK // NEOFETCH ]`
  */
 export type SceneMode = 'playground' | 'mascot';
+
+/**
+ * Environmental / atmospheric states supported on the unified playground scenario:
+ * - 'day': Sunlit urban avenue with clear visibility, crisp solar shadows & dry pavement
+ * - 'night': Clear nocturnal cyberpunk boulevard with stars, neon signage & moonlight shadows
+ * - 'rain': Stormy rain-drenched cyberpunk avenue with wind-slanted rain, wet mirror puddles & raindrop ripples
+ */
+export type AtmosphereMode = 'day' | 'night' | 'rain';
 
 export type ResolutionTier = 'mobile' | 'compact' | 'desktop' | 'hd' | 'uhd';
 
@@ -107,10 +115,12 @@ export interface LifecycleCallbacks {
  * Complete engine configuration contract.
  */
 export interface EngineConfig {
-  /** Scene mode ('playground' for ASCII Realms island, 'mascot' for Neofetch 3D Tux) */
+  /** Scene mode ('playground' for Cyberpunk avenue, 'mascot' for Neofetch 3D Tux) */
   mode: SceneMode;
   /** Map identifier loaded by MapLoader when mode === 'playground' (default: 'cyberpunk-citadel') */
   mapId: string;
+  /** Active atmospheric/weather state on the unified scenario ('day' | 'night' | 'rain', default: 'night') */
+  atmosphere: AtmosphereMode;
   /** Enable keyboard input capture ONLY when explicitly opted-in / focused (default: false) */
   enableKeyboard: boolean;
   /** Automatically pause when container leaves viewport via IntersectionObserver (default: true) */

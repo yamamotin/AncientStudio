@@ -127,7 +127,10 @@ export class AsciiPostProcessor {
         tBloom: { value: this.bloomTargetA.texture },
         tGlyphAtlas: { value: this.atlasData.texture },
         uResolution: { value: new THREE.Vector2(2, 2) },
-        uCellSize: { value: new THREE.Vector2(8, 10) },
+        uCellSize: { value: new THREE.Vector2(8, 13) },
+        uAtlasTileSize: {
+          value: new THREE.Vector2(this.atlasData.tileWidth, this.atlasData.tileHeight),
+        },
         uSubCellSpread: { value: 0.22 },
         uTransitionMix: { value: 0.0 },
         uRampCount: { value: this.atlasData.rampCount },
@@ -141,6 +144,7 @@ export class AsciiPostProcessor {
         uEdgeStrength: { value: config.edgeStrength },
         uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
+        uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
         uBgColor: { value: bgColor },
         uTime: { value: 0 },
       },
@@ -253,6 +257,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uDofStrength.value = config.dofStrength;
     this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
     this.compositeMaterial.uniforms.uBlockBlendWeight.value = config.blockBlendWeight;
+    this.compositeMaterial.uniforms.uDaylight.value = config.atmosphere === 'day' ? 1.0 : 0.0;
     this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
 
     return this.applyResolutionProfile(profile, config, false);
@@ -267,6 +272,10 @@ export class AsciiPostProcessor {
       tileSize
     );
     this.compositeMaterial.uniforms.tGlyphAtlas.value = this.atlasData.texture;
+    this.compositeMaterial.uniforms.uAtlasTileSize.value.set(
+      this.atlasData.tileWidth,
+      this.atlasData.tileHeight
+    );
     this.compositeMaterial.uniforms.uRampCount.value = this.atlasData.rampCount;
     this.compositeMaterial.uniforms.uStructuralCount.value = this.atlasData.structuralCount;
     this.compositeMaterial.uniforms.uBlockCount.value = this.atlasData.blockCount;

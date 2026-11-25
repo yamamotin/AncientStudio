@@ -84,7 +84,8 @@ export class PlaygroundEntityFactory {
           torchLight.shadow.mapSize.height = 512;
           torchLight.shadow.camera.near = 0.5;
           torchLight.shadow.camera.far = 36;
-          torchLight.shadow.bias = -0.002;
+          torchLight.shadow.bias = -0.0008;
+          torchLight.shadow.normalBias = 0.04;
         }
 
         return {
@@ -244,6 +245,7 @@ export class PlaygroundEntityFactory {
           frameMat
         );
         frame.position.y = -params.height * 0.5;
+        frame.castShadow = true;
         group.add(frame);
 
         const glowFace = new THREE.Mesh(
@@ -327,6 +329,7 @@ export class PlaygroundEntityFactory {
         });
 
         const fuselage = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.24, 1.45), hullMat);
+        fuselage.castShadow = true;
         group.add(fuselage);
 
         const lightStrip = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.1, 1.25), thrusterMat);
@@ -460,6 +463,7 @@ export class PlaygroundEntityFactory {
           const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.42), coatMat);
           pauldron.position.set(side * 0.46, 1.46, 0);
           pauldron.rotation.z = -side * 0.18;
+          pauldron.castShadow = true;
           group.add(pauldron);
 
           const shoulderTrim = new THREE.Mesh(
@@ -477,11 +481,13 @@ export class PlaygroundEntityFactory {
         const leftFlap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.72, 0.09), coatMat);
         leftFlap.position.set(-0.19, -0.34, -0.04);
         leftFlap.rotation.z = 0.12;
+        leftFlap.castShadow = true;
         coatTail.add(leftFlap);
 
         const rightFlap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.72, 0.09), coatMat);
         rightFlap.position.set(0.19, -0.34, -0.04);
         rightFlap.rotation.z = -0.12;
+        rightFlap.castShadow = true;
         coatTail.add(rightFlap);
 
         const hemNeon = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.075, 0.11), magentaNeonMat);
@@ -521,6 +527,7 @@ export class PlaygroundEntityFactory {
         const lForearm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.18), armorMat);
         lForearm.position.y = -0.26;
         lForearm.rotation.z = 0.18;
+        lForearm.castShadow = true;
         leftArm.add(lForearm);
         group.add(leftArm);
 
@@ -529,6 +536,7 @@ export class PlaygroundEntityFactory {
         const rForearm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.56, 0.18), armorMat);
         rForearm.position.y = -0.22;
         rForearm.rotation.z = -0.24;
+        rForearm.castShadow = true;
         bladePivot.add(rForearm);
 
         const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.12), amberCoreMat);
@@ -539,6 +547,7 @@ export class PlaygroundEntityFactory {
         const bladeCore = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.98, 0.11), cyanNeonMat);
         bladeCore.position.set(0.62, 0.48, 0.16);
         bladeCore.rotation.z = -0.52;
+        bladeCore.castShadow = true;
         bladePivot.add(bladeCore);
         group.add(bladePivot);
 

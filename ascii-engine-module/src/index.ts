@@ -24,11 +24,13 @@ import { PlaygroundEntityFactory } from './entities/PlaygroundEntityFactory';
 import { TuxEntityFactory } from './entities/TuxEntityFactory';
 import { KeyboardInput } from './input/KeyboardInput';
 import { PointerInput } from './input/PointerInput';
+import { createGlyphAtlas } from './shaders/glyphAtlas';
 import { VfxController } from './vfx/VfxController';
 import { MapLoader } from './world/MapLoader';
 import { PlaygroundSceneBuilder } from './world/PlaygroundSceneBuilder';
 import { SceneComposerKit, SceneDepthRig } from './world/SceneComposerKit';
 import type {
+  AtmosphereMode,
   DeepPartial,
   EngineConfig,
   EngineLifecycleState,
@@ -42,6 +44,7 @@ import type {
 } from './types';
 
 export type {
+  AtmosphereMode,
   DeepPartial,
   EngineConfig,
   EngineLifecycleState,
@@ -56,6 +59,7 @@ export type {
 
 export {
   AsciiEngineCore,
+  createGlyphAtlas,
   DEFAULT_ASCII_RAMP,
   DEFAULT_ENGINE_CONFIG,
   DEFAULT_PALETTE,

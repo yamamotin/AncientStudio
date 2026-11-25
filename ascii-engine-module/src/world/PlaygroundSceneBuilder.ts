@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import type { EntityBlueprintRegistry } from '../ecs/EntityBlueprint';
 import type { EntityId, World } from '../ecs/World';
 import { PlaygroundEntityFactory } from '../entities/PlaygroundEntityFactory';
-import { createSanctuaryWaterMaterial } from '../shaders/waterShader';
+import {
+  atmosphereWaterParams,
+  createSanctuaryWaterMaterial,
+} from '../shaders/waterShader';
 import type { EngineConfig } from '../types';
 import type {
   BuildingSpawnDef,
@@ -20,12 +23,17 @@ export interface BuiltPlaygroundScene {
   depthRig: SceneDepthRig;
   materialBank: NeonMaterialBank;
   blueprintRegistry: EntityBlueprintRegistry;
+  foundationMaterial: THREE.MeshStandardMaterial;
   waterMesh: THREE.Mesh;
   waterMaterial: THREE.ShaderMaterial;
   ambientHemi: THREE.HemisphereLight;
   moonDirLight: THREE.DirectionalLight;
   torchLight: THREE.PointLight;
   brazierLights: THREE.PointLight[];
+  skySunMesh: THREE.Mesh;
+  skyHaloMesh: THREE.Mesh;
+  skyBeams: THREE.Mesh[];
+  starPoints: THREE.Points;
   neonMaterials: {
     cyan: THREE.MeshStandardMaterial;
     magenta: THREE.MeshStandardMaterial;
@@ -37,13 +45,14 @@ export interface BuiltPlaygroundScene {
 }
 
 /**
- * PlaygroundSceneBuilder: Composes the Cyberpunk Nocturnal Street Scene (`[ ASCII REALMS // SCENE ]`)
- * using the modular `SceneComposerKit` + `SceneDepthRig` + `EntityBlueprintRegistry`:
+ * PlaygroundSceneBuilder: Composes the single unified Cyberpunk Boulevard (`[ ASCII REALMS // SCENE ]`)
+ * supporting all three atmospheric states ("Dia" / `'day'`, "Noite" / `'night'`, "Com chuva" / `'rain'`)
+ * with calibrated real-time PCF shadows across street, sidewalks, facades, props, and foreground avatar:
  *  - `DepthLayer_Foreground`: High-contrast Netrunner protagonist on crosswalk, street bollards & foreground lamps
  *  - `DepthLayer_Midground`: Streetlamps, wind-swaying banners, overhead catenary cables, sidewalk vending kiosks,
- *    cantilevered neon signage, multi-story street-wall buildings, elevated overpass, and Holo-Reactor portal
- *  - `DepthLayer_Background`: Perspective-converging arcology megastructures with lit window matrices & spires
- *  - `DepthLayer_Sky`: Synth horizon ring, searchlight beams, and crisp nocturnal stars.
+ *    cantilevered signage, multi-story street-wall buildings, elevated overpass, and Holo-Reactor portal
+ *  - `DepthLayer_Background`: Perspective-converging arcology megastructures with window matrices & spires
+ *  - `DepthLayer_Sky`: Solar/lunar focal disc, nocturnal searchlights, and starfield.
  */
 export class PlaygroundSceneBuilder {
   public static terrainHeight(x: number, z: number): number {
@@ -89,38 +98,45 @@ export class PlaygroundSceneBuilder {
       amber: materialBank.amber,
     };
 
-    // 1. Nocturnal Cyberpunk Lighting Rig (eliminates dead dark pockets while preserving deep sky contrast)
+    // 1. Directional Sun/Moon/Storm Shadow Rig + Hemisphere Fill
     const ambientHemi = new THREE.HemisphereLight(
       new THREE.Color(config.palette.coolAmbient),
       new THREE.Color('#141A2E'),
-      1.3
+      1.24
     );
     scene.add(ambientHemi);
 
     const moonDirLight = new THREE.DirectionalLight(
-      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#E2F9FF'), 0.45),
-      1.78
+      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#E2F9FF'), 0.48),
+      1.95
     );
-    moonDirLight.position.set(-12, 24, 10);
+    moonDirLight.position.set(-13, 24, 10);
+    moonDirLight.target.position.set(0, 1.0, -1.5);
+    scene.add(moonDirLight.target);
+
     moonDirLight.castShadow = config.enableShadows;
-    if (config.enableShadows) {
-      moonDirLight.shadow.mapSize.width = 1024;
-      moonDirLight.shadow.mapSize.height = 1024;
-      moonDirLight.shadow.camera.near = 2;
-      moonDirLight.shadow.camera.far = 60;
-      const d = 22;
-      moonDirLight.shadow.camera.left = -d;
-      moonDirLight.shadow.camera.right = d;
-      moonDirLight.shadow.camera.top = d;
-      moonDirLight.shadow.camera.bottom = -d;
-      moonDirLight.shadow.bias = -0.0015;
-    }
+    moonDirLight.shadow.mapSize.width = 1536;
+    moonDirLight.shadow.mapSize.height = 1536;
+    moonDirLight.shadow.camera.near = 1.5;
+    moonDirLight.shadow.camera.far = 56;
+    moonDirLight.shadow.camera.left = -17;
+    moonDirLight.shadow.camera.right = 17;
+    moonDirLight.shadow.camera.top = 19;
+    moonDirLight.shadow.camera.bottom = -16;
+    moonDirLight.shadow.bias = -0.00045;
+    moonDirLight.shadow.normalBias = 0.035;
+    moonDirLight.shadow.radius = 1.55;
     scene.add(moonDirLight);
 
-    // 2. Sidewalks, Neon Curbs & Wet Boulevard Foundation
-    this.buildUrbanStreetFoundation(depthRig.midground, mapDef, config, materialBank);
+    // 2. Sidewalks, Neon Curbs & Boulevard Foundation (receives real-time PCF shadows)
+    const foundationMaterial = this.buildUrbanStreetFoundation(
+      depthRig.midground,
+      mapDef,
+      config,
+      materialBank
+    );
 
-    // 3. Rain-Slicked Reflective Street Surface (`PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48)`)
+    // 3. Boulevard Street Surface (`PlaneGeometry(mapDef.waterSize, mapDef.waterSize, 48, 48)`)
     const { waterMesh, waterMaterial } = this.buildReflectiveWetBoulevard(scene, mapDef, config);
 
     // 4. Streetlamps, Overhead Catenary Cables, Wind-Swaying Neon Signs & Sidewalk Kiosks
@@ -141,8 +157,8 @@ export class PlaygroundSceneBuilder {
     // 6. Layered Cyberpunk Cityscape (placed into Foreground / Midground / Background depth groups)
     this.buildCyberCityscape(depthRig, mapDef.buildings, materialBank);
 
-    // 7. Sky Layer: Horizon Synth Ring, Searchlights & Stars
-    this.buildCyberSkyBackdrop(depthRig.sky, materialBank);
+    // 7. Sky Layer: Horizon Solar/Synth Ring, Searchlights & Stars
+    const skyRefs = this.buildCyberSkyBackdrop(depthRig.sky, materialBank);
 
     // 8. Spawn ECS Entities via Blueprint Registry with semantic DepthLayer tracking
     const reactorSpawn = blueprintRegistry.spawn(
@@ -182,10 +198,9 @@ export class PlaygroundSceneBuilder {
       }
     });
 
-    // Midground storefront neon lights casting vivid cyan/magenta reflection trails onto wet asphalt
     const midCyanLight = new THREE.PointLight(
       new THREE.Color(config.palette.coolAmbient),
-      24.0,
+      22.0,
       24.0,
       1.5
     );
@@ -195,7 +210,7 @@ export class PlaygroundSceneBuilder {
 
     const midMagentaLight = new THREE.PointLight(
       new THREE.Color(config.palette.warmLight),
-      24.0,
+      22.0,
       24.0,
       1.5
     );
@@ -239,22 +254,161 @@ export class PlaygroundSceneBuilder {
       {}
     );
 
-    return {
+    const built: BuiltPlaygroundScene = {
       scene,
       depthRig,
       materialBank,
       blueprintRegistry,
+      foundationMaterial,
       waterMesh,
       waterMaterial,
       ambientHemi,
       moonDirLight,
       torchLight,
       brazierLights,
+      skySunMesh: skyRefs.skySunMesh,
+      skyHaloMesh: skyRefs.skyHaloMesh,
+      skyBeams: skyRefs.skyBeams,
+      starPoints: skyRefs.starPoints,
       neonMaterials,
       shrineEntityId,
       avatarEntityId: avatarSpawn.entityId,
       terrainHeightAt: PlaygroundSceneBuilder.terrainHeight,
     };
+
+    this.applyAtmosphere(built, config);
+    return built;
+  }
+
+  /**
+   * Transitions the single unified scenario cohesively across `'day'` ("Dia"), `'night'` ("Noite"),
+   * and `'rain'` ("Com chuva"): updating directional sun/moon/storm shadow geometry, sky stars & beams,
+   * fog density, architectural hull/neon balance, and dry vs wet raindrop-rippled pavement.
+   */
+  public static applyAtmosphere(built: BuiltPlaygroundScene, config: EngineConfig): void {
+    const atmosphere = config.atmosphere ?? 'night';
+    const p = config.palette;
+
+    built.materialBank.setAtmosphere(atmosphere, p);
+
+    if (built.scene.background instanceof THREE.Color) {
+      built.scene.background.set(p.background);
+    }
+
+    if (built.scene.fog instanceof THREE.FogExp2) {
+      built.scene.fog.color.set(p.background);
+      built.scene.fog.density =
+        atmosphere === 'day' ? 0.0085 : atmosphere === 'rain' ? 0.0255 : 0.0165;
+    }
+
+    built.moonDirLight.castShadow = config.enableShadows;
+    built.torchLight.castShadow = config.enableShadows && atmosphere !== 'day';
+
+    if (atmosphere === 'day') {
+      // Crisp sunlit afternoon across the urban canyon with high-contrast diagonal solar shadows
+      built.ambientHemi.color.set('#B6E4FF');
+      built.ambientHemi.groundColor.set('#3A4A62');
+      built.ambientHemi.intensity = 1.72;
+
+      built.moonDirLight.position.set(15, 27, 11);
+      built.moonDirLight.color.set('#FFF5DC');
+      built.moonDirLight.intensity = 3.05;
+      built.moonDirLight.shadow.radius = 1.15;
+
+      built.foundationMaterial.roughness = 0.62;
+      built.foundationMaterial.metalness = 0.32;
+
+      built.torchLight.color.set(p.warmCore);
+      built.torchLight.intensity = 18.0;
+      built.brazierLights.forEach((bl, idx) => {
+        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
+        bl.intensity = 8.0;
+      });
+
+      built.starPoints.visible = false;
+      for (const beam of built.skyBeams) {
+        beam.visible = false;
+      }
+      built.skySunMesh.scale.setScalar(1.12);
+    } else if (atmosphere === 'rain') {
+      // Stormy rain-drenched cyberpunk night: misty sky, veiled stars, diffused shadows & intense wet neon
+      built.ambientHemi.color.set(p.coolAmbient);
+      built.ambientHemi.groundColor.set('#0E1626');
+      built.ambientHemi.intensity = 1.15;
+
+      built.moonDirLight.position.set(-9, 25, 8);
+      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#C4F0FF'), 0.35);
+      built.moonDirLight.intensity = 1.65;
+      built.moonDirLight.shadow.radius = 2.35;
+
+      built.foundationMaterial.roughness = 0.24;
+      built.foundationMaterial.metalness = 0.72;
+
+      built.torchLight.color.set(p.warmLight);
+      built.torchLight.intensity = 54.0;
+      built.brazierLights.forEach((bl, idx) => {
+        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
+        bl.intensity = 25.0;
+      });
+
+      built.starPoints.visible = true;
+      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.16;
+      for (let i = 0; i < built.skyBeams.length; i++) {
+        const beam = built.skyBeams[i]!;
+        beam.visible = true;
+        const bMat = beam.material as THREE.MeshBasicMaterial;
+        bMat.color.set(i === 0 ? p.coolAmbient : p.warmLight);
+        bMat.opacity = 0.28;
+      }
+      built.skySunMesh.scale.setScalar(0.96);
+    } else {
+      // Clear nocturnal cyberpunk avenue: crisp starlight, moonlight shadows & dry/lightly-damp pavement
+      built.ambientHemi.color.set(p.coolAmbient);
+      built.ambientHemi.groundColor.set('#141C30');
+      built.ambientHemi.intensity = 1.25;
+
+      built.moonDirLight.position.set(-13, 24, 10);
+      built.moonDirLight.color.set(p.coolAmbient).lerp(new THREE.Color('#E4FAFF'), 0.48);
+      built.moonDirLight.intensity = 1.95;
+      built.moonDirLight.shadow.radius = 1.55;
+
+      built.foundationMaterial.roughness = 0.44;
+      built.foundationMaterial.metalness = 0.56;
+
+      built.torchLight.color.set(p.warmLight);
+      built.torchLight.intensity = 48.0;
+      built.brazierLights.forEach((bl, idx) => {
+        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
+        bl.intensity = 20.0;
+      });
+
+      built.starPoints.visible = true;
+      (built.starPoints.material as THREE.PointsMaterial).opacity = 0.9;
+      for (let i = 0; i < built.skyBeams.length; i++) {
+        const beam = built.skyBeams[i]!;
+        beam.visible = true;
+        const bMat = beam.material as THREE.MeshBasicMaterial;
+        bMat.color.set(i === 0 ? p.coolAmbient : p.warmLight);
+        bMat.opacity = 0.2;
+      }
+      built.skySunMesh.scale.setScalar(1.0);
+    }
+
+    built.moonDirLight.updateMatrixWorld();
+
+    const u = built.waterMaterial.uniforms;
+    const wp = atmosphereWaterParams(atmosphere);
+    if (u.uDeepColor) u.uDeepColor.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
+    if (u.uShallowColor) u.uShallowColor.value.set(p.coolAmbient).lerp(new THREE.Color('#8be4ff'), 0.34);
+    if (u.uWarmColor) u.uWarmColor.value.set(p.warmLight);
+    if (u.uWarmCoreColor) u.uWarmCoreColor.value.set(p.warmCore);
+    if (u.uCursorColor) u.uCursorColor.value.set(p.cursorLight);
+    if (u.uMoonDir) u.uMoonDir.value.copy(built.moonDirLight.position).normalize();
+    if (u.uWetness) u.uWetness.value = wp.wetness;
+    if (u.uRainIntensity) u.uRainIntensity.value = wp.rainIntensity;
+    if (u.uDaylight) u.uDaylight.value = wp.daylight;
+    if (u.uShadowStrength) u.uShadowStrength.value = wp.shadowStrength;
+    if (u.uShadowEnabled) u.uShadowEnabled.value = config.enableShadows ? 1.0 : 0.0;
   }
 
   private static buildUrbanStreetFoundation(
@@ -262,7 +416,7 @@ export class PlaygroundSceneBuilder {
     mapDef: PlaygroundMapDefinition,
     config: EngineConfig,
     bank: NeonMaterialBank
-  ): void {
+  ): THREE.MeshStandardMaterial {
     const geo = new THREE.PlaneGeometry(
       mapDef.terrainSize,
       mapDef.terrainSize,
@@ -274,9 +428,9 @@ export class PlaygroundSceneBuilder {
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
 
-    const roadBed = new THREE.Color('#0A101D');
-    const sidewalkConcrete = new THREE.Color('#1E2C42');
-    const terraceSteel = new THREE.Color('#162235');
+    const roadBed = new THREE.Color('#10192B');
+    const sidewalkConcrete = new THREE.Color('#273852');
+    const terraceSteel = new THREE.Color('#1D2C42');
     const tileHighlight = new THREE.Color(config.palette.coolAmbient).multiplyScalar(0.45);
     const tmpColor = new THREE.Color();
 
@@ -292,7 +446,7 @@ export class PlaygroundSceneBuilder {
         const onPaver =
           Math.abs((x % 1.5) + 1.5) % 1.5 < 0.12 || Math.abs((z % 1.5) + 1.5) % 1.5 < 0.12;
         if (onPaver && Math.abs(x) < 10.5) {
-          tmpColor.copy(sidewalkConcrete).lerp(tileHighlight, 0.55);
+          tmpColor.copy(sidewalkConcrete).lerp(tileHighlight, 0.52);
         } else {
           tmpColor.copy(y > 0.25 ? terraceSteel : sidewalkConcrete);
         }
@@ -308,8 +462,8 @@ export class PlaygroundSceneBuilder {
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.4,
-      metalness: 0.58,
+      roughness: 0.44,
+      metalness: 0.56,
       flatShading: true,
     });
 
@@ -319,11 +473,17 @@ export class PlaygroundSceneBuilder {
 
     const leftCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), bank.cyan);
     leftCurb.position.set(-4.02, 0.24, -2.5);
+    leftCurb.castShadow = true;
+    leftCurb.receiveShadow = true;
     targetGroup.add(leftCurb);
 
     const rightCurb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 28.0), bank.magenta);
     rightCurb.position.set(4.02, 0.24, -2.5);
+    rightCurb.castShadow = true;
+    rightCurb.receiveShadow = true;
     targetGroup.add(rightCurb);
+
+    return mat;
   }
 
   private static buildReflectiveWetBoulevard(
@@ -340,7 +500,9 @@ export class PlaygroundSceneBuilder {
     const waterMaterial = createSanctuaryWaterMaterial({
       palette: config.palette,
       shrineLightPos: new THREE.Vector3(sx, sy, sz),
-      moonDir: new THREE.Vector3(-12, 24, 10),
+      moonDir: new THREE.Vector3(-13, 24, 10),
+      atmosphere: config.atmosphere,
+      enableShadows: config.enableShadows,
     });
 
     const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
@@ -398,7 +560,6 @@ export class PlaygroundSceneBuilder {
       }
     });
 
-    // Sidewalk Vending Kiosks / Data Terminals along the midground sidewalks
     const kioskSpecs = [
       { x: -4.85, z: 3.9, facingX: 1, tone: 'amber' as const },
       { x: 4.85, z: 3.7, facingX: -1, tone: 'cyan' as const },
@@ -416,7 +577,6 @@ export class PlaygroundSceneBuilder {
       );
     }
 
-    // Overhead sagging catenary cables registered as WindSway ECS entities
     const cableZList = [6.4, 1.9, -2.6];
     cableZList.forEach((cz, idx) => {
       const pivotY = 4.35;
@@ -481,6 +641,7 @@ export class PlaygroundSceneBuilder {
       bank.hullDark
     );
     stepBase.position.y = 0.15;
+    stepBase.castShadow = true;
     stepBase.receiveShadow = true;
     group.add(stepBase);
 
@@ -509,6 +670,7 @@ export class PlaygroundSceneBuilder {
     const headerBeam = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.72, 0.96), bank.hullMid);
     headerBeam.position.set(0, 6.0, -0.2);
     headerBeam.castShadow = true;
+    headerBeam.receiveShadow = true;
     group.add(headerBeam);
 
     const headerNeon = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.16, 1.04), bank.cyan);
@@ -520,6 +682,8 @@ export class PlaygroundSceneBuilder {
     const overpass = new THREE.Group();
     overpass.position.set(0, 6.8, -8.6);
     const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(20.0, 0.62, 1.4), bank.hullMid);
+    bridgeDeck.castShadow = true;
+    bridgeDeck.receiveShadow = true;
     overpass.add(bridgeDeck);
 
     const upperRail = new THREE.Mesh(new THREE.BoxGeometry(19.6, 0.14, 1.48), bank.amber);
@@ -568,25 +732,32 @@ export class PlaygroundSceneBuilder {
   private static buildCyberSkyBackdrop(
     skyGroup: THREE.Group,
     bank: NeonMaterialBank
-  ): void {
-    const haloRing = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.35, 32), bank.magenta);
-    haloRing.position.set(0, 13.8, -28.5);
-    skyGroup.add(haloRing);
+  ): {
+    skySunMesh: THREE.Mesh;
+    skyHaloMesh: THREE.Mesh;
+    skyBeams: THREE.Mesh[];
+    starPoints: THREE.Points;
+  } {
+    const skyHaloMesh = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.35, 32), bank.magenta);
+    skyHaloMesh.position.set(0, 13.8, -28.5);
+    skyGroup.add(skyHaloMesh);
 
-    const innerSun = new THREE.Mesh(new THREE.CircleGeometry(3.25, 28), bank.amber);
-    innerSun.position.set(0, 13.8, -28.7);
-    skyGroup.add(innerSun);
+    const skySunMesh = new THREE.Mesh(new THREE.CircleGeometry(3.25, 28), bank.amber);
+    skySunMesh.position.set(0, 13.8, -28.7);
+    skyGroup.add(skySunMesh);
 
+    const skyBeams: THREE.Mesh[] = [];
     for (const sx of [-9.5, 9.5]) {
       const beamMat = new THREE.MeshBasicMaterial({
         color: sx < 0 ? bank.cyan.color : bank.magenta.color,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.2,
       });
       const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.14, 26, 6), beamMat);
       beam.position.set(sx, 15.0, -20.0);
       beam.rotation.z = sx < 0 ? -0.1 : 0.1;
       skyGroup.add(beam);
+      skyBeams.push(beam);
     }
 
     const starCount = 160;
@@ -621,9 +792,12 @@ export class PlaygroundSceneBuilder {
       vertexColors: true,
       fog: false,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.9,
     });
 
-    skyGroup.add(new THREE.Points(starGeo, starMat));
+    const starPoints = new THREE.Points(starGeo, starMat);
+    skyGroup.add(starPoints);
+
+    return { skySunMesh, skyHaloMesh, skyBeams, starPoints };
   }
 }

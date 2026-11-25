@@ -84,7 +84,10 @@ window.TP = window.TP || {};
     "scene.fullscreen": "[ tela cheia ]",
     "scene.exitFullscreen": "[ sair da tela cheia ]",
     "scene.fullscreenAria": "Ampliar a seção ASCII REALMS",
-    "scene.exitFullscreenAria": "Restaurar a seção ASCII REALMS"
+    "scene.exitFullscreenAria": "Restaurar a seção ASCII REALMS",
+    "scene.modeNight": "Noite",
+    "scene.modeDay": "Dia",
+    "scene.modeRain": "Com chuva"
   },
   "en": {
     "skip": "Skip to content",
@@ -164,7 +167,10 @@ window.TP = window.TP || {};
     "scene.fullscreen": "[ fullscreen ]",
     "scene.exitFullscreen": "[ exit fullscreen ]",
     "scene.fullscreenAria": "Expand the ASCII REALMS section",
-    "scene.exitFullscreenAria": "Restore the ASCII REALMS section"
+    "scene.exitFullscreenAria": "Restore the ASCII REALMS section",
+    "scene.modeNight": "Night",
+    "scene.modeDay": "Day",
+    "scene.modeRain": "With rain"
   }
 };
   var STORAGE_KEY = 'ancientstudio.lang';

@@ -226,10 +226,10 @@ window.TP = window.TP || {};
     var preset = document.getElementById('scene-preset');
     var help = document.querySelector('.scene-help');
 
-    var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'sanctuary' });
+    var scene = TP.scene.create(stage, { preset: preset ? preset.value : 'night' });
     var penguin = penguinStage
       ? TP.scene.create(penguinStage, {
-          preset: 'sanctuary',
+          preset: 'night',
           weather: false,
           mascotFocus: true,
           config: { mode: 'mascot', maxFps: 36, cellSize: 8, dofStrength: 0.0, edgeStrength: 0.96 }

@@ -143,18 +143,19 @@ export class AsciiEngineCore {
       // 2. Initialize Lifecycle, Input, and ECS World
       const lifecycle = new LifecycleManager(this.container);
       const pointerInput = new PointerInput(this.container, {
-        trackWindowHover: this.config.mode === 'mascot',
+        trackWindowHover: false,
       });
       const keyboardInput = new KeyboardInput({
         enabled: this.config.enableKeyboard,
         focusTarget: this.container,
       });
 
-      pointerInput.attach();
-      keyboardInput.attach();
-
-      // Passive container pointermove hook preserving backward-compatible event contract
-      this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+      // Mascot stage (`#penguin-stage`) stays 100% pointer/touch-inert; only playground attaches pointer listeners
+      if (this.config.mode !== 'mascot') {
+        pointerInput.attach();
+        keyboardInput.attach();
+        this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+      }
 
       lifecycle.registerCleanup(() => {
         this.container.removeEventListener('pointermove', this.onPassivePointerMoveBound);
@@ -173,7 +174,7 @@ export class AsciiEngineCore {
       this.systemRunner = systemRunner;
 
       if (this.config.mode === 'mascot') {
-        this.initMascotStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
+        this.initMascotStage(ecsWorld, systemRunner);
       } else {
         this.initPlaygroundStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
       }
@@ -259,9 +260,7 @@ export class AsciiEngineCore {
 
   private initMascotStage(
     ecsWorld: World,
-    systemRunner: SystemRunner,
-    pointerInput: PointerInput,
-    keyboardInput: KeyboardInput
+    systemRunner: SystemRunner
   ): void {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(this.config.palette.background);
@@ -273,6 +272,13 @@ export class AsciiEngineCore {
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.35);
     keyLight.position.set(-2.6, 4.2, 4.8);
+    if (this.config.enableShadows) {
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.width = 512;
+      keyLight.shadow.mapSize.height = 512;
+      keyLight.shadow.bias = -0.0005;
+      keyLight.shadow.normalBias = 0.02;
+    }
     scene.add(keyLight);
 
     const rimLight = new THREE.PointLight(new THREE.Color(this.config.palette.warmCore), 10.5, 12, 1.5);
@@ -303,8 +309,8 @@ export class AsciiEngineCore {
       particleCount: 16,
     });
 
+    // No InputSystem on mascot stage: Tux stays pointer-free and spins smoothly on horizontal yaw
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
       .addSystem(new MovementRotationSystem(), 20)
       .addSystem(new AnimationSystem(), 30)
       .addSystem(new RenderSyncSystem(), 40);
@@ -356,35 +362,16 @@ export class AsciiEngineCore {
       this.renderer.shadowMap.needsUpdate = true;
     }
 
-    // Apply live palette updates to background, fog, neon architecture, lights & water uniforms
+    // Apply live atmosphere & palette updates to sky, fog, architecture, shadows & boulevard uniforms
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.set(this.config.palette.background);
     }
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.set(this.config.palette.background);
-    }
 
     if (this.builtPlayground) {
-      const p = this.config.palette;
-      this.builtPlayground.ambientHemi.color.set(p.coolAmbient);
-      this.builtPlayground.moonDirLight.color
-        .set(p.coolAmbient)
-        .lerp(new THREE.Color('#D8F6FF'), 0.4);
-      this.builtPlayground.torchLight.color.set(p.warmLight);
-
-      // Update shared cyberpunk architectural neon material bank dynamically on preset switch
-      this.builtPlayground.materialBank.updatePalette(p);
-
-      this.builtPlayground.brazierLights.forEach((bl, idx) => {
-        bl.color.set(idx % 2 === 0 ? p.coolAmbient : p.warmLight);
-      });
-
-      const u = this.builtPlayground.waterMaterial.uniforms;
-      u.uDeepColor?.value.set(p.background).lerp(new THREE.Color(p.coolAmbient), 0.26);
-      u.uShallowColor?.value.set(p.coolAmbient).lerp(new THREE.Color('#8be4ff'), 0.32);
-      u.uWarmColor?.value.set(p.warmLight);
-      u.uWarmCoreColor?.value.set(p.warmCore);
-      u.uCursorColor?.value.set(p.cursorLight);
+      PlaygroundSceneBuilder.applyAtmosphere(this.builtPlayground, this.config);
+      this.renderer.shadowMap.needsUpdate = true;
+    } else if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.set(this.config.palette.background);
     }
 
     this.vfx?.applyConfig(this.config);
@@ -524,7 +511,7 @@ export class AsciiEngineCore {
 
     this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
 
-    // 3. Sync Playground Reflective Neon Canal Uniforms
+    // 3. Sync Playground Boulevard Reflections, Real-Time PCF Shadow Map & Protagonist Grounding
     if (this.builtPlayground) {
       const u = this.builtPlayground.waterMaterial.uniforms;
       if (u.uTime) u.uTime.value = elapsed;
@@ -536,6 +523,26 @@ export class AsciiEngineCore {
           this.builtPlayground.torchLight.position.z,
           this.builtPlayground.torchLight.intensity
         );
+      }
+
+      // Bind live DirectionalLight shadow map & projection matrix so street surface receives real-time shadows
+      const dirShadow = this.builtPlayground.moonDirLight.shadow;
+      if (this.config.enableShadows && dirShadow.map) {
+        if (u.uDirShadowMap) u.uDirShadowMap.value = dirShadow.map.texture;
+        if (u.uDirShadowMatrix) u.uDirShadowMatrix.value.copy(dirShadow.matrix);
+        if (u.uShadowMapSize) {
+          u.uShadowMapSize.value.set(dirShadow.mapSize.width, dirShadow.mapSize.height);
+        }
+        if (u.uShadowEnabled) u.uShadowEnabled.value = 1.0;
+      } else if (u.uShadowEnabled) {
+        u.uShadowEnabled.value = 0.0;
+      }
+
+      if (this.ecsWorld && u.uAvatarPos) {
+        const avT = this.ecsWorld.getComponent(this.builtPlayground.avatarEntityId, 'Transform');
+        if (avT) {
+          u.uAvatarPos.value.set(avT.x, avT.y, avT.z);
+        }
       }
 
       if (this.vfx) {

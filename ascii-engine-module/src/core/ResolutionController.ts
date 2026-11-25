@@ -20,7 +20,12 @@ export interface ResolutionInput {
   isFullscreen?: boolean;
 }
 
-const MONOSPACE_ASPECT = 0.82;
+/**
+ * Tight 5:8 (0.625) terminal monospace cell aspect ratio matching the rectangular glyph atlas tiles
+ * (`40x64` @ 1x, `60x96` @ HiDPI). Eliminates wide inter-character horizontal box gaps so adjacent
+ * ASCII glyphs flow continuously like clean terminal typography.
+ */
+const MONOSPACE_ASPECT = 0.625;
 
 /**
  * Classifies the container + device into a deterministic resolution tier.

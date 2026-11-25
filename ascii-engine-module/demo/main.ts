@@ -1,27 +1,43 @@
 import {
   AsciiSceneEngine,
+  type AtmosphereMode,
   DEFAULT_PALETTE,
   type PartialEngineConfig,
   type ThemePalette,
 } from '../src/index';
 
-const PALETTE_PRESETS: Record<string, ThemePalette> = {
-  sanctuary: { ...DEFAULT_PALETTE },
-  bloodmoon: {
-    background: '#070408',
-    warmLight: '#FF4E2A',
-    warmCore: '#FFA866',
-    coolAmbient: '#5E3B76',
-    foliageAccent: '#2F5E58',
-    cursorLight: '#FF94B8',
+const ATMOSPHERE_PRESETS: Record<
+  AtmosphereMode,
+  { palette: ThemePalette; windStrength: number; bloomIntensity: number }
+> = {
+  night: {
+    palette: { ...DEFAULT_PALETTE },
+    windStrength: 0.65,
+    bloomIntensity: 1.42,
   },
-  emerald: {
-    background: '#040808',
-    warmLight: '#38E5A5',
-    warmCore: '#A6FFE0',
-    coolAmbient: '#1F5C78',
-    foliageAccent: '#3D8C54',
-    cursorLight: '#FFD166',
+  day: {
+    palette: {
+      background: '#1E3F66',
+      warmLight: '#FF8A3D',
+      warmCore: '#FFF1A8',
+      coolAmbient: '#7AD4FF',
+      foliageAccent: '#4895EF',
+      cursorLight: '#FFF6D6',
+    },
+    windStrength: 0.45,
+    bloomIntensity: 0.78,
+  },
+  rain: {
+    palette: {
+      background: '#04060D',
+      warmLight: '#FF1E75',
+      warmCore: '#FFB703',
+      coolAmbient: '#00D8FF',
+      foliageAccent: '#6930C3',
+      cursorLight: '#8CF4FF',
+    },
+    windStrength: 1.5,
+    bloomIntensity: 1.72,
   },
 };
 
@@ -53,7 +69,7 @@ const valDof = document.getElementById('val-dof') as HTMLElement;
 
 let engine: AsciiSceneEngine | null = null;
 let hudClicks = 0;
-let activePresetKey = 'sanctuary';
+let activePresetKey: AtmosphereMode = 'night';
 
 function appendLog(message: string): void {
   const li = document.createElement('li');
@@ -86,8 +102,11 @@ function syncUiState(): void {
 }
 
 function currentControlsToConfig(): PartialEngineConfig {
+  const preset = ATMOSPHERE_PRESETS[activePresetKey] ?? ATMOSPHERE_PRESETS.night;
   return {
-    palette: PALETTE_PRESETS[activePresetKey] ?? DEFAULT_PALETTE,
+    atmosphere: activePresetKey,
+    palette: preset.palette,
+    windStrength: preset.windStrength,
     cellSize: Number(inputCell.value),
     bloomIntensity: Number(inputBloom.value),
     edgeStrength: Number(inputEdge.value),
@@ -202,20 +221,25 @@ inputDof.addEventListener('input', () => {
   engine?.updateConfig({ dofStrength: v });
 });
 
-// Wire Palette Presets
+// Wire Atmosphere Modes (Noite / Dia / Com chuva)
 document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((chip) => {
   chip.addEventListener('click', () => {
-    const key = chip.dataset.preset ?? 'sanctuary';
+    const rawKey = chip.dataset.preset;
+    const key: AtmosphereMode =
+      rawKey === 'day' || rawKey === 'rain' ? rawKey : 'night';
     activePresetKey = key;
 
     document.querySelectorAll('[data-preset]').forEach((el) => el.classList.remove('active'));
     chip.classList.add('active');
 
-    const palette = PALETTE_PRESETS[key];
-    if (palette) {
-      engine?.updateConfig({ palette });
-      appendLog(`updateConfig({ palette: "${key}" }) aplicado em tempo real`);
-    }
+    const preset = ATMOSPHERE_PRESETS[key];
+    engine?.updateConfig({
+      atmosphere: key,
+      palette: preset.palette,
+      windStrength: preset.windStrength,
+      bloomIntensity: preset.bloomIntensity,
+    });
+    appendLog(`updateConfig({ atmosphere: "${key}" }) aplicado no cenário único`);
   });
 });
 

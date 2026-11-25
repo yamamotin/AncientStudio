@@ -1,15 +1,18 @@
 /**
- * MapLoader: Declarative map schema & registry for rich 3D Cyberpunk Street & Skyline scenes.
- * Default map `'cyberpunk-citadel'` defines a layered nocturnal cyberpunk boulevard in 3 depth planes:
- *  - Foreground (`z: +2 .. +9`): Streetlamps, utility poles with overhead cables, neon bollards,
+ * MapLoader: Consolidated single-scenario definition for the 3D Cyberpunk Avenue (`cyberpunk-citadel`).
+ *
+ * Legacy unused scenarios (`sanctuary-isle` / island terrain) have been removed so all three
+ * atmospheric states ("Dia" / `'day'`, "Noite" / `'night'`, and "Com chuva" / `'rain'`) operate on
+ * one cohesive, richly layered 3-plane urban boulevard:
+ *  - Foreground (`z: +2.2 .. +9`): Streetlamps, utility poles with overhead cables, neon pylons,
  *    wind-swaying hanging street signs, crosswalk, and high-contrast central Netrunner protagonist
- *  - Midground (`z: -8 .. +2`): Multi-story brutalist/cyber buildings with lit window grids, storefront
- *    awnings, vertical/cantilevered neon signboards, elevated transit overpass, and holo-reactor portal
- *  - Background (`z: -24 .. -10`): Towering arcology megastructures in perspective convergence, rooftop
- *    antennas, sky-beams, and synth horizon ring.
+ *  - Midground (`z: -9.5 .. +2.2`): Multi-story brutalist/cyber buildings with lit window grids, storefront
+ *    awnings, vertical/cantilevered signboards, sidewalk kiosks, elevated transit overpass, and holo-reactor
+ *  - Background (`z: -24 .. -9.5`): Towering arcology megastructures in perspective convergence, rooftop
+ *    antennas, and horizon solar/lunar focal ring.
  */
 
-export type MapThemeStyle = 'cyberpunk' | 'sanctuary';
+export type MapThemeStyle = 'cyberpunk';
 
 export interface BuildingSpawnDef {
   x: number;
@@ -32,18 +35,6 @@ export interface StreetPoleSpawnDef {
   side: -1 | 1;
   tone: 'cyan' | 'magenta' | 'amber';
   hasHangingBanner?: boolean;
-}
-
-export interface TreeSpawnDef {
-  x: number;
-  z: number;
-  scale: number;
-}
-
-export interface BoulderSpawnDef {
-  x: number;
-  z: number;
-  scale: number;
 }
 
 export interface BrazierSpawnDef {
@@ -73,30 +64,26 @@ export interface PlaygroundMapDefinition {
   cameraLookAt: [number, number, number];
   shrineCenter: [number, number];
   avatarSpawn: [number, number];
-  causewayStones: number;
   buildings: BuildingSpawnDef[];
   streetPoles: StreetPoleSpawnDef[];
   drones: DroneSpawnDef[];
-  trees: TreeSpawnDef[];
-  boulders: BoulderSpawnDef[];
   braziers: BrazierSpawnDef[];
 }
 
 const CYBERPUNK_CITADEL_MAP: PlaygroundMapDefinition = {
   id: 'cyberpunk-citadel',
-  title: 'Neo-District 09 // Rain-Slicked Cyberpunk Avenue',
+  title: 'Neo-District 09 // Unified Cyberpunk Boulevard',
   themeStyle: 'cyberpunk',
   terrainSize: 60,
   terrainSegments: 64,
   waterSize: 68,
   waterLevel: -0.06,
-  fogDensity: 0.021,
-  // Street-level perspective camera framing foreground streetlamps, central protagonist, and towering avenue canyon!
+  fogDensity: 0.017,
+  // Street-level perspective camera framing foreground streetlamps, central protagonist, and towering avenue canyon
   cameraAnchor: [0.0, 3.35, 13.4],
   cameraLookAt: [0.0, 2.55, -5.5],
   shrineCenter: [0, -4.6],
   avatarSpawn: [0.0, 4.15],
-  causewayStones: 8,
   buildings: [
     // === FOREGROUND CANYON FRAMING BUILDINGS (z: +3.5 .. +7.2) ===
     {
@@ -282,17 +269,6 @@ const CYBERPUNK_CITADEL_MAP: PlaygroundMapDefinition = {
     { origin: [0, 7.2, -7.4], amplitude: [9.6, 0.52, 2.8], speed: -0.52, phase: 2.1, tone: 'magenta' },
     { origin: [0, 9.4, -12.5], amplitude: [11.5, 0.48, 2.2], speed: 0.44, phase: 4.2, tone: 'amber' },
   ],
-  // Preserved backward-compatible arrays
-  trees: [
-    { x: -4.6, z: 3.6, scale: 1.0 },
-    { x: 4.6, z: 3.6, scale: 1.0 },
-    { x: -4.6, z: -0.8, scale: 1.1 },
-    { x: 4.6, z: -0.8, scale: 1.1 },
-  ],
-  boulders: [
-    { x: -3.9, z: 5.1, scale: 0.65 },
-    { x: 3.9, z: 5.1, scale: 0.65 },
-  ],
   braziers: [
     { x: -3.65, z: 3.2, tone: 'cyan' },
     { x: 3.65, z: 3.2, tone: 'magenta' },
@@ -301,10 +277,6 @@ const CYBERPUNK_CITADEL_MAP: PlaygroundMapDefinition = {
 
 const BUILTIN_MAPS: Record<string, PlaygroundMapDefinition> = {
   'cyberpunk-citadel': CYBERPUNK_CITADEL_MAP,
-  'sanctuary-isle': {
-    ...CYBERPUNK_CITADEL_MAP,
-    id: 'sanctuary-isle',
-  },
 };
 
 export class MapLoader {
