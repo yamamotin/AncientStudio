@@ -9,14 +9,20 @@ build of the module's public facade (plus its `three` dependency), and
 
 ```ts
 new AsciiSceneEngine(container, config) // facade from ascii-engine-module/src/index.ts
-  .mount() .pause() .resume() .updateConfig(partial) .destroy()
-  .getState() .getConfig() .getStats()
+  .mount() .pause() .resume() .resize(dims, immediate?) .updateConfig(partial) .destroy()
+  .setPlayableKeyboardEnabled(enabled)
+  .setObjectOutline(target, options?) .clearObjectOutline(target?) .getObjectOutlineState(target)
+  .getState() .getConfig() .getStats() .getScene() .getCamera() .getPrimaryEntityAngles()
 ```
 
-`window.ASCIIRealms` exposes `AsciiSceneEngine`, `THREE`, `DEFAULT_ENGINE_CONFIG`
-and `DEFAULT_PALETTE`. The adapter also tolerates older namespace-style engines
-(`mount`/`create`/`Engine`) so the static site continues to work if the bundle is
-replaced by another implementation.
+`window.ASCIIRealms` exposes `AsciiSceneEngine`, `THREE`, `DEFAULT_ENGINE_CONFIG`,
+`DEFAULT_PALETTE`, `DEFAULT_ASCII_RAMP`, scene composition tools
+(`SceneComposerKit`, `SceneDepthRig`, `EntityBlueprintRegistry`, `World`,
+`SystemRunner`) and standalone per-object outline helpers (`applyObjectOutline`,
+`clearObjectOutline`, `getObjectOutlineState`, `DEFAULT_OUTLINE_HIGHLIGHT_COLOR`).
+The adapter also tolerates older namespace-style engines (`mount`/`create`/`Engine`)
+so the static site continues to work if the bundle is replaced by another
+implementation.
 
 ## Loading strategy
 
@@ -48,18 +54,24 @@ only when ready.
 
 ## Playground systems
 
-`[ ASCII REALMS // SCENE ]` uses the merged engine's layered cyberpunk boulevard,
-PCF street shadows, wind ECS, terrain, ruins/architecture, torches, foreground
-silhouettes, forest, horizon, cursor light and ember particles. The adapter maps
-the three UI modes to palette/weather state: `day`, `night` and `rain` (rain adds
-ASCII precipitation). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md)
-records the engine-side tools added on that date.
+`[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
+the unified Cyberpunk Neo-Sector boulevard (`MapLoader` + `PlaygroundSceneBuilder`
++ `PlaygroundEntityFactory`), elevated maglev viaduct and train, neon towers and
+holograms, cyber-trees animated by `WindSystem`, patrolling drones/hover-vehicles,
+5-tap PCF street shadows, ~35% GPU `max()` lighten block-detail blend, `5:8`
+grid-free glyph cells, cursor light and smooth HiDPI resolution scaling. The
+adapter maps the three UI buttons to `atmosphere` + palette/weather state on that
+single scene: `day`, `night` and `rain` (`rain` enables ASCII precipitation and
+stronger wind). [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records
+the engine-side tools added on that date.
 
-`[ STACK // NEOFETCH ]` adds a real `THREE.Group` penguin to the same engine scene.
-It spins only on the horizontal axis, continuously, with no pitch and no pointer,
-mouse or touch response; the stage is `pointer-events: none`. Text content is
-limited to the seven specified stack rows. The page does **not** yet call the
-engine outline API on the penguin.
+`[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (built by
+`TuxEntityFactory` with `TuxShowcasePlinth`, falling back to the 2D ASCII
+raycaster in `assets/js/neofetch.js` when hardware WebGL2 is unavailable). It
+spins only on the horizontal axis (`yaw`), continuously, with no pitch and no
+pointer, mouse or touch response; the stage is `pointer-events: none`. Text
+content is limited to the seven specified stack rows. The page does **not** yet
+call the engine outline API on the penguin.
 
 ## Per-object outline API (engine side, not yet consumed by the UI)
 
