@@ -137,6 +137,35 @@ npm run build:demo
 
 ---
 
+## Assets 3D (`.glb`) e Decoder Draco Self-Hosted (Zero CDN)
+
+Para preservar a política estrita de **zero CDN externa** e manter total compatibilidade entre o subpath `/AncientStudio/` do GitHub Pages e a raiz `/` do container `Dockerfile` na Vercel, todos os assets 3D e binários de decodificação são servidos localmente por **caminhos relativos** (`./assets/...`):
+
+- **Modelo 3D otimizado (Draco + WebP `1024px`)**: `./assets/models/cena_completa.glb`
+  - Comprimido com `KHR_draco_mesh_compression` + `EXT_texture_webp` (`<= 1024×1024`), sem uso de Git LFS.
+  - Hierarquia interna preservada integralmente: nós raiz `Cidade_Sketchfab_model`, `Player_Rig` e `Carro_Grupo`, além das NLA animation tracks `Idle`, `Walking` e `Casting`.
+- **Decoder Draco oficial (`three/examples/jsm/libs/draco/`)**: `./assets/draco/`
+  - Contém `draco_decoder.js`, `draco_decoder.wasm` e `draco_wasm_wrapper.js` (Apache-2.0, mesmo padrão self-hosted de `./assets/fonts/`).
+  - Ao instanciar `GLTFLoader` + `DRACOLoader` no `ascii-engine-module`, configure sempre o caminho relativo `./assets/draco/` (nunca URLs externas como `gstatic.com`):
+
+```ts
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('./assets/draco/');
+
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+
+const gltf = await gltfLoader.loadAsync('./assets/models/cena_completa.glb');
+// Nós preservados: 'Cidade_Sketchfab_model', 'Player_Rig', 'Carro_Grupo'
+// NLA tracks preservadas em gltf.animations: 'Idle', 'Walking', 'Casting'
+// Lembre-se de chamar dracoLoader.dispose() no ciclo de destroy()/LifecycleManager!
+```
+
+---
+
 ## Uso da Facade (`AsciiSceneEngine`)
 
 ### 1. Cenário Cyber Noir + Entropism com Atmosferas (`day` | `night` | `rain`)

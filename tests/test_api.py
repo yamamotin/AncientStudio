@@ -119,6 +119,18 @@ class PortfolioBackendTests(unittest.TestCase):
             self.assertEqual(resp_b.status, 200)
             self.assertGreater(int(resp_b.headers.get("Content-Length", "0")), 100000)
 
+        req_wasm = Request(f"{self.base_url}/assets/draco/draco_decoder.wasm", method="HEAD")
+        with urlopen(req_wasm, timeout=5) as resp_wasm:
+            self.assertEqual(resp_wasm.status, 200)
+            self.assertEqual(resp_wasm.headers.get("Content-Type"), "application/wasm")
+            self.assertGreater(int(resp_wasm.headers.get("Content-Length", "0")), 100000)
+
+        req_glb = Request(f"{self.base_url}/assets/models/cena_completa.glb", method="HEAD")
+        with urlopen(req_glb, timeout=5) as resp_glb:
+            self.assertEqual(resp_glb.status, 200)
+            self.assertEqual(resp_glb.headers.get("Content-Type"), "model/gltf-binary")
+            self.assertGreater(int(resp_glb.headers.get("Content-Length", "0")), 1000000)
+
         code_dot, _ = self._request_json("/.gitignore")
         self.assertEqual(code_dot, 404)
 

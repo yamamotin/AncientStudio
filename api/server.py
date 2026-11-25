@@ -23,6 +23,14 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
 BOOT_TIME = time.monotonic()
 
+# Ensure python:3.11-slim serves WebAssembly, glTF binary, WebP, and WOFF2
+# with standards-compliant MIME types (required by WebAssembly.instantiateStreaming).
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("model/gltf-binary", ".glb")
+mimetypes.add_type("model/gltf+json", ".gltf")
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("font/woff2", ".woff2")
+
 # Thread-safe enough under GIL for compact portfolio diagnostics
 RECENT_LOGS = deque(maxlen=40)
 PROCESSED_WEBHOOK_EVENTS = {}
