@@ -64,10 +64,12 @@ AncientStudio/
 │   ├── ci.yml                         # Matriz completa (Node, engine TS, ruff + pytest)
 │   ├── ci-cd.yml                      # Ruff, pytest, Docker build e deploy Vercel
 │   ├── pages.yml                      # Deploy estático GitHub Pages + parity check não-bloqueante
-│   └── pr-tests.yml                   # Testes estáticos e contratos do frontend/engine
+│   ├── pr-tests.yml                   # Testes estáticos e contratos do frontend/engine
+│   └── vcr-cleanup.yml                # Retenção das 3 imagens mais recentes no Vercel Container Registry
 │
 ├── scripts/
 │   ├── auto-merge-verified.sh         # Helper de merge, resolução de conflito, limpeza de branch e redeploy
+│   ├── vcr-cleanup.js                 # Limpeza segura do repositório "dockerfile" no VCR (CLI e REST API)
 │   └── verify-pages-parity.sh         # Validação de paridade de SHA (Pages vs Vercel)
 │
 ├── docs/
@@ -75,12 +77,13 @@ AncientStudio/
 │   ├── changelog-2026-11-25.md        # Consolidação das entregas de 2026-11-25
 │   ├── cicd-auto-merge.md             # Fluxo de auto-merge e configurações do GitHub
 │   ├── engine-integration.md          # Contrato de integração do motor 3D [agente 3D]
-│   └── pages-recovery.md              # Diagnóstico e recuperação do GitHub Pages
+│   ├── pages-recovery.md              # Diagnóstico e recuperação do GitHub Pages
+│   └── vcr-cleanup.md                 # Automação de retenção de 3 imagens no VCR (ancientstudio/dockerfile)
 │
 ├── docker-compose.yml                 # Subida local de api + n8n com segredos obrigatórios via .env
 ├── .env.example                       # Variáveis documentadas e higienizadas (sem credenciais reais)
 ├── Dockerfile                         # Host estático legado usado na Vercel atual (api/server.py)
-└── tests/                             # 47 testes Node (contratos estáticos, UI, i18n, CI e engine) + 6 unittest
+└── tests/                             # Suítes Node (contratos estáticos, UI, i18n, CI, VCR e engine) + 6 unittest
 ```
 
 ## 2. Responsabilidades por trilha
@@ -89,8 +92,8 @@ AncientStudio/
 
 - `pt-br` é o idioma primário, com paridade total de chaves entre `assets/i18n/pt-br.json`, `en.json` e o dicionário embutido em `assets/js/i18n.js` para funcionamento inclusive via `file://`.
 - Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações no padrão `[ termo ]` (`[ github ]`, `[ linkedin ]`, `[ contato ]`/`[ contact ]`, `[ curriculo-pt-br ]`/`[ resume-pt-br ]` e `[ curriculo-en ]`/`[ resume-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
-- `[ ASCII REALMS // SCENE ]` expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D girando continuamente em `yaw`, isolado de eventos de mouse/toque.
-- `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend.
+- `[ ASCII REALMS // SCENE ]` expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D sobre o estúdio ASCII minimalista (`MascotStageBuilder`: fundo `#13222E` + piso `#1D2B36`) girando continuamente em `yaw`, isolado de eventos de mouse/toque.
+- `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend, e consolida em [`ascii-engine-module/README.md`](../ascii-engine-module/README.md) as regras obrigatórias para novas implementações (ECS enxuto, coerência estilística ASCII integral sem código residual, paletas sóbrias/controladas e ciclo de vida limpo).
 - `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, workflows n8n, simulador de pipelines e console RAG), sem respostas simuladas.
 
 ### Backend FastAPI (Fases 1 a 5)
