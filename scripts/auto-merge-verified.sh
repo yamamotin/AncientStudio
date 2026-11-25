@@ -220,7 +220,20 @@ fi
 #    is required to guarantee Pages and Vercel pipelines execute.
 # ---------------------------------------------------------------------------
 old_main=$(main_sha)
-gh pr merge "$PR_NUMBER" --merge
+if ! gh pr merge "$PR_NUMBER" --merge; then
+  # GitHub can answer "Merge already in progress" for a merge that succeeded.
+  # Verify the final state instead of aborting and skipping cleanup/deploy.
+  merged=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ "$(pr_field '.state')" = "MERGED" ] && { merged=1; break; }
+    sleep 3
+  done
+  if [ "$merged" -ne 1 ]; then
+    echo "::error::Merge of #$PR_NUMBER failed; skipping cleanup and deploys." >&2
+    exit 1
+  fi
+  log "GitHub reported a merge race, but #$PR_NUMBER is MERGED."
+fi
 log "Merged #$PR_NUMBER ($head_sha) into main."
 
 merged_main="$old_main"
