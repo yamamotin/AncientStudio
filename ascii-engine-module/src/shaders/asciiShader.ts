@@ -94,11 +94,13 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uDofStrength;
   uniform float uDaylight;
   uniform float uWetness;
-  uniform float uCamPitchCos;
-  uniform float uCamPitchSin;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uVolumeWrapStrength;
+  uniform float uNormalReliefStrength;
+  uniform vec3 uKeyLightViewDir;
+  uniform vec3 uRimLightViewDir;
+  uniform vec3 uWorldUpViewDir;
   uniform vec3 uBgColor;
   uniform vec3 uCoolTint;
   uniform vec3 uWarmTint;
@@ -148,17 +150,26 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
   /**
    * Selective vertical rippled reflection sampler for upward-facing wet asphalt & sidewalk:
-   * Only reflects genuinely luminous upper-screen sources (storefronts, streetlamps, car headlights,
-   * and bright character rims) so dark ground stays clean instead of mirroring noisy grey walls.
+   * Perturbs reflection rays by actual surface normal tilt ('normalTilt' from embedded/procedural
+   * normal maps) plus gentle rain ripples, reflecting only genuinely luminous upper-screen sources.
    */
-  vec3 sampleGroundReflection(vec2 centerUv, vec2 cellIndex, vec2 cellUvSpan, float upwardMask) {
+  vec3 sampleGroundReflection(
+    vec2 centerUv,
+    vec2 cellIndex,
+    vec2 cellUvSpan,
+    float upwardMask,
+    vec2 normalTilt
+  ) {
     if (upwardMask <= 0.01 || uWetness <= 0.01) {
       return vec3(0.0);
     }
 
-    float wavePhase = cellIndex.y * 0.88 + cellIndex.x * 0.19 - uTime * 2.05;
-    float rippleX = sin(wavePhase) * cellUvSpan.x * (0.50 + 0.42 * uWetness);
-    float rippleBand = 0.68 + 0.32 * sin(cellIndex.y * 1.40 - uTime * 2.55 + cellIndex.x * 0.28);
+    float rainAnim = smoothstep(0.45, 0.95, uWetness);
+    float wavePhase = cellIndex.y * 0.88 + cellIndex.x * 0.19 - uTime * (0.45 + 1.65 * rainAnim);
+    float rippleX = sin(wavePhase) * cellUvSpan.x * (0.28 + 0.56 * rainAnim);
+    float normalRefractX = normalTilt.x * cellUvSpan.x * (1.85 + 1.35 * uWetness);
+    float normalRefractY = normalTilt.y * cellUvSpan.y * 1.25;
+    float rippleBand = 0.74 + 0.26 * sin(cellIndex.y * 1.35 - uTime * (0.55 + 1.95 * rainAnim) + normalTilt.x * 3.2);
 
     vec3 reflAcc = vec3(0.0);
     float weightSum = 0.0;
@@ -166,9 +177,12 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     for (int i = 1; i <= 6; i++) {
       float fi = float(i);
       float w = 1.0 / (0.70 + fi * 0.58);
-      float subWave = sin(wavePhase + fi * 0.82) * cellUvSpan.x * (0.42 + 0.48 * uWetness);
+      float subWave = sin(wavePhase + fi * 0.82) * cellUvSpan.x * (0.24 + 0.52 * rainAnim);
       vec2 sampleUv = clamp(
-        centerUv + vec2(rippleX * 0.60 + subWave * 0.50, fi * cellUvSpan.y * 2.85),
+        centerUv + vec2(
+          normalRefractX + rippleX * 0.55 + subWave * 0.45,
+          fi * cellUvSpan.y * 2.85 + normalRefractY
+        ),
         vec2(0.002),
         vec2(0.998)
       );
@@ -284,29 +298,58 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 gyNVec = (nTL + 2.0 * nTC + nTR) - (nBL + 2.0 * nBC + nBR);
     float gxN = dot(gxNVec, vec3(0.38, 0.38, 0.24));
     float gyN = dot(gyNVec, vec3(0.38, 0.38, 0.24));
-    float normalEdgeMag = length(vec2(gxN, gyN)) * 0.36 * isGeometry;
+    float normalEdgeMag = length(vec2(gxN, gyN)) * 0.38 * isGeometry;
 
-    // Suppress fine internal bevel noise on mid/far facades while keeping true silhouettes crisp
-    float depthCreaseAtten = mix(1.0, 0.24, smoothstep(0.16, 0.62, centerLinDepth));
-    float effectiveNormalEdge = normalEdgeMag * depthCreaseAtten * (1.0 - silhouetteOuterMoat);
+    // 4. Reconstruct Normal-Mapped Surface Orientation & View-Space Directional Lighting
+    vec3 rawViewN = normalize(nCenterEnc * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
+    vec3 macroViewN = normalize(((nTC + nBC + nML + nMR) * 0.25) * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
+    // Distance-filter micro-normals into macro planar normals so distant facades never alias into static
+    vec3 viewN = normalize(mix(rawViewN, macroViewN, smoothstep(0.24, 0.74, centerLinDepth) * 0.68));
+
+    // Exact surface slope relative to world gravity '+Y' (independent of camera pitch or orbit)
+    float worldUpY = clamp(dot(viewN, uWorldUpViewDir), -1.0, 1.0);
+    vec2 normalTilt = (viewN - uWorldUpViewDir * worldUpY).xy;
+    float upwardSurfaceMask =
+      uVolumeWrapStrength *
+      isGeometry *
+      smoothstep(0.68, 0.90, worldUpY) *
+      (1.0 - smoothstep(0.62, 0.92, centerLinDepth));
+
+    // Directional key & rim incidence (Lambertian N*L, back-facing self-occlusion, Blinn-Phong N*H, Fresnel rim)
+    float rawKeyDot = dot(viewN, uKeyLightViewDir);
+    float keyNdotL = clamp(rawKeyDot, 0.0, 1.0);
+    float keyAway = clamp(-rawKeyDot, 0.0, 1.0);
+    float rimNdotL = clamp(dot(viewN, uRimLightViewDir), 0.0, 1.0);
+    vec3 halfVec = normalize(uKeyLightViewDir + vec3(0.0, 0.0, 1.0));
+    float specPower = mix(22.0, 44.0, uWetness);
+    float normalSpec = pow(max(dot(viewN, halfVec), 0.0), specPower) * mix(0.075, 0.165, uWetness);
+    float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.15) * (0.36 + 0.64 * rimNdotL) * 0.105;
+    float hemiCatch = worldUpY * 0.038;
+
+    // Suppress fine internal bevel noise on far facades while letting key/rim-lit architectural creases glint
+    float creaseLightCatch = 0.58 + 0.62 * max(keyNdotL, rimNdotL);
+    float depthCreaseAtten = mix(1.0, 0.22, smoothstep(0.18, 0.62, centerLinDepth));
+    float effectiveNormalEdge = normalEdgeMag * depthCreaseAtten * creaseLightCatch * (1.0 - silhouetteOuterMoat);
     float effectiveDepthEdge = depthEdgeMag * (1.0 - silhouetteOuterMoat * 0.85);
     float combinedEdge = max(effectiveDepthEdge, effectiveNormalEdge) * uEdgeStrength * (1.0 - dofBlurFactor * 0.55);
     vec2 domGrad = effectiveDepthEdge >= effectiveNormalEdge ? vec2(gxD, gyD) : vec2(gxN, gyN);
 
-    // 4. Reconstruct Upward Surface Mask + Selective Wet Ground Reflections + Lit-Only Relief
-    vec3 viewN = normalize(nCenterEnc * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
-    float worldUpY = clamp(viewN.y * uCamPitchCos + viewN.z * uCamPitchSin, -1.0, 1.0);
-    float upwardSurfaceMask =
-      uVolumeWrapStrength *
-      isGeometry *
-      smoothstep(0.74, 0.94, worldUpY) *
-      (1.0 - smoothstep(0.62, 0.92, centerLinDepth));
-
-    vec3 groundRefl = sampleGroundReflection(cellCenterUv, cellIndex, cellUvSpan, upwardSurfaceMask);
+    vec3 groundRefl = sampleGroundReflection(cellCenterUv, cellIndex, cellUvSpan, upwardSurfaceMask, normalTilt);
 
     // Contained typographic light halo: bloom lifts nearby character indices into crisp bright glyphs
     vec3 haloLift = bloomCol * (uBloomIntensity * 0.96);
-    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.78;
+    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.82;
+
+    // Modulate scene radiance by directional surface orientation so 90-degree return walls separate cleanly
+    if (uVolumeWrapStrength > 0.5 && isGeometry > 0.5) {
+      float emissiveKeep = smoothstep(0.55, 0.96, getLuma(combinedHdr));
+      float planarFactor = mix(
+        1.0 + (keyNdotL * 0.16 - keyAway * 0.18 + hemiCatch * 1.4) * uNormalReliefStrength,
+        1.0,
+        emissiveKeep
+      );
+      combinedHdr = combinedHdr * clamp(planarFactor, 0.72, 1.24) + vec3(normalSpec * 0.45 * uNormalReliefStrength);
+    }
 
     // Soft-shoulder tone curve compresses bright lamp/headlight peaks smoothly without solid clipping
     vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.38)) * 1.26;
@@ -321,12 +364,12 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       combinedSignal = mix(vec3(rawLuma), combinedSignal, baseSatKeep);
     }
 
-    // Gate 3D rim/zenith relief strictly to lit surfaces so unlit shadows stay genuinely dark & empty!
-    float litGate = smoothstep(0.07, 0.28, rawLuma);
-    float zenithCatch = clamp(viewN.y, -0.25, 0.75) * 0.034;
-    float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.2) * 0.068;
+    // Gate directional 3D normal relief strictly to lit surfaces so unlit shadows stay genuinely dark & empty
+    float litGate = smoothstep(0.065, 0.27, rawLuma);
+    float directionalRelief =
+      (keyNdotL * 0.056 - keyAway * 0.044 + hemiCatch + grazingRim + normalSpec) * uNormalReliefStrength;
     float volumeRelief =
-      ((zenithCatch + grazingRim) * litGate + silhouetteInnerRim * 0.11) *
+      (directionalRelief * litGate + silhouetteInnerRim * 0.115) *
       isGeometry *
       uVolumeWrapStrength;
 
@@ -347,21 +390,25 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     float luma = clamp(shapedLuma + volumeRelief, 0.0, 1.0);
 
-    // 5. Select Primary Detail ASCII Glyph (Coherent Spatial Clusters, Zero 1-Cell White Noise!)
+    // 5. Select Primary Detail ASCII Glyph (Surface-Orientation Coherent Clusters, Zero 1-Cell Static)
     float varietyJitter = 0.0;
     if (uVolumeWrapStrength > 0.5) {
-    // Only diversify active midtones/highlights ('luma > 0.18'), keeping shadows & silhouettes clean
+      // Only diversify active midtones/highlights ('luma > 0.18'), keeping shadows & silhouettes clean
       float midtoneEnvelope =
         smoothstep(0.18, 0.34, luma) *
         (1.0 - smoothstep(0.88, 0.985, luma)) *
         (1.0 - clamp(combinedEdge * 1.2, 0.0, 1.0)) *
         smoothstep(0.14, 0.28, centerLinDepth);
-      // Coherent horizontal word-like clusters (~3x2 cells) instead of noisy 1-cell TV static
-      float wordClusterHash = glyphVarietyHash(floor(vec2(cellIndex.x * 0.32, cellIndex.y * 0.66)) + vec2(11.7, 5.3));
+      // Anchor typographic clusters to quantized planar orientation ('normalSector') so flat walls read calmly
+      vec2 normalSector = floor(macroViewN.xy * 2.5 + 0.5);
+      float wordClusterHash = glyphVarietyHash(
+        floor(vec2(cellIndex.x * 0.28, cellIndex.y * 0.58)) + normalSector * 4.1 + vec2(11.7, 5.3)
+      );
       float cellSubtleHash = glyphVarietyHash(cellIndex * 0.85 + vec2(3.1, 7.9));
-      float blendedHash = wordClusterHash * 0.74 + cellSubtleHash * 0.26;
-      float wetRippleShift = upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 2.5) * 1.25;
-      varietyJitter = (blendedHash * 4.2 + wetRippleShift) * midtoneEnvelope;
+      float blendedHash = wordClusterHash * 0.80 + cellSubtleHash * 0.20;
+      float wetRippleShift =
+        upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 1.8 + normalTilt.x * 4.0) * 1.10;
+      varietyJitter = (blendedHash * 3.4 + wetRippleShift) * midtoneEnvelope;
     }
 
     float detailTileIndex = floor(luma * (uRampCount - 1.0) + 0.5 + varietyJitter);

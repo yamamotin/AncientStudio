@@ -87,6 +87,7 @@ export interface UrbanArchitecturalLightRig {
   streetLampCenter: THREE.PointLight;
   streetLampEast: THREE.PointLight;
   avenueBeaconLight: THREE.PointLight;
+  poleMaterial: THREE.MeshStandardMaterial;
   emissiveFixtureMaterials: THREE.MeshStandardMaterial[];
 }
 
@@ -267,6 +268,7 @@ export class UrbanGlbSceneBuilder {
       streetLampCenter,
       streetLampEast,
       avenueBeaconLight,
+      poleMaterial: poleMat,
       emissiveFixtureMaterials,
     };
   }
@@ -296,6 +298,7 @@ export class UrbanGlbSceneBuilder {
       new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#C8D6E2'), 0.45),
       1.48
     );
+    keyDirLight.name = 'KeyDirectionalLight';
     keyDirLight.position.set(16, 28, 18);
     keyDirLight.target.position.set(-6, 0.5, 0);
     scene.add(keyDirLight.target);
@@ -317,7 +320,10 @@ export class UrbanGlbSceneBuilder {
       new THREE.Color(config.palette.warmLight),
       0.54
     );
+    rimDirLight.name = 'RimDirectionalLight';
     rimDirLight.position.set(-20, 14, -15);
+    rimDirLight.target.position.set(-4, 1.0, -1);
+    scene.add(rimDirLight.target);
     scene.add(rimDirLight);
 
     const urbanLightRig = UrbanGlbSceneBuilder.createArchitecturalLightRig(scene);
@@ -372,6 +378,8 @@ export class UrbanGlbSceneBuilder {
     ecsWorld: World
   ): void {
     stage.assets = assets;
+    stage.urbanLightRig.poleMaterial.normalMap = assets.proceduralNormals.facade;
+    stage.urbanLightRig.poleMaterial.normalScale.set(0.36, 0.36);
 
     const { cidade, playerRig, carroGrupo } = assets.nodes;
 
@@ -752,36 +760,58 @@ export class UrbanGlbSceneBuilder {
     stage.keyDirLight.castShadow = config.enableShadows;
     (stage.waypointMarker.material as THREE.MeshBasicMaterial).color.copy(warm);
 
-    // Update road wetness, dark breathing base albedo, character/car contrast, foliage & emissives
+    // Update road wetness, dark breathing base albedo, normal-map scale, character/car contrast & emissives
     if (stage.assets) {
+      const applyScaledNormal = (mat: THREE.MeshStandardMaterial, factor: number): void => {
+        if (!mat.normalMap || !mat.normalScale) return;
+        const baseX =
+          typeof mat.userData.__baseNormalScaleX === 'number'
+            ? mat.userData.__baseNormalScaleX
+            : mat.normalScale.x;
+        const baseY =
+          typeof mat.userData.__baseNormalScaleY === 'number'
+            ? mat.userData.__baseNormalScaleY
+            : mat.normalScale.y;
+        mat.normalScale.set(baseX * factor, baseY * factor);
+      };
+
       const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.26;
       const roadMetalness = mode === 'rain' ? 0.42 : mode === 'day' ? 0.04 : 0.28;
       const roadBaseHex = mode === 'day' ? '#E4E9EE' : mode === 'rain' ? '#58626C' : '#646F7A';
+      // Rain film levels micro-pores on asphalt while keeping macro aggregate relief
+      const roadNormalFactor = mode === 'rain' ? 0.62 : mode === 'day' ? 1.08 : 0.92;
       for (const mat of stage.assets.materials.roads) {
         mat.roughness = roadRoughness;
         mat.metalness = roadMetalness;
         mat.color.set(roadBaseHex);
+        applyScaledNormal(mat, roadNormalFactor);
       }
 
       const sidewalkRoughness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.88 : 0.38;
       const sidewalkMetalness = mode === 'rain' ? 0.32 : mode === 'day' ? 0.05 : 0.18;
       const sidewalkBaseHex = mode === 'day' ? '#E8EDF2' : mode === 'rain' ? '#707B86' : '#7C8894';
+      const sidewalkNormalFactor = mode === 'rain' ? 0.74 : mode === 'day' ? 1.08 : 0.96;
       for (const mat of stage.assets.materials.sidewalks) {
         mat.roughness = sidewalkRoughness;
         mat.metalness = sidewalkMetalness;
         mat.color.set(sidewalkBaseHex);
+        applyScaledNormal(mat, sidewalkNormalFactor);
       }
 
-      // Keep unlit nocturnal roofs/walls subdued so warm light pools stand out with crisp hierarchy
+      // Keep unlit nocturnal roofs/walls subdued while preserving directional masonry/seam normal relief
       const wallBaseHex = mode === 'day' ? '#F2F5F8' : mode === 'rain' ? '#848F9A' : '#8E9AA6';
+      const wallNormalFactor = mode === 'day' ? 1.15 : mode === 'rain' ? 0.96 : 1.06;
       for (const mat of stage.assets.materials.walls) {
         mat.color.set(wallBaseHex);
+        applyScaledNormal(mat, wallNormalFactor);
       }
 
       // Protagonist (`Player_Rig`) sculpted contrast across day / night / rain
       const charEmissive = mode === 'day' ? 0.08 : mode === 'rain' ? 0.34 : 0.28;
+      const charNormalFactor = mode === 'day' ? 1.08 : 1.0;
       for (const mat of stage.assets.materials.character) {
         mat.color.set(mode === 'day' ? '#DCE6F0' : '#E6F0F8');
+        applyScaledNormal(mat, charNormalFactor);
         if (mat.emissive) {
           mat.emissive.set('#2C4456');
           mat.emissiveIntensity = charEmissive;
@@ -790,7 +820,9 @@ export class UrbanGlbSceneBuilder {
 
       // Vehicle (`Carro_Grupo`) clear silhouette response during its 8s active pass
       const carEmissive = mode === 'day' ? 0.06 : mode === 'rain' ? 0.28 : 0.24;
+      const carNormalFactor = mode === 'rain' ? 0.88 : 1.0;
       for (const mat of stage.assets.materials.carBody) {
+        applyScaledNormal(mat, carNormalFactor);
         if (mat.emissive) {
           mat.emissive.set('#1F3140');
           mat.emissiveIntensity = carEmissive;

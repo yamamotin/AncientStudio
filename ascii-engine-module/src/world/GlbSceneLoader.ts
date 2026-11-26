@@ -6,6 +6,10 @@ import {
   DEFAULT_SCENE_MODEL_URL,
 } from '../core/defaultConfig';
 import { LifecycleManager } from '../core/LifecycleManager';
+import {
+  createProceduralNormalMapSet,
+  type ProceduralNormalMapSet,
+} from '../shaders/normalMaps';
 import type { SceneLoadProgress } from '../types';
 
 export const GLB_NODE_NAMES = {
@@ -49,6 +53,7 @@ export interface PreparedUrbanGlbAssets {
     carBody: THREE.MeshStandardMaterial[];
     carHeadlightCovers: THREE.MeshStandardMaterial[];
   };
+  proceduralNormals: ProceduralNormalMapSet;
   foregroundOccluders: ForegroundOccluderGroup[];
   dispose: () => void;
 }
@@ -66,9 +71,9 @@ export interface GlbSceneLoadOptions {
  */
 export function normalizeRelativeDecoderPath(rawPath?: string): string {
   const path = (rawPath ?? DEFAULT_DRACO_DECODER_PATH).trim() || DEFAULT_DRACO_DECODER_PATH;
-  if (/^https?:\/\//i.test(path)) {
+  if (/^https?:\/\//i.test(path) || /^\/\//.test(path)) {
     throw new Error(
-      `[GlbSceneLoader] External CDN URLs are forbidden for Draco decoders ("${path}"). Use a relative local path such as "./assets/draco/".`
+      `[GlbSceneLoader] External CDN URLs are forbidden by the zero-CDN policy for Draco decoders ("${path}"). Use a relative local path such as "./assets/draco/".`
     );
   }
   return path.endsWith('/') ? path : `${path}/`;
@@ -76,9 +81,9 @@ export function normalizeRelativeDecoderPath(rawPath?: string): string {
 
 export function normalizeRelativeModelUrl(rawUrl?: string): string {
   const url = (rawUrl ?? DEFAULT_SCENE_MODEL_URL).trim() || DEFAULT_SCENE_MODEL_URL;
-  if (/^https?:\/\//i.test(url)) {
+  if (/^https?:\/\//i.test(url) || /^\/\//.test(url)) {
     throw new Error(
-      `[GlbSceneLoader] External CDN URLs are forbidden for GLB models ("${url}"). Use a relative local path such as "./assets/models/cena_completa.glb".`
+      `[GlbSceneLoader] External CDN URLs are forbidden by the zero-CDN policy for GLB models ("${url}"). Use a relative local path such as "./assets/models/cena_completa.glb".`
     );
   }
   return url;
@@ -184,6 +189,34 @@ export function extractAndPrepareGlbNodes(
   const carBody: THREE.MeshStandardMaterial[] = [];
   const carHeadlightCovers: THREE.MeshStandardMaterial[] = [];
   const seenMats = new Set<string>();
+  const proceduralNormals = createProceduralNormalMapSet();
+
+  const ensureSurfaceNormalMap = (
+    mat: THREE.MeshStandardMaterial,
+    fallbackMap: THREE.DataTexture,
+    fallbackScale: number,
+    minEmbeddedScale = 0.68
+  ): void => {
+    if (mat.normalMap && mat.normalMap.isTexture) {
+      mat.normalMap.colorSpace = THREE.NoColorSpace;
+      const curX = mat.normalScale ? mat.normalScale.x : 1.0;
+      const curY = mat.normalScale ? mat.normalScale.y : 1.0;
+      const signX = curX < 0 ? -1 : 1;
+      const signY = curY < 0 ? -1 : 1;
+      const tunedX = signX * Math.max(Math.abs(curX), minEmbeddedScale);
+      const tunedY = signY * Math.max(Math.abs(curY), minEmbeddedScale);
+      if (!mat.normalScale) {
+        mat.normalScale = new THREE.Vector2(tunedX, tunedY);
+      } else {
+        mat.normalScale.set(tunedX, tunedY);
+      }
+    } else {
+      mat.normalMap = fallbackMap;
+      mat.normalScale = new THREE.Vector2(fallbackScale, fallbackScale);
+    }
+    mat.userData.__baseNormalScaleX = mat.normalScale.x;
+    mat.userData.__baseNormalScaleY = mat.normalScale.y;
+  };
 
   const eastTreeMeshes: THREE.Mesh[] = [];
   const westTreeMeshes: THREE.Mesh[] = [];
@@ -270,8 +303,10 @@ export function extractAndPrepareGlbNodes(
       }
 
       if (/real_road|road|asphalt/i.test(name)) {
+        ensureSurfaceNormalMap(mat, proceduralNormals.asphalt, 0.78, 0.85);
         roads.push(mat);
       } else if (/concrete_pavement|tiles/i.test(name)) {
+        ensureSurfaceNormalMap(mat, proceduralNormals.pavement, 0.68, 0.82);
         sidewalks.push(mat);
       } else if (/window|wiind/i.test(name)) {
         windows.push(mat);
@@ -291,7 +326,10 @@ export function extractAndPrepareGlbNodes(
           name
         )
       ) {
+        ensureSurfaceNormalMap(mat, proceduralNormals.facade, 0.56, 0.72);
         walls.push(mat);
+      } else if (!hasTransparentBlend) {
+        ensureSurfaceNormalMap(mat, proceduralNormals.facade, 0.42, 0.60);
       }
     }
   });
@@ -332,6 +370,7 @@ export function extractAndPrepareGlbNodes(
     roughness: 0.38,
     metalness: 0.12,
   });
+  ensureSurfaceNormalMap(protagonistMaterial, proceduralNormals.contourTrim, 0.38, 0.38);
   character.push(protagonistMaterial);
 
   playerRig.traverse((obj) => {
@@ -351,6 +390,7 @@ export function extractAndPrepareGlbNodes(
         seenMats.add(stdMat.uuid);
         stdMat.metalness = Math.min(0.22, stdMat.metalness);
         stdMat.roughness = Math.min(0.55, Math.max(0.3, stdMat.roughness));
+        ensureSurfaceNormalMap(stdMat, proceduralNormals.contourTrim, 0.38, 0.45);
         character.push(stdMat);
       }
     }
@@ -392,14 +432,17 @@ export function extractAndPrepareGlbNodes(
           tuned.emissiveIntensity = 0.22;
           tuned.metalness = 0.28;
           tuned.roughness = 0.28;
+          ensureSurfaceNormalMap(tuned, proceduralNormals.contourTrim, 0.32, 0.45);
           carBody.push(tuned);
         } else if (isTireMesh) {
           tuned.color = new THREE.Color('#283038');
           tuned.metalness = 0.08;
           tuned.roughness = 0.78;
+          ensureSurfaceNormalMap(tuned, proceduralNormals.asphalt, 0.65, 0.75);
         } else {
           tuned.metalness = 0.25;
           tuned.roughness = 0.42;
+          ensureSurfaceNormalMap(tuned, proceduralNormals.contourTrim, 0.30, 0.45);
           carBody.push(tuned);
         }
         carClonedMats.set(key, tuned);
@@ -422,6 +465,7 @@ export function extractAndPrepareGlbNodes(
     LifecycleManager.disposeObject3D(playerRig);
     LifecycleManager.disposeObject3D(carroGrupo);
     LifecycleManager.disposeObject3D(sceneRoot);
+    proceduralNormals.dispose();
     onDisposeExtra?.();
   };
 
@@ -446,6 +490,7 @@ export function extractAndPrepareGlbNodes(
       carBody,
       carHeadlightCovers,
     },
+    proceduralNormals,
     foregroundOccluders,
     dispose,
   };

@@ -1,10 +1,17 @@
 import * as THREE from 'three';
-import type { EcsSystem, SystemContext } from '../animation/AnimationSystem';
 import type { SidewalkBoundsComponent, World } from './World';
 import type { KeyboardInput } from '../input/KeyboardInput';
 import type { PointerInput } from '../input/PointerInput';
 
-export type { EcsSystem, SystemContext };
+export interface SystemContext {
+  dt: number;
+  elapsed: number;
+}
+
+export interface EcsSystem {
+  readonly name: string;
+  update(world: World, context: SystemContext): void;
+}
 
 export interface SystemEntry {
   readonly priority: number;

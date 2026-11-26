@@ -74,6 +74,12 @@ export {
 export { AsciiPostProcessor, type PostProcessRenderMetrics } from './shaders/AsciiPostProcessor';
 export { createGlyphAtlas, type GlyphAtlasData } from './shaders/glyphAtlas';
 export {
+  createProceduralNormalMapSet,
+  extractSceneDirectionalVectors,
+  NormalPassMaterialCache,
+  type ProceduralNormalMapSet,
+} from './shaders/normalMaps';
+export {
   applyObjectOutline,
   clearObjectOutline,
   DEFAULT_OUTLINE_HIGHLIGHT_COLOR,

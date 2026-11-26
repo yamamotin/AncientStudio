@@ -1,14 +1,23 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { type GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import {
+  DEFAULT_DRACO_DECODER_PATH,
+  DEFAULT_SCENE_MODEL_URL,
+} from '../core/defaultConfig';
 import { LifecycleManager } from '../core/LifecycleManager';
+import {
+  GLB_NODE_NAMES,
+  normalizeRelativeDecoderPath,
+  normalizeRelativeModelUrl,
+} from './GlbSceneLoader';
 
-export const DEFAULT_DRACO_DECODER_PATH = './assets/draco/';
-export const DEFAULT_SCENE_GLB_URL = './assets/models/cena_completa.glb';
+export { DEFAULT_DRACO_DECODER_PATH };
+export const DEFAULT_SCENE_GLB_URL = DEFAULT_SCENE_MODEL_URL;
 export const REQUIRED_SCENE_ROOT_NODES = [
-  'Cidade_Sketchfab_model',
-  'Player_Rig',
-  'Carro_Grupo',
+  GLB_NODE_NAMES.cidade,
+  GLB_NODE_NAMES.playerRig,
+  GLB_NODE_NAMES.carroGrupo,
 ] as const;
 export const REQUIRED_SCENE_NLA_TRACKS = ['Idle', 'Walking', 'Casting'] as const;
 
@@ -55,16 +64,6 @@ function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
     : Date.now();
-}
-
-function assertSelfHostedDecoderPath(decoderPath: string): string {
-  const trimmed = String(decoderPath || DEFAULT_DRACO_DECODER_PATH).trim();
-  if (/^https?:\/\//i.test(trimmed) || /^\/\//.test(trimmed)) {
-    throw new Error(
-      `[SceneGlbLoader] External CDN decoder path "${trimmed}" is forbidden by the zero-CDN policy. Use a relative path such as "./assets/draco/".`
-    );
-  }
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
 }
 
 function deriveResourceBasePath(url: string): string {
@@ -122,10 +121,12 @@ export class SceneGlbLoader {
   private disposed = false;
 
   constructor(options: SceneGlbLoaderOptions = {}) {
-    this.decoderPath = assertSelfHostedDecoderPath(
+    this.decoderPath = normalizeRelativeDecoderPath(
       options.decoderPath ?? DEFAULT_DRACO_DECODER_PATH
     );
-    this.defaultModelUrl = String(options.modelUrl ?? DEFAULT_SCENE_GLB_URL).trim();
+    this.defaultModelUrl = normalizeRelativeModelUrl(
+      options.modelUrl ?? DEFAULT_SCENE_GLB_URL
+    );
     const rawLimit = Number.isFinite(options.workerLimit) ? Number(options.workerLimit) : 4;
     this.workerLimit = Math.max(1, Math.min(8, Math.round(rawLimit)));
     this.fetchImpl =

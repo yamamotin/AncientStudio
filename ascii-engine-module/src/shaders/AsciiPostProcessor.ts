@@ -10,6 +10,10 @@ import {
   FULLSCREEN_VERTEX_SHADER,
 } from './asciiShader';
 import { createGlyphAtlas, type GlyphAtlasData } from './glyphAtlas';
+import {
+  extractSceneDirectionalVectors,
+  NormalPassMaterialCache,
+} from './normalMaps';
 
 export interface PostProcessRenderMetrics {
   drawCalls: number;
@@ -19,10 +23,11 @@ export interface PostProcessRenderMetrics {
 /**
  * AsciiPostProcessor: Multi-pass GPU post-processing pipeline:
  * 1. Offscreen Scene Color + Depth RenderTarget (`HalfFloatType` + `DepthTexture`)
- * 2. Offscreen View-Space Normal RenderTarget (`MeshNormalMaterial` — supports both static & skinned glTF meshes)
+ * 2. Offscreen Normal-Map-Aware View-Space Normal RenderTarget (`NormalPassMaterialCache` —
+ *    captures vertex normals + macro-filtered embedded/procedural normal maps across static & skinned meshes)
  * 3. Downsampled 13-tap Soft-Knee Bloom RenderTarget (contained typographic light halos)
- * 4. Full-screen 3D-Wrapping ASCII Composite Shader (sub-cell supersampling + glyph-variety hash
- *    + Linear-Depth/Normal Sobel + vertical rippled ground reflections + 5:8 glyph atlas)
+ * 4. Full-screen 3D-Wrapping ASCII Composite Shader (view-space directional normal lighting,
+ *    normal-perturbed ground reflections, sub-cell supersampling, and 5:8 glyph atlas)
  */
 export class AsciiPostProcessor {
   private sceneTarget: THREE.WebGLRenderTarget;
@@ -30,12 +35,11 @@ export class AsciiPostProcessor {
   private bloomTarget: THREE.WebGLRenderTarget;
   private depthTexture: THREE.DepthTexture;
 
-  private readonly normalMaterial: THREE.MeshNormalMaterial;
+  private readonly normalPassCache = new NormalPassMaterialCache();
   private readonly bloomMaterial: THREE.ShaderMaterial;
   private readonly compositeMaterial: THREE.ShaderMaterial;
   private readonly transitionController = new ResolutionTransitionController(14.0);
-  private readonly camWorldDir = new THREE.Vector3();
-  private readonly tempHiddenNormalObjs: THREE.Object3D[] = [];
+  private readonly savedClearColor = new THREE.Color();
 
   private readonly quadGeometry: THREE.PlaneGeometry;
   private readonly bloomQuad: THREE.Mesh;
@@ -90,8 +94,6 @@ export class AsciiPostProcessor {
       depthBuffer: false,
     });
 
-    this.normalMaterial = new THREE.MeshNormalMaterial();
-
     this.atlas = createGlyphAtlas(
       config.characterRamp,
       config.structuralChars,
@@ -145,11 +147,13 @@ export class AsciiPostProcessor {
         uDofStrength: { value: config.dofStrength },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
         uWetness: { value: AsciiPostProcessor.resolveWetness(config) },
-        uCamPitchCos: { value: 0.75 },
-        uCamPitchSin: { value: 0.66 },
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 140.0 },
         uVolumeWrapStrength: { value: config.mode === 'mascot' ? 0.0 : 1.0 },
+        uNormalReliefStrength: { value: AsciiPostProcessor.resolveNormalRelief(config) },
+        uKeyLightViewDir: { value: new THREE.Vector3(-0.48, 0.72, 0.50).normalize() },
+        uRimLightViewDir: { value: new THREE.Vector3(0.58, 0.42, -0.70).normalize() },
+        uWorldUpViewDir: { value: new THREE.Vector3(0.0, 0.78, 0.62).normalize() },
         uBgColor: { value: bg },
         uCoolTint: { value: cool },
         uWarmTint: { value: warm },
@@ -173,6 +177,13 @@ export class AsciiPostProcessor {
     if (config.atmosphere === 'rain') return 1.0;
     if (config.atmosphere === 'day') return 0.22;
     return 0.62;
+  }
+
+  private static resolveNormalRelief(config: EngineConfig): number {
+    if (config.mode === 'mascot') return 0.72;
+    if (config.atmosphere === 'day') return 1.12;
+    if (config.atmosphere === 'rain') return 1.06;
+    return 1.0;
   }
 
   private computeAtlasSignature(config: EngineConfig, tileSize: number): string {
@@ -265,6 +276,8 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uWetness!.value = AsciiPostProcessor.resolveWetness(config);
     this.compositeMaterial.uniforms.uVolumeWrapStrength!.value =
       config.mode === 'mascot' ? 0.0 : 1.0;
+    this.compositeMaterial.uniforms.uNormalReliefStrength!.value =
+      AsciiPostProcessor.resolveNormalRelief(config);
 
     (this.compositeMaterial.uniforms.uBgColor!.value as THREE.Color).set(
       config.palette.background
@@ -300,12 +313,14 @@ export class AsciiPostProcessor {
       this.compositeMaterial.uniforms.uCameraFar!.value = persp.far;
     }
 
-    // Extract camera downward pitch sin/cos so view-space normals reconstruct upward ground planes
-    camera.getWorldDirection(this.camWorldDir);
-    const pitchSin = THREE.MathUtils.clamp(-this.camWorldDir.y, -0.99, 0.99);
-    const pitchCos = Math.sqrt(Math.max(0.01, 1 - pitchSin * pitchSin));
-    this.compositeMaterial.uniforms.uCamPitchSin!.value = pitchSin;
-    this.compositeMaterial.uniforms.uCamPitchCos!.value = pitchCos;
+    // Extract view-space directional key/rim lights and true world-up vector with zero allocations
+    extractSceneDirectionalVectors(
+      scene,
+      camera,
+      this.compositeMaterial.uniforms.uKeyLightViewDir!.value as THREE.Vector3,
+      this.compositeMaterial.uniforms.uRimLightViewDir!.value as THREE.Vector3,
+      this.compositeMaterial.uniforms.uWorldUpViewDir!.value as THREE.Vector3
+    );
 
     // Pass 1: Lit 3D Scene + Hardware DepthTexture
     renderer.setRenderTarget(this.sceneTarget);
@@ -315,34 +330,23 @@ export class AsciiPostProcessor {
     const drawCalls = renderer.info.render.calls;
     const triangles = renderer.info.render.triangles;
 
-    // Pass 2: View-Space Surface Normals (supports both static meshes & SkinnedMesh character)
-    // Exclude alpha-blended billboard decals/foliage cards (`skipNormalPass`) & `Points` so opaque
-    // rectangular quad bounds never pollute Sobel contours or upward ground reflection normals.
-    this.tempHiddenNormalObjs.length = 0;
-    scene.traverseVisible((obj) => {
-      if (obj.userData?.skipNormalPass === true || (obj as THREE.Points).isPoints) {
-        this.tempHiddenNormalObjs.push(obj);
-      }
-    });
-    for (let i = 0; i < this.tempHiddenNormalObjs.length; i++) {
-      this.tempHiddenNormalObjs[i]!.visible = false;
-    }
-
-    const prevOverride = scene.overrideMaterial;
+    // Pass 2: Normal-Map-Aware View-Space Surface Normals (`MeshNormalMaterial` per normalMap)
+    // Excludes alpha-blended billboard decals/foliage cards (`skipNormalPass`) & `Points`/`Line`
+    // while capturing embedded glTF + procedural tangent-space normal relief at macro scale.
     const prevBackground = scene.background;
-    scene.overrideMaterial = this.normalMaterial;
+    const prevClearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this.savedClearColor);
+
+    this.normalPassCache.beginPass(scene);
     scene.background = null;
     renderer.setRenderTarget(this.normalTarget);
     renderer.setClearColor(0x8080ff, 1);
     renderer.clear();
     renderer.render(scene, camera);
-    scene.overrideMaterial = prevOverride;
-    scene.background = prevBackground;
+    this.normalPassCache.endPass();
 
-    for (let i = 0; i < this.tempHiddenNormalObjs.length; i++) {
-      this.tempHiddenNormalObjs[i]!.visible = true;
-    }
-    this.tempHiddenNormalObjs.length = 0;
+    scene.background = prevBackground;
+    renderer.setClearColor(this.savedClearColor, prevClearAlpha);
 
     // Pass 3: Soft-Knee Bloom Extract
     renderer.setRenderTarget(this.bloomTarget);
@@ -364,7 +368,7 @@ export class AsciiPostProcessor {
     this.depthTexture.dispose();
     this.atlas.texture.dispose();
 
-    this.normalMaterial.dispose();
+    this.normalPassCache.dispose();
     this.bloomMaterial.dispose();
     this.compositeMaterial.dispose();
     this.quadGeometry.dispose();
