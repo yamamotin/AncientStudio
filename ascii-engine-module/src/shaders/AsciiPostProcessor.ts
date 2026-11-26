@@ -35,6 +35,7 @@ export class AsciiPostProcessor {
   private readonly compositeMaterial: THREE.ShaderMaterial;
   private readonly transitionController = new ResolutionTransitionController(14.0);
   private readonly camWorldDir = new THREE.Vector3();
+  private readonly tempHiddenNormalObjs: THREE.Object3D[] = [];
 
   private readonly quadGeometry: THREE.PlaneGeometry;
   private readonly bloomQuad: THREE.Mesh;
@@ -315,6 +316,18 @@ export class AsciiPostProcessor {
     const triangles = renderer.info.render.triangles;
 
     // Pass 2: View-Space Surface Normals (supports both static meshes & SkinnedMesh character)
+    // Exclude alpha-blended billboard decals/foliage cards (`skipNormalPass`) & `Points` so opaque
+    // rectangular quad bounds never pollute Sobel contours or upward ground reflection normals.
+    this.tempHiddenNormalObjs.length = 0;
+    scene.traverseVisible((obj) => {
+      if (obj.userData?.skipNormalPass === true || (obj as THREE.Points).isPoints) {
+        this.tempHiddenNormalObjs.push(obj);
+      }
+    });
+    for (let i = 0; i < this.tempHiddenNormalObjs.length; i++) {
+      this.tempHiddenNormalObjs[i]!.visible = false;
+    }
+
     const prevOverride = scene.overrideMaterial;
     const prevBackground = scene.background;
     scene.overrideMaterial = this.normalMaterial;
@@ -325,6 +338,11 @@ export class AsciiPostProcessor {
     renderer.render(scene, camera);
     scene.overrideMaterial = prevOverride;
     scene.background = prevBackground;
+
+    for (let i = 0; i < this.tempHiddenNormalObjs.length; i++) {
+      this.tempHiddenNormalObjs[i]!.visible = true;
+    }
+    this.tempHiddenNormalObjs.length = 0;
 
     // Pass 3: Soft-Knee Bloom Extract
     renderer.setRenderTarget(this.bloomTarget);

@@ -55,12 +55,12 @@ export const DEFAULT_URBAN_PLAYER_SPAWN = {
  * while smoothly following (`lerp`) `Player_Rig`.
  */
 export const URBAN_CAMERA_FOLLOW_DEFAULTS = {
-  offsetX: 10.6,
-  offsetY: 11.6,
-  offsetZ: 10.6,
-  lookAtOffsetX: -2.1,
-  lookAtOffsetY: 0.9,
-  lookAtOffsetZ: -1.4,
+  offsetX: 10.3,
+  offsetY: 11.3,
+  offsetZ: 10.3,
+  lookAtOffsetX: -1.85,
+  lookAtOffsetY: 1.05,
+  lookAtOffsetZ: -1.25,
   followSharpness: 6.5,
 } as const;
 
@@ -136,12 +136,13 @@ export class UrbanGlbSceneBuilder {
     };
 
     // 1. Storefront Facade Lights, Warm Amber Transoms & Cyber-Cyan Neon Trim (`fachadas das lojas`)
-    const storefrontEastLight = new THREE.PointLight(new THREE.Color('#F2A84B'), 8.4, 17.5, 1.5);
-    storefrontEastLight.position.set(-4.35, 3.05, -2.65);
+    // Tighter distance & quadratic-leaning decay carve crisp focal light islands surrounded by dark breathing space
+    const storefrontEastLight = new THREE.PointLight(new THREE.Color('#F4AA4C'), 9.2, 14.5, 1.78);
+    storefrontEastLight.position.set(-4.35, 3.05, -2.55);
     group.add(storefrontEastLight);
 
     const eastSignGeo = new THREE.BoxGeometry(5.8, 0.28, 0.14);
-    const eastSignMat = makeFixtureMat('#3A2B1C', '#F6B85C', 1.45);
+    const eastSignMat = makeFixtureMat('#3A2B1C', '#F6B85C', 1.52);
     const eastSignMesh = new THREE.Mesh(eastSignGeo, eastSignMat);
     eastSignMesh.name = 'StorefrontEastTransom';
     eastSignMesh.position.set(-4.35, 3.22, -3.45);
@@ -149,7 +150,7 @@ export class UrbanGlbSceneBuilder {
     group.add(eastSignMesh);
 
     const neonStripGeo = new THREE.BoxGeometry(0.12, 2.35, 0.12);
-    const neonCyanMat = makeFixtureMat('#162C33', '#58B6C6', 1.25);
+    const neonCyanMat = makeFixtureMat('#162C33', '#58B6C6', 1.32);
 
     const eastNeonStrip = new THREE.Mesh(neonStripGeo, neonCyanMat);
     eastNeonStrip.name = 'StorefrontEastNeon';
@@ -157,12 +158,12 @@ export class UrbanGlbSceneBuilder {
     eastNeonStrip.userData.skipObjectOutline = true;
     group.add(eastNeonStrip);
 
-    const storefrontWestLight = new THREE.PointLight(new THREE.Color('#EB9E42'), 8.0, 17.5, 1.5);
-    storefrontWestLight.position.set(-13.35, 3.1, -1.8);
+    const storefrontWestLight = new THREE.PointLight(new THREE.Color('#ED9F44'), 8.8, 14.5, 1.78);
+    storefrontWestLight.position.set(-13.35, 3.1, -1.75);
     group.add(storefrontWestLight);
 
     const westSignGeo = new THREE.BoxGeometry(5.4, 0.26, 0.14);
-    const westSignMat = makeFixtureMat('#38291A', '#F0AC50', 1.38);
+    const westSignMat = makeFixtureMat('#38291A', '#F0AC50', 1.45);
     const westSignMesh = new THREE.Mesh(westSignGeo, westSignMat);
     westSignMesh.name = 'StorefrontWestTransom';
     westSignMesh.position.set(-13.35, 3.25, -2.55);
@@ -176,12 +177,12 @@ export class UrbanGlbSceneBuilder {
     group.add(westNeonStrip);
 
     // Sidewalk Kiosk Warm Counter & Canopy Glow (casts vertical golden reflections onto foreground asphalt)
-    const kioskWarmLight = new THREE.PointLight(new THREE.Color('#F0B056'), 5.8, 13.5, 1.55);
+    const kioskWarmLight = new THREE.PointLight(new THREE.Color('#F2B258'), 6.4, 11.5, 1.82);
     kioskWarmLight.position.set(-3.42, 2.35, 3.65);
     group.add(kioskWarmLight);
 
     const kioskBarGeo = new THREE.BoxGeometry(2.15, 0.12, 0.12);
-    const kioskBarMat = makeFixtureMat('#3B2B1B', '#F7BC64', 1.42);
+    const kioskBarMat = makeFixtureMat('#3B2B1B', '#F7BC64', 1.48);
     const kioskBarMesh = new THREE.Mesh(kioskBarGeo, kioskBarMat);
     kioskBarMesh.name = 'KioskCanopyGlow';
     kioskBarMesh.position.set(-3.42, 2.54, 3.42);
@@ -190,9 +191,9 @@ export class UrbanGlbSceneBuilder {
 
     // 2. Streetlamps / Luminaires Along the Roadway (`postes/luminárias`)
     const lampGlobeGeo = new THREE.SphereGeometry(0.22, 10, 8);
-    const lampGlobeMat = makeFixtureMat('#FFF4DC', '#FAD080', 1.72);
+    const lampGlobeMat = makeFixtureMat('#FFF4DC', '#FAD284', 1.82);
 
-    const streetLampWest = new THREE.PointLight(new THREE.Color('#F6C270'), 11.2, 24.0, 1.42);
+    const streetLampWest = new THREE.PointLight(new THREE.Color('#F6C270'), 12.2, 19.0, 1.72);
     streetLampWest.position.set(-17.99, 6.0, 3.14);
     group.add(streetLampWest);
 
@@ -204,9 +205,9 @@ export class UrbanGlbSceneBuilder {
 
     // Sleek curbside luminaire at `(-5.25, y, 4.00)` outside central player sightline, illuminating wet roadbed
     const poleMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color('#222B33'),
-      roughness: 0.55,
-      metalness: 0.65,
+      color: new THREE.Color('#28323B'),
+      roughness: 0.52,
+      metalness: 0.35,
     });
     const postGeo = new THREE.CylinderGeometry(0.06, 0.085, 5.35, 8);
     const postMesh = new THREE.Mesh(postGeo, poleMat);
@@ -222,7 +223,7 @@ export class UrbanGlbSceneBuilder {
     armMesh.position.set(-5.25, 5.42, 4.3);
     group.add(armMesh);
 
-    const streetLampCenter = new THREE.PointLight(new THREE.Color('#F2BA68'), 9.8, 21.0, 1.48);
+    const streetLampCenter = new THREE.PointLight(new THREE.Color('#F2BA68'), 10.6, 16.5, 1.76);
     streetLampCenter.position.set(-5.25, 5.25, 4.58);
     group.add(streetLampCenter);
 
@@ -232,7 +233,7 @@ export class UrbanGlbSceneBuilder {
     globeCenter.userData.skipObjectOutline = true;
     group.add(globeCenter);
 
-    const streetLampEast = new THREE.PointLight(new THREE.Color('#ECAF5E'), 8.6, 19.5, 1.5);
+    const streetLampEast = new THREE.PointLight(new THREE.Color('#ECAF5E'), 9.2, 16.0, 1.76);
     streetLampEast.position.set(8.4, 6.0, 4.83);
     group.add(streetLampEast);
 
@@ -243,7 +244,7 @@ export class UrbanGlbSceneBuilder {
     group.add(globeEast);
 
     // 3. Distant West Avenue Cyber-Slate Beacon (depth layering light point in upper-left background)
-    const avenueBeaconLight = new THREE.PointLight(new THREE.Color('#5CA8BA'), 5.4, 22.0, 1.55);
+    const avenueBeaconLight = new THREE.PointLight(new THREE.Color('#5CA8BA'), 5.8, 17.5, 1.75);
     avenueBeaconLight.position.set(-27.2, 4.8, 1.6);
     group.add(avenueBeaconLight);
 
@@ -332,6 +333,7 @@ export class UrbanGlbSceneBuilder {
     });
     const waypointMarker = new THREE.Mesh(waypointGeo, waypointMat);
     waypointMarker.name = 'UrbanWaypointMarker';
+    waypointMarker.userData.skipNormalPass = true;
     waypointMarker.visible = false;
     scene.add(waypointMarker);
 
@@ -423,8 +425,8 @@ export class UrbanGlbSceneBuilder {
 
     // Crisp ivory silhouette catchlight on `Player_Rig` so character stands out cleanly on dark pavement
     const rigScale = Math.max(0.001, Math.abs(playerRig.scale.y || 1));
-    const playerRimLight = new THREE.PointLight(new THREE.Color('#E6F2FC'), 2.6, 5.4, 1.7);
-    playerRimLight.position.set(0, 2.45 / rigScale, 0.24 / rigScale);
+    const playerRimLight = new THREE.PointLight(new THREE.Color('#EEF6FF'), 3.4, 4.6, 1.95);
+    playerRimLight.position.set(0.18 / rigScale, 2.75 / rigScale, 0.35 / rigScale);
     playerRig.add(playerRimLight);
     stage.playerRimLight = playerRimLight;
 
@@ -691,78 +693,108 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 0.24;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 0.95;
+        stage.playerRimLight.intensity = 1.1;
       }
     } else if (mode === 'rain') {
+      // Stormy Cyber-Noir: restrained global fill so unlit roofs/asphalt breathe darkly around focal pools
       stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#080C10');
-      stage.ambientHemi.intensity = 0.72;
+      stage.ambientHemi.groundColor.set('#05080B');
+      stage.ambientHemi.intensity = 0.32;
 
       stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#9BB0C2'), 0.35);
-      stage.keyDirLight.intensity = 1.28;
+      stage.keyDirLight.intensity = 0.62;
       stage.keyDirLight.position.set(14, 27, 18);
 
       stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.66;
+      stage.rimDirLight.intensity = 0.42;
 
-      rig.storefrontEastLight.intensity = 9.8;
-      rig.storefrontWestLight.intensity = 9.2;
-      rig.kioskWarmLight.intensity = 6.8;
-      rig.streetLampWest.intensity = 13.0;
-      rig.streetLampCenter.intensity = 11.4;
-      rig.streetLampEast.intensity = 9.6;
-      rig.avenueBeaconLight.intensity = 6.6;
+      rig.storefrontEastLight.intensity = 10.8;
+      rig.storefrontWestLight.intensity = 10.2;
+      rig.kioskWarmLight.intensity = 7.6;
+      rig.streetLampWest.intensity = 14.2;
+      rig.streetLampCenter.intensity = 12.4;
+      rig.streetLampEast.intensity = 10.8;
+      rig.avenueBeaconLight.intensity = 7.0;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.72;
+        m.emissiveIntensity = 1.82;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.0;
+        stage.playerRimLight.intensity = 3.8;
       }
     } else {
-      // 'night' — dark Cyber-Noir base with warm amber storefront/streetlamp pools & wet sheen
+      // 'night' — restrained ambient fill + high-contrast focal light pools on storefronts, streetlamps & character
       stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#090E13');
-      stage.ambientHemi.intensity = 0.78;
+      stage.ambientHemi.groundColor.set('#060A0E');
+      stage.ambientHemi.intensity = 0.36;
 
       stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C4D3E0'), 0.4);
-      stage.keyDirLight.intensity = 1.48;
+      stage.keyDirLight.intensity = 0.72;
       stage.keyDirLight.position.set(16, 28, 18);
 
       stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.56;
+      stage.rimDirLight.intensity = 0.38;
 
-      rig.storefrontEastLight.intensity = 8.4;
-      rig.storefrontWestLight.intensity = 8.0;
-      rig.kioskWarmLight.intensity = 5.8;
-      rig.streetLampWest.intensity = 11.2;
-      rig.streetLampCenter.intensity = 9.8;
-      rig.streetLampEast.intensity = 8.6;
-      rig.avenueBeaconLight.intensity = 5.4;
+      rig.storefrontEastLight.intensity = 9.2;
+      rig.storefrontWestLight.intensity = 8.8;
+      rig.kioskWarmLight.intensity = 6.4;
+      rig.streetLampWest.intensity = 12.2;
+      rig.streetLampCenter.intensity = 10.6;
+      rig.streetLampEast.intensity = 9.2;
+      rig.avenueBeaconLight.intensity = 5.8;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.45;
+        m.emissiveIntensity = 1.55;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 2.6;
+        stage.playerRimLight.intensity = 3.4;
       }
     }
 
     stage.keyDirLight.castShadow = config.enableShadows;
     (stage.waypointMarker.material as THREE.MeshBasicMaterial).color.copy(warm);
 
-    // Update road wetness, sidewalk specular sheen, foliage tones, billboards & window/lamp emissives
+    // Update road wetness, dark breathing base albedo, character/car contrast, foliage & emissives
     if (stage.assets) {
-      const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.28;
-      const roadMetalness = mode === 'rain' ? 0.45 : mode === 'day' ? 0.04 : 0.3;
+      const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.26;
+      const roadMetalness = mode === 'rain' ? 0.42 : mode === 'day' ? 0.04 : 0.28;
+      const roadBaseHex = mode === 'day' ? '#E4E9EE' : mode === 'rain' ? '#58626C' : '#646F7A';
       for (const mat of stage.assets.materials.roads) {
         mat.roughness = roadRoughness;
         mat.metalness = roadMetalness;
+        mat.color.set(roadBaseHex);
       }
 
-      const sidewalkRoughness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.88 : 0.4;
-      const sidewalkMetalness = mode === 'rain' ? 0.34 : mode === 'day' ? 0.05 : 0.2;
+      const sidewalkRoughness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.88 : 0.38;
+      const sidewalkMetalness = mode === 'rain' ? 0.32 : mode === 'day' ? 0.05 : 0.18;
+      const sidewalkBaseHex = mode === 'day' ? '#E8EDF2' : mode === 'rain' ? '#707B86' : '#7C8894';
       for (const mat of stage.assets.materials.sidewalks) {
         mat.roughness = sidewalkRoughness;
         mat.metalness = sidewalkMetalness;
+        mat.color.set(sidewalkBaseHex);
+      }
+
+      // Keep unlit nocturnal roofs/walls subdued so warm light pools stand out with crisp hierarchy
+      const wallBaseHex = mode === 'day' ? '#F2F5F8' : mode === 'rain' ? '#848F9A' : '#8E9AA6';
+      for (const mat of stage.assets.materials.walls) {
+        mat.color.set(wallBaseHex);
+      }
+
+      // Protagonist (`Player_Rig`) sculpted contrast across day / night / rain
+      const charEmissive = mode === 'day' ? 0.08 : mode === 'rain' ? 0.34 : 0.28;
+      for (const mat of stage.assets.materials.character) {
+        mat.color.set(mode === 'day' ? '#DCE6F0' : '#E6F0F8');
+        if (mat.emissive) {
+          mat.emissive.set('#2C4456');
+          mat.emissiveIntensity = charEmissive;
+        }
+      }
+
+      // Vehicle (`Carro_Grupo`) clear silhouette response during its 8s active pass
+      const carEmissive = mode === 'day' ? 0.06 : mode === 'rain' ? 0.28 : 0.24;
+      for (const mat of stage.assets.materials.carBody) {
+        if (mat.emissive) {
+          mat.emissive.set('#1F3140');
+          mat.emissiveIntensity = carEmissive;
+        }
       }
 
       // Warm golden-amber window glow on storefronts & upper stories (`Q 8 $ # o a` reference look)

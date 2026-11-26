@@ -108,6 +108,7 @@ export class VfxController {
       this.rainPoints = new THREE.Points(geo, mat);
       this.rainPoints.name = 'WeatherRainParticles';
       this.rainPoints.frustumCulled = false;
+      this.rainPoints.userData.skipNormalPass = true;
       this.rainPositions = positions;
       this.rainSpeeds = speeds;
       this.scene.add(this.rainPoints);

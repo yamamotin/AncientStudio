@@ -39,11 +39,14 @@ export interface PreparedUrbanGlbAssets {
   materials: {
     roads: THREE.MeshStandardMaterial[];
     sidewalks: THREE.MeshStandardMaterial[];
+    walls: THREE.MeshStandardMaterial[];
     windows: THREE.MeshStandardMaterial[];
     streetLamps: THREE.MeshStandardMaterial[];
     foliage: THREE.MeshStandardMaterial[];
     kioskGlass: THREE.MeshStandardMaterial[];
     billboards: THREE.MeshStandardMaterial[];
+    character: THREE.MeshStandardMaterial[];
+    carBody: THREE.MeshStandardMaterial[];
     carHeadlightCovers: THREE.MeshStandardMaterial[];
   };
   foregroundOccluders: ForegroundOccluderGroup[];
@@ -171,11 +174,14 @@ export function extractAndPrepareGlbNodes(
 
   const roads: THREE.MeshStandardMaterial[] = [];
   const sidewalks: THREE.MeshStandardMaterial[] = [];
+  const walls: THREE.MeshStandardMaterial[] = [];
   const windows: THREE.MeshStandardMaterial[] = [];
   const streetLamps: THREE.MeshStandardMaterial[] = [];
   const foliage: THREE.MeshStandardMaterial[] = [];
   const kioskGlass: THREE.MeshStandardMaterial[] = [];
   const billboards: THREE.MeshStandardMaterial[] = [];
+  const character: THREE.MeshStandardMaterial[] = [];
+  const carBody: THREE.MeshStandardMaterial[] = [];
   const carHeadlightCovers: THREE.MeshStandardMaterial[] = [];
   const seenMats = new Set<string>();
 
@@ -236,8 +242,17 @@ export function extractAndPrepareGlbNodes(
 
     const matLabel = mats.map((m) => m?.name ?? '').join(' ').toLowerCase();
     const isFoliage = /grass|leav|material\.005|material\.009/i.test(matLabel);
-    mesh.castShadow = !isFoliage;
-    mesh.receiveShadow = true;
+    const hasTransparentBlend = mats.some((m) => Boolean(m && m.transparent));
+
+    // Exclude alpha-blended billboard decals/cards (`grass_medium_01`, `leavesfall`, `leavsp`,
+    // `Material.013`, `Material.019`, `PaletteMaterial005`) from Pass 2 (`MeshNormalMaterial`),
+    // preventing opaque rectangular quad borders from polluting Sobel contours & road reflections.
+    if (hasTransparentBlend) {
+      mesh.userData.skipNormalPass = true;
+    }
+
+    mesh.castShadow = !isFoliage && !hasTransparentBlend;
+    mesh.receiveShadow = !hasTransparentBlend;
 
     for (const rawMat of mats) {
       const mat = rawMat as THREE.MeshStandardMaterial;
@@ -245,6 +260,15 @@ export function extractAndPrepareGlbNodes(
       seenMats.add(mat.uuid);
 
       const name = (mat.name || '').toLowerCase();
+
+      // Fix baked `metalness = 1` palette materials when rendering without an HDRI environment map
+      // so lampposts, railings, and trims retain readable diffuse shading instead of turning black.
+      if (/palettematerial00[1-5]|material\.034/i.test(name) && mat.metalness >= 0.85) {
+        mat.metalnessMap = null;
+        mat.metalness = 0.32;
+        mat.roughness = Math.min(0.56, Math.max(0.28, mat.roughness));
+      }
+
       if (/real_road|road|asphalt/i.test(name)) {
         roads.push(mat);
       } else if (/concrete_pavement|tiles/i.test(name)) {
@@ -262,6 +286,12 @@ export function extractAndPrepareGlbNodes(
         (mat.emissive.r + mat.emissive.g + mat.emissive.b > 0.25)
       ) {
         streetLamps.push(mat);
+      } else if (
+        /wall|hous|roof|rust|metal|material\.0(01|03|07|08|10|11|12|14|16|17|20|21|24|28|29|30|31|32)/i.test(
+          name
+        )
+      ) {
+        walls.push(mat);
       }
     }
   });
@@ -291,34 +321,95 @@ export function extractAndPrepareGlbNodes(
     buildOccluderGroup('frontSign', 'Cidade_Plane052_053 (Foreground Hanging Sign)', frontSignMeshes),
   ].filter((g): g is ForegroundOccluderGroup => g !== null);
 
-  // 2. Configure `Player_Rig` SkinnedMesh shadows & disable premature frustum culling during skinning
+  // 2. Configure `Player_Rig` SkinnedMesh shadows, culling & high-legibility sculpted material
+  // (`FuturisticGirl` in `cena_completa.glb` has `material: undefined`, which defaults in glTF 2.0
+  // to `metalness = 1.0, roughness = 1.0` -> zero diffuse albedo without an envMap!).
+  const protagonistMaterial = new THREE.MeshStandardMaterial({
+    name: 'PlayerProtagonistMaterial',
+    color: new THREE.Color('#E2EDF5'),
+    emissive: new THREE.Color('#2A4152'),
+    emissiveIntensity: 0.26,
+    roughness: 0.38,
+    metalness: 0.12,
+  });
+  character.push(protagonistMaterial);
+
   playerRig.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
     const skinned = obj as THREE.SkinnedMesh;
-    if ((obj as THREE.Mesh).isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
+    if (mesh.isMesh) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const curMat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      const stdMat = curMat as THREE.MeshStandardMaterial | undefined;
+      if (!stdMat || (!stdMat.map && stdMat.metalness >= 0.85)) {
+        if (stdMat && !seenMats.has(stdMat.uuid)) {
+          stdMat.dispose();
+        }
+        mesh.material = protagonistMaterial;
+      } else if (!seenMats.has(stdMat.uuid)) {
+        seenMats.add(stdMat.uuid);
+        stdMat.metalness = Math.min(0.22, stdMat.metalness);
+        stdMat.roughness = Math.min(0.55, Math.max(0.3, stdMat.roughness));
+        character.push(stdMat);
+      }
     }
     if (skinned.isSkinnedMesh) {
       skinned.frustumCulled = false;
     }
   });
 
-  // 3. Configure `Carro_Grupo` shadows & capture headlight cover materials
+  // 3. Configure `Carro_Grupo` shadows, restore non-black diffuse/clearcoat response & capture headlights
+  const carClonedMats = new Map<string, THREE.MeshStandardMaterial>();
   carroGrupo.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
 
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const rawMat of mats) {
-      const mat = rawMat as THREE.MeshStandardMaterial;
-      if (!mat || seenMats.has(mat.uuid)) continue;
-      seenMats.add(mat.uuid);
-      if (/headlight/i.test(`${mesh.name} ${mat.name}`)) {
-        carHeadlightCovers.push(mat);
+    const isHeadlightMesh = /headlight/i.test(mesh.name);
+    const isBodyMesh = /body_color|supra|chrome|rims/i.test(mesh.name);
+    const isTireMesh = /tire|rubber|blocker/i.test(mesh.name);
+
+    const origList = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const nextList = origList.map((rawMat) => {
+      const src = rawMat as THREE.MeshStandardMaterial;
+      if (!src) return rawMat;
+      if (src.transparent) {
+        mesh.userData.skipNormalPass = true;
       }
-    }
+
+      const key = `${src.uuid}::${isHeadlightMesh ? 'hl' : isBodyMesh ? 'body' : isTireMesh ? 'tire' : 'trim'}`;
+      let tuned = carClonedMats.get(key);
+      if (!tuned) {
+        tuned = src.clone();
+        tuned.metalnessMap = null;
+        if (isHeadlightMesh) {
+          tuned.metalness = 0.1;
+          tuned.roughness = 0.18;
+          carHeadlightCovers.push(tuned);
+        } else if (isBodyMesh) {
+          tuned.color = new THREE.Color('#C8D6E2');
+          tuned.emissive = new THREE.Color('#1B2A36');
+          tuned.emissiveIntensity = 0.22;
+          tuned.metalness = 0.28;
+          tuned.roughness = 0.28;
+          carBody.push(tuned);
+        } else if (isTireMesh) {
+          tuned.color = new THREE.Color('#283038');
+          tuned.metalness = 0.08;
+          tuned.roughness = 0.78;
+        } else {
+          tuned.metalness = 0.25;
+          tuned.roughness = 0.42;
+          carBody.push(tuned);
+        }
+        carClonedMats.set(key, tuned);
+      }
+      return tuned;
+    });
+
+    mesh.material = Array.isArray(mesh.material) ? nextList : nextList[0]!;
+    mesh.castShadow = !mesh.userData.skipNormalPass;
+    mesh.receiveShadow = !mesh.userData.skipNormalPass;
   });
 
   const clips = normalizeCharacterClips(gltf.animations ?? []);
@@ -345,11 +436,14 @@ export function extractAndPrepareGlbNodes(
     materials: {
       roads,
       sidewalks,
+      walls,
       windows,
       streetLamps,
       foliage,
       kioskGlass,
       billboards,
+      character,
+      carBody,
       carHeadlightCovers,
     },
     foregroundOccluders,

@@ -273,7 +273,7 @@ export class AsciiEngineCore {
     this.builtUrbanStage = stage;
     this.scene = stage.scene;
 
-    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 64;
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 58;
     const defaultPlayerSpawn: [number, number, number] = [
       DEFAULT_URBAN_PLAYER_SPAWN.x,
       DEFAULT_URBAN_PLAYER_SPAWN.y,
@@ -867,7 +867,7 @@ export class AsciiEngineCore {
         this.lastAutoPlaygroundFov !== null &&
         Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
       if (!wasCustomizedExternally) {
-        const autoFov = 64;
+        const autoFov = 58;
         this.camera.fov = autoFov;
         this.lastAutoPlaygroundFov = autoFov;
       }

@@ -397,6 +397,23 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const helperBox = prepared.nodes.cidade.getObjectByName('Cidade_Object_331');
   assert.ok(helperBox && helperBox.visible === false, 'Invisible exporter bounding box hidden cleanly');
 
+  // Verify material legibility fixes: Player_Rig & Carro_Grupo diffuse restoration + alpha-card normal-pass exclusion
+  assert.ok(
+    prepared.materials.character.length >= 1 &&
+      prepared.materials.character.every((m) => m.metalness <= 0.25),
+    'Player_Rig unassigned glTF metalness=1 material replaced with sculpted readable albedo'
+  );
+  assert.ok(
+    prepared.materials.carBody.length >= 1 &&
+      prepared.materials.carBody.every((m) => m.metalness <= 0.35),
+    'Carro_Grupo baked metalness=1 palette materials tuned for crisp coupe silhouette'
+  );
+  let skipNormalCount = 0;
+  prepared.nodes.cidade.traverse((obj) => {
+    if (obj.userData && obj.userData.skipNormalPass === true) skipNormalCount += 1;
+  });
+  assert.ok(skipNormalCount >= 35, `Alpha-blended billboard decals excluded from normal pass (${skipNormalCount})`);
+
   // Verify Hips horizontal root offset normalization across Idle, Walking, and Casting
   const walkHips = prepared.clips.Walking.tracks.find((t) => /hips\.position$/i.test(t.name));
   const castHips = prepared.clips.Casting.tracks.find((t) => /hips\.position$/i.test(t.name));
@@ -429,7 +446,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.equal(mockListeners.pointermove.opts.passive, true);
 
   const keyboard = new pkg.KeyboardInput({ enabled: true, focusTarget: mockContainer });
-  const camera = new THREE.PerspectiveCamera(64, 16 / 9, 0.15, 160);
+  const camera = new THREE.PerspectiveCamera(58, 16 / 9, 0.15, 160);
 
   const runner = new pkg.SystemRunner()
     .addSystem(new pkg.InputSystem(pointer, keyboard, camera), 10)
@@ -641,13 +658,16 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     'utf8'
   );
 
-  // 1. Modern 3D-wrapping ASCII shader invariants (glyph variety + ground reflections + linearized depth + view-normal Sobel + soft knee, zero solid block blowout)
+  // 1. Modern 3D-wrapping ASCII shader invariants (glyph variety + dark breathing + silhouette moat + tonal underlayer + ground reflections)
   includesAll(asciiShaderSrc, [
     'tNormal',
     'tDepth',
     'linearizeDepth',
     'glyphVarietyHash',
     'sampleGroundReflection',
+    'silhouetteOuterMoat',
+    'silhouetteInnerRim',
+    'tonedUnderlayer',
     'uWetness',
     'uCameraNear',
     'uCameraFar',
@@ -691,6 +711,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87');
   assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540');
   includesAll(pkg.DEFAULT_ASCII_RAMP, ['o', 'u', 's', 'a', '$', '8', 'Q', '=', '-', '~', '^', '*']);
+  assert.ok(pkg.DEFAULT_ASCII_RAMP.startsWith('    '), 'DEFAULT_ASCII_RAMP reserves leading empty spaces for dark breathing shadows');
 
   // 2. High-legibility 5:8 glyph atlas proportions
   const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);

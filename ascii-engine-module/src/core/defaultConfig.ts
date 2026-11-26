@@ -17,11 +17,11 @@ export const DEFAULT_PALETTE: ThemePalette = {
 
 /**
  * Expressive multi-symbol & alphanumeric ASCII luminance ramp inspired by classic & modern
- * ASCII RPG aesthetics (`o`, `u`, `s`, `a`, `$`, `8`, `Q`, `=`, `-`, `~`, `^`, `*`), ordered
- * from sparse punctuation to dense typographic highlights to avoid repetitive bar runs.
+ * ASCII RPG aesthetics (`o`, `u`, `s`, `a`, `$`, `8`, `Q`, `=`, `-`, `~`, `^`, `*`), with dedicated
+ * leading dark-breathing empty space (`' '`) and quiet punctuation before midtone/highlight glyphs.
  */
 export const DEFAULT_ASCII_RAMP =
-  " .',:;~-_^+=*!i1r?cvunxzjft<>saoeukpqdbwmh0OQCJLZUYX$8&#%B@";
+  "      .,'-~_:;^+=*!?rcvusaoenxz<>kpqdbwm0OQCJL8$&#%@";
 
 export const DEFAULT_SCENE_MODEL_URL = './assets/models/cena_completa.glb';
 export const DEFAULT_DRACO_DECODER_PATH = './assets/draco/';
@@ -31,7 +31,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   modelUrl: DEFAULT_SCENE_MODEL_URL,
   dracoDecoderPath: DEFAULT_DRACO_DECODER_PATH,
   atmosphere: 'night',
-  fov: 64,
+  fov: 58,
   enableKeyboard: true,
   autoOrbit: false,
   pauseOffscreen: true,
@@ -40,16 +40,16 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   autoResponsiveDensity: true,
   characterRamp: DEFAULT_ASCII_RAMP,
   structuralChars: '/\\|_[]',
-  edgeStrength: 0.94,
-  blockBlendWeight: 0.10,
+  edgeStrength: 0.96,
+  blockBlendWeight: 0.06,
   windStrength: 1.0,
-  bloomIntensity: 0.30,
-  bloomThreshold: 0.54,
+  bloomIntensity: 0.28,
+  bloomThreshold: 0.58,
   dofFocusDistance: 0.34,
-  dofStrength: 0.18,
+  dofStrength: 0.20,
   parallaxIntensity: 0.35,
   parallaxSmoothing: 6.5,
-  cursorLightIntensity: 0.42,
+  cursorLightIntensity: 0.32,
   enableShadows: true,
   maxFps: 60,
   maxPixelRatio: 2,
