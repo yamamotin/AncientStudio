@@ -14,6 +14,16 @@ export const GLB_NODE_NAMES = {
   carroGrupo: 'Carro_Grupo',
 } as const;
 
+export type ForegroundOccluderRole = 'eastTree' | 'westTree' | 'frontSign';
+
+export interface ForegroundOccluderGroup {
+  role: ForegroundOccluderRole;
+  label: string;
+  meshes: THREE.Mesh[];
+  worldBox: THREE.Box3;
+  occluded: boolean;
+}
+
 export interface PreparedUrbanGlbAssets {
   sceneRoot: THREE.Group;
   nodes: {
@@ -33,8 +43,10 @@ export interface PreparedUrbanGlbAssets {
     streetLamps: THREE.MeshStandardMaterial[];
     foliage: THREE.MeshStandardMaterial[];
     kioskGlass: THREE.MeshStandardMaterial[];
+    billboards: THREE.MeshStandardMaterial[];
     carHeadlightCovers: THREE.MeshStandardMaterial[];
   };
+  foregroundOccluders: ForegroundOccluderGroup[];
   dispose: () => void;
 }
 
@@ -163,10 +175,27 @@ export function extractAndPrepareGlbNodes(
   const streetLamps: THREE.MeshStandardMaterial[] = [];
   const foliage: THREE.MeshStandardMaterial[] = [];
   const kioskGlass: THREE.MeshStandardMaterial[] = [];
+  const billboards: THREE.MeshStandardMaterial[] = [];
   const carHeadlightCovers: THREE.MeshStandardMaterial[] = [];
   const seenMats = new Set<string>();
 
-  // 1. Sanitize & classify static urban environment (`Cidade_Sketchfab_model`)
+  const eastTreeMeshes: THREE.Mesh[] = [];
+  const westTreeMeshes: THREE.Mesh[] = [];
+  const frontSignMeshes: THREE.Mesh[] = [];
+
+  cidade.updateMatrixWorld(true);
+
+  const getAncestorPath = (obj: THREE.Object3D): string => {
+    const names: string[] = [obj.name];
+    let cur = obj.parent;
+    while (cur && cur !== cidade) {
+      if (cur.name) names.push(cur.name);
+      cur = cur.parent;
+    }
+    return names.join('/');
+  };
+
+  // 1. Sanitize, classify materials & identify foreground occluders (`Cidade_Sketchfab_model`)
   cidade.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -183,6 +212,26 @@ export function extractAndPrepareGlbNodes(
       mesh.castShadow = false;
       mesh.receiveShadow = false;
       return;
+    }
+
+    // Identify the 2 foreground plaza trees (`Cidade_leaves_0_3` & `Cidade_leaves001_1_7`)
+    // and the hanging sign assembly in front (`Plane052/053` + `Cylinder001..005`) without touching `.glb` on disk
+    const pathLabel = getAncestorPath(mesh);
+    if (
+      /Cidade_leaves_0_3/i.test(pathLabel) ||
+      /^Cidade_Object_(8|10|12)$/i.test(mesh.name)
+    ) {
+      eastTreeMeshes.push(mesh);
+    } else if (
+      /Cidade_leaves001_1_7/i.test(pathLabel) ||
+      /^Cidade_Object_(15|17|19)$/i.test(mesh.name)
+    ) {
+      westTreeMeshes.push(mesh);
+    } else if (
+      /Cidade_(Plane05[23]_8[56]|Cylinder00[1-5]_(79|80|81|84|87))/i.test(pathLabel) ||
+      /^Cidade_Object_(296|299|302|304|313|315|318|321|323|326|328)$/i.test(mesh.name)
+    ) {
+      frontSignMeshes.push(mesh);
     }
 
     const matLabel = mats.map((m) => m?.name ?? '').join(' ').toLowerCase();
@@ -206,6 +255,8 @@ export function extractAndPrepareGlbNodes(
         foliage.push(mat);
       } else if (/palettematerial005|material\.033/i.test(name)) {
         kioskGlass.push(mat);
+      } else if (/material\.026|material\.035/i.test(name)) {
+        billboards.push(mat);
       } else if (
         mat.emissive &&
         (mat.emissive.r + mat.emissive.g + mat.emissive.b > 0.25)
@@ -214,6 +265,31 @@ export function extractAndPrepareGlbNodes(
       }
     }
   });
+
+  const buildOccluderGroup = (
+    role: ForegroundOccluderRole,
+    label: string,
+    meshes: THREE.Mesh[]
+  ): ForegroundOccluderGroup | null => {
+    if (meshes.length === 0) return null;
+    const worldBox = new THREE.Box3();
+    for (const m of meshes) {
+      worldBox.union(new THREE.Box3().setFromObject(m));
+    }
+    return {
+      role,
+      label,
+      meshes,
+      worldBox,
+      occluded: false,
+    };
+  };
+
+  const foregroundOccluders = [
+    buildOccluderGroup('eastTree', 'Cidade_leaves_0_3 (East Plaza Tree)', eastTreeMeshes),
+    buildOccluderGroup('westTree', 'Cidade_leaves001_1_7 (West Plaza Tree)', westTreeMeshes),
+    buildOccluderGroup('frontSign', 'Cidade_Plane052_053 (Foreground Hanging Sign)', frontSignMeshes),
+  ].filter((g): g is ForegroundOccluderGroup => g !== null);
 
   // 2. Configure `Player_Rig` SkinnedMesh shadows & disable premature frustum culling during skinning
   playerRig.traverse((obj) => {
@@ -273,8 +349,10 @@ export function extractAndPrepareGlbNodes(
       streetLamps,
       foliage,
       kioskGlass,
+      billboards,
       carHeadlightCovers,
     },
+    foregroundOccluders,
     dispose,
   };
 }

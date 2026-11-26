@@ -576,6 +576,183 @@ export class CameraFollowSystem implements EcsSystem {
 }
 
 /**
+ * LineOfSightOcclusionSystem (priority 39): Keeps the 3D sightline between the elevated 45°
+ * camera, `Player_Rig`, and the central plaza/storefront vista completely unobstructed by
+ * foreground canopy/sign obstacles (`Cidade_leaves_0_3`, `Cidade_leaves001_1_7`, and the
+ * hanging front sign `Plane052/053` + `Cylinder001..005`) without modifying `.glb` on disk.
+ */
+export class LineOfSightOcclusionSystem implements EcsSystem {
+  public readonly name = 'LineOfSightOcclusionSystem';
+  private camera: THREE.PerspectiveCamera | null;
+
+  private readonly ray = new THREE.Ray();
+  private readonly rayDir = new THREE.Vector3();
+  private readonly hitPoint = new THREE.Vector3();
+  private readonly expandedBox = new THREE.Box3();
+  private readonly sampleTarget = new THREE.Vector3();
+  private readonly playerNdc = new THREE.Vector3();
+  private readonly cornerVec = new THREE.Vector3();
+
+  constructor(camera: THREE.PerspectiveCamera | null = null) {
+    this.camera = camera;
+  }
+
+  public setCamera(camera: THREE.PerspectiveCamera | null): void {
+    this.camera = camera;
+  }
+
+  private segmentIntersectsExpandedBox(
+    camPos: THREE.Vector3,
+    target: THREE.Vector3,
+    box: THREE.Box3,
+    padding: number
+  ): boolean {
+    this.expandedBox.copy(box).expandByScalar(padding);
+    if (this.expandedBox.containsPoint(camPos)) {
+      return true;
+    }
+    this.rayDir.subVectors(target, camPos);
+    const totalDist = this.rayDir.length();
+    if (totalDist <= 0.05) return false;
+
+    this.rayDir.multiplyScalar(1 / totalDist);
+    this.ray.set(camPos, this.rayDir);
+    const hit = this.ray.intersectBox(this.expandedBox, this.hitPoint);
+    if (!hit) return false;
+
+    return camPos.distanceTo(hit) < totalDist - 0.12;
+  }
+
+  public update(world: World): void {
+    if (!this.camera) return;
+
+    const envEntities = world.query('ForegroundOccluders');
+    if (envEntities.length === 0) return;
+
+    const playerEntities = world.query('Transform', 'CharacterAnimation');
+    const playerTransform =
+      playerEntities.length > 0 ? world.getComponent(playerEntities[0]!, 'Transform') : undefined;
+
+    this.camera.updateMatrixWorld();
+    this.camera.updateProjectionMatrix();
+    const camPos = this.camera.position;
+
+    let hasPlayerNdc = false;
+    let playerDist = Infinity;
+    if (playerTransform) {
+      this.sampleTarget.set(playerTransform.x, playerTransform.y + 1.05, playerTransform.z);
+      playerDist = camPos.distanceTo(this.sampleTarget);
+      this.playerNdc.copy(this.sampleTarget).project(this.camera);
+      hasPlayerNdc = true;
+    }
+
+    for (const envId of envEntities) {
+      const occluderComp = world.getComponent(envId, 'ForegroundOccluders')!;
+      this.sampleTarget.set(
+        occluderComp.centralFocusX,
+        occluderComp.centralFocusY,
+        occluderComp.centralFocusZ
+      );
+      const focalDist = camPos.distanceTo(this.sampleTarget);
+
+      for (const group of occluderComp.groups) {
+        let blocksSightline = false;
+
+        // 1. Check 3D capsule rays from Camera -> Player_Rig (feet, torso, head)
+        if (playerTransform) {
+          const pad = group.occluded
+            ? occluderComp.playerClearanceRadius + 0.35
+            : occluderComp.playerClearanceRadius;
+
+          for (const hOff of [0.35, 1.05, 1.72]) {
+            this.sampleTarget.set(playerTransform.x, playerTransform.y + hOff, playerTransform.z);
+            if (this.segmentIntersectsExpandedBox(camPos, this.sampleTarget, group.worldBox, pad)) {
+              blocksSightline = true;
+              break;
+            }
+          }
+        }
+
+        // 2. Check 3D ray to central plaza & NDC screen-space overlap with player / scene center
+        if (!blocksSightline) {
+          this.sampleTarget.set(
+            occluderComp.centralFocusX,
+            occluderComp.centralFocusY,
+            occluderComp.centralFocusZ
+          );
+          if (this.segmentIntersectsExpandedBox(camPos, this.sampleTarget, group.worldBox, 1.85)) {
+            blocksSightline = true;
+          }
+        }
+
+        if (!blocksSightline) {
+          const b = group.worldBox;
+          let ndcMinX = Infinity;
+          let ndcMaxX = -Infinity;
+          let ndcMinY = Infinity;
+          let ndcMaxY = -Infinity;
+          let closestCornerDist = Infinity;
+
+          for (let ix = 0; ix < 2; ix++) {
+            const cx = ix === 0 ? b.min.x : b.max.x;
+            for (let iy = 0; iy < 2; iy++) {
+              const cy = iy === 0 ? b.min.y : b.max.y;
+              for (let iz = 0; iz < 2; iz++) {
+                const cz = iz === 0 ? b.min.z : b.max.z;
+                this.cornerVec.set(cx, cy, cz);
+                const d = camPos.distanceTo(this.cornerVec);
+                if (d < closestCornerDist) closestCornerDist = d;
+
+                this.cornerVec.project(this.camera);
+                if (this.cornerVec.z <= 1.05) {
+                  if (this.cornerVec.x < ndcMinX) ndcMinX = this.cornerVec.x;
+                  if (this.cornerVec.x > ndcMaxX) ndcMaxX = this.cornerVec.x;
+                  if (this.cornerVec.y < ndcMinY) ndcMinY = this.cornerVec.y;
+                  if (this.cornerVec.y > ndcMaxY) ndcMaxY = this.cornerVec.y;
+                }
+              }
+            }
+          }
+
+          const hysteresis = group.occluded ? 0.05 : 0.0;
+          const halfW = occluderComp.centralNdcHalfWidth + hysteresis;
+          const halfH = occluderComp.centralNdcHalfHeight + hysteresis;
+
+          // Overlaps central viewport window while positioned in front of the plaza/storefronts
+          const overlapsCenterWindow =
+            closestCornerDist < focalDist + 1.2 &&
+            ndcMaxX > -halfW &&
+            ndcMinX < halfW &&
+            ndcMaxY > -halfH &&
+            ndcMinY < halfH;
+
+          // Overlaps Player_Rig screen silhouette while closer to camera than Player_Rig
+          const playerMargin = 0.22 + hysteresis;
+          const overlapsPlayerScreen =
+            hasPlayerNdc &&
+            closestCornerDist < playerDist + 0.5 &&
+            ndcMaxX > this.playerNdc.x - playerMargin &&
+            ndcMinX < this.playerNdc.x + playerMargin &&
+            ndcMaxY > this.playerNdc.y - 0.28 &&
+            ndcMinY < this.playerNdc.y + 0.34;
+
+          if (overlapsCenterWindow || overlapsPlayerScreen) {
+            blocksSightline = true;
+          }
+        }
+
+        if (group.occluded !== blocksSightline) {
+          group.occluded = blocksSightline;
+        }
+        for (const mesh of group.meshes) {
+          mesh.visible = !blocksSightline;
+        }
+      }
+    }
+  }
+}
+
+/**
  * RenderSyncSystem (priority 40): Synchronizes pure ECS `Transform` & `Renderable` state
  * onto Three.js `Object3D` transforms and optional `PointLight` flicker.
  */

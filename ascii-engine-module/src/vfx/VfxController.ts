@@ -141,11 +141,11 @@ export class VfxController {
 
     // 2. Subtle interactive cursor light relative to 45-degree camera focus in playground mode
     if (this.config.mode === 'playground') {
-      const anchorX = camera.position.x - 10.2;
-      const anchorZ = camera.position.z - 9.4;
-      const targetLightX = anchorX + pointer.normX * 7.2;
+      const anchorX = camera.position.x - 10.6;
+      const anchorZ = camera.position.z - 10.6;
+      const targetLightX = anchorX + pointer.normX * 7.5;
       const targetLightY = 1.85 + pointer.normY * 1.4;
-      const targetLightZ = anchorZ - pointer.normY * 5.2;
+      const targetLightZ = anchorZ - pointer.normY * 5.4;
 
       const lightLerp = 1 - Math.exp(-8.5 * dt);
       this.cursorLight.position.x += (targetLightX - this.cursorLight.position.x) * lightLerp;
@@ -161,8 +161,8 @@ export class VfxController {
       const pos = this.rainPositions;
       const speeds = this.rainSpeeds;
       const count = speeds.length;
-      const centerX = camera.position.x - 9.5;
-      const centerZ = camera.position.z - 8.5;
+      const centerX = camera.position.x - 10.0;
+      const centerZ = camera.position.z - 10.0;
       const halfX = VfxController.RAIN_SPAN_X * 0.5;
       const halfZ = VfxController.RAIN_SPAN_Z * 0.5;
       const windDriftX = -2.2 * this.config.windStrength;
