@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { EcsSystem, SystemContext } from '../animation/AnimationSystem';
-import type { World } from './World';
+import type { SidewalkBoundsComponent, World } from './World';
 import type { KeyboardInput } from '../input/KeyboardInput';
 import type { PointerInput } from '../input/PointerInput';
 
@@ -12,9 +12,60 @@ export interface SystemEntry {
 }
 
 /**
- * InputSystem (priority 10): Transfers normalized PointerInput (mouse + touch), discrete
- * click/tap ground raycasts (`NavigationTarget`), and optional KeyboardInput into ECS state.
- * Uses pre-allocated Three.js math primitives for zero per-frame heap allocations.
+ * Clamps a candidate `(x, z)` coordinate onto the walkable urban sidewalk of `Cidade_Sketchfab_model`
+ * using `THREE.MathUtils.clamp` and sidewalk furniture AABB resolution so `Player_Rig` never crosses
+ * building walls or steps off the curb into the void/roadbed.
+ */
+export function clampToSidewalkBounds(
+  x: number,
+  z: number,
+  bounds: SidewalkBoundsComponent
+): { x: number; z: number } {
+  let clampedX = THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX);
+  let clampedZ = THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZ);
+
+  // Outside the central sidewalk plaza (`x < plazaMinX` or `x > plazaMaxX`), constrain Z to the
+  // continuous East-West sidewalk promenade (`corridorMinZ .. corridorMaxZ`).
+  if (clampedX < bounds.plazaMinX || clampedX > bounds.plazaMaxX) {
+    const localMinZ =
+      clampedX >= bounds.westStorefrontMinX && clampedX <= bounds.westStorefrontMaxX
+        ? bounds.westStorefrontMinZ
+        : bounds.corridorMinZ;
+    clampedZ = THREE.MathUtils.clamp(clampedZ, localMinZ, bounds.corridorMaxZ);
+  }
+
+  // Smoothly push out of any sidewalk kiosk/planter AABBs along the shallowest penetration axis
+  for (let i = 0; i < bounds.obstacles.length; i++) {
+    const box = bounds.obstacles[i]!;
+    if (
+      clampedX > box.minX &&
+      clampedX < box.maxX &&
+      clampedZ > box.minZ &&
+      clampedZ < box.maxZ
+    ) {
+      const pushLeft = clampedX - box.minX;
+      const pushRight = box.maxX - clampedX;
+      const pushBack = clampedZ - box.minZ;
+      const pushFront = box.maxZ - clampedZ;
+      const minPush = Math.min(pushLeft, pushRight, pushBack, pushFront);
+
+      if (minPush === pushLeft) clampedX = box.minX;
+      else if (minPush === pushRight) clampedX = box.maxX;
+      else if (minPush === pushBack) clampedZ = box.minZ;
+      else clampedZ = box.maxZ;
+    }
+  }
+
+  // Final outer safety clamp via THREE.MathUtils.clamp
+  clampedX = THREE.MathUtils.clamp(clampedX, bounds.minX, bounds.maxX);
+  clampedZ = THREE.MathUtils.clamp(clampedZ, bounds.minZ, bounds.maxZ);
+
+  return { x: clampedX, z: clampedZ };
+}
+
+/**
+ * InputSystem (priority 10): Transfers `KeyboardInput` (`WASD` movement + `E` interaction)
+ * and passive `PointerInput` (ground click/tap raycasts + mascot hover) into ECS components.
  */
 export class InputSystem implements EcsSystem {
   public readonly name = 'InputSystem';
@@ -43,13 +94,13 @@ export class InputSystem implements EcsSystem {
     const keys = this.keyboard.sampleAxes();
     const hasKeyMove = Math.abs(keys.moveX) > 0.01 || Math.abs(keys.moveZ) > 0.01;
 
-    if (tap) {
+    if (tap && !hasKeyMove) {
       const navEntities = world.query('Transform', 'NavigationTarget');
       for (const id of navEntities) {
         const transform = world.getComponent(id, 'Transform')!;
         const nav = world.getComponent(id, 'NavigationTarget')!;
-        const anim = world.getComponent(id, 'AnimationState');
-        const groundY = anim ? anim.baseY : transform.y;
+        const sidewalk = world.getComponent(id, 'SidewalkBounds');
+        const groundY = sidewalk ? sidewalk.groundY : transform.y;
 
         let targetX = transform.x + tap.ndcX * 3.5;
         let targetZ = transform.z - tap.ndcY * 4.5;
@@ -67,17 +118,22 @@ export class InputSystem implements EcsSystem {
               targetZ = hit.z;
             }
           } else {
-            // Above-horizon tap: project forward along horizontal camera ray into walkable boulevard
             const dirX = this.raycaster.ray.direction.x;
             const dirZ = this.raycaster.ray.direction.z;
             const horizLen = Math.hypot(dirX, dirZ) || 1;
-            targetX = this.raycaster.ray.origin.x + (dirX / horizLen) * 14.0;
-            targetZ = this.raycaster.ray.origin.z + (dirZ / horizLen) * 14.0;
+            targetX = this.raycaster.ray.origin.x + (dirX / horizLen) * 10.0;
+            targetZ = this.raycaster.ray.origin.z + (dirZ / horizLen) * 10.0;
           }
         }
 
-        nav.targetX = Math.max(nav.minX, Math.min(nav.maxX, targetX));
-        nav.targetZ = Math.max(nav.minZ, Math.min(nav.maxZ, targetZ));
+        if (sidewalk) {
+          const clamped = clampToSidewalkBounds(targetX, targetZ, sidewalk);
+          nav.targetX = clamped.x;
+          nav.targetZ = clamped.z;
+        } else {
+          nav.targetX = THREE.MathUtils.clamp(targetX, nav.minX, nav.maxX);
+          nav.targetZ = THREE.MathUtils.clamp(targetZ, nav.minZ, nav.maxZ);
+        }
         nav.active = true;
       }
     }
@@ -86,6 +142,8 @@ export class InputSystem implements EcsSystem {
     for (const id of entities) {
       const input = world.getComponent(id, 'InputState')!;
       const nav = world.getComponent(id, 'NavigationTarget');
+      const charAnim = world.getComponent(id, 'CharacterAnimation');
+
       input.pointerX = ptr.normX;
       input.pointerY = ptr.normY;
       input.pointerActive = ptr.active;
@@ -97,15 +155,21 @@ export class InputSystem implements EcsSystem {
         nav.active = false;
       }
 
+      if (keys.interactPressed && charAnim) {
+        charAnim.interactRequested = true;
+        if (nav) nav.active = false;
+      }
+
       const rotTarget = world.getComponent(id, 'RotationTarget');
-      if (rotTarget && ptr.active && !nav) {
+      if (rotTarget && ptr.active && !nav && !charAnim) {
         const desiredYaw = ptr.normX * input.yawSensitivity + ptr.dragYaw * 0.85;
         const desiredPitch = -ptr.normY * input.pitchSensitivity + ptr.dragPitch * 0.65;
 
         rotTarget.targetYaw = desiredYaw;
-        rotTarget.targetPitch = Math.max(
+        rotTarget.targetPitch = THREE.MathUtils.clamp(
+          desiredPitch,
           -rotTarget.maxPitch,
-          Math.min(rotTarget.maxPitch, desiredPitch)
+          rotTarget.maxPitch
         );
         rotTarget.targetRoll = -ptr.normX * 0.06;
       }
@@ -119,58 +183,111 @@ export class InputSystem implements EcsSystem {
 }
 
 /**
- * PatrolSystem (priority 15): Drives autonomous aerial drones, hover-vehicles, and orbital
- * probes along deterministic Figure-8 / Lissajous paths (`PatrolPath` -> `Transform` + `AnimationState.baseY`).
+ * TrafficFlowSystem (priority 15): Drives `Carro_Grupo` along the left lateral avenue on a
+ * deterministic 30-second cycle:
+ *  - `[0s .. 8s)`: `visible = true`, straight-line constant low speed along `laneX` from `startZ`
+ *    to `endZ`, with attached headlight `SpotLight`s and `PointLight` illuminating asphalt & buildings.
+ *  - `[8s .. 30s)`: `visible = false` and headlights off (`intensity = 0`) out of frame until the
+ *    cycle restarts at `30s`.
  */
-export class PatrolSystem implements EcsSystem {
-  public readonly name = 'PatrolSystem';
+export class TrafficFlowSystem implements EcsSystem {
+  public readonly name = 'TrafficFlowSystem';
 
   public update(world: World, { elapsed }: SystemContext): void {
-    const entities = world.query('Transform', 'PatrolPath');
+    const entities = world.query('Transform', 'TrafficCycle', 'Renderable');
+
     for (const id of entities) {
       const transform = world.getComponent(id, 'Transform')!;
-      const p = world.getComponent(id, 'PatrolPath')!;
-      const t = elapsed * p.speed + p.phase;
+      const cycle = world.getComponent(id, 'TrafficCycle')!;
+      const renderable = world.getComponent(id, 'Renderable')!;
 
-      const nextX = p.originX + Math.sin(t) * p.amplitudeX;
-      const nextY = p.originY + Math.sin(t * 1.7 + p.phase) * p.amplitudeY;
-      const nextZ = p.originZ + Math.cos(t * 0.85) * p.amplitudeZ;
+      const period = Math.max(0.1, cycle.cycleDuration);
+      const activeWin = THREE.MathUtils.clamp(cycle.activeDuration, 0.05, period);
+      const rawPhase = (elapsed + cycle.timeOffset) % period;
+      const tCycle = rawPhase < 0 ? rawPhase + period : rawPhase;
 
-      if (p.faceTangent) {
-        const vx = Math.cos(t) * p.amplitudeX * p.speed;
-        const vz = -Math.sin(t * 0.85) * p.amplitudeZ * p.speed * 0.85;
-        if (Math.abs(vx) + Math.abs(vz) > 0.001) {
-          transform.rotY = Math.atan2(vx, vz);
-          transform.rotZ = -vx * 0.045;
+      const isActive = tCycle < activeWin;
+
+      if (isActive) {
+        const progress = tCycle / activeWin;
+        const currentZ = THREE.MathUtils.lerp(cycle.startZ, cycle.endZ, progress);
+
+        // Smooth 0.35s envelope at entry/exit avoids abrupt light pop while keeping steady cruise
+        const fadeIn = THREE.MathUtils.clamp(tCycle / 0.35, 0.15, 1.0);
+        const fadeOut = THREE.MathUtils.clamp((activeWin - tCycle) / 0.35, 0.15, 1.0);
+        const envelope = Math.min(fadeIn, fadeOut);
+
+        transform.x = cycle.laneX;
+        transform.y = cycle.laneY;
+        transform.z = currentZ;
+        transform.rotY = cycle.headingYaw;
+
+        renderable.object3D.visible = true;
+
+        if (cycle.headlightLeft) {
+          cycle.headlightLeft.visible = true;
+          cycle.headlightLeft.intensity = cycle.baseSpotIntensity * envelope;
         }
-      }
+        if (cycle.headlightRight) {
+          cycle.headlightRight.visible = true;
+          cycle.headlightRight.intensity = cycle.baseSpotIntensity * envelope;
+        }
+        if (cycle.streetThrowLight) {
+          cycle.streetThrowLight.visible = true;
+          cycle.streetThrowLight.intensity = cycle.basePointIntensity * envelope;
+        }
+        if (cycle.taillightGlow) {
+          cycle.taillightGlow.visible = true;
+          cycle.taillightGlow.intensity = cycle.baseTailIntensity * envelope;
+        }
+        if (cycle.headlightMaterials) {
+          for (const mat of cycle.headlightMaterials) {
+            mat.emissiveIntensity = 0.85 * envelope;
+          }
+        }
+      } else {
+        // Hidden phase (22s): keep vehicle & lights off and parked outside the camera frustum
+        renderable.object3D.visible = false;
+        transform.x = cycle.laneX;
+        transform.y = cycle.laneY;
+        transform.z = cycle.startZ - 24.0;
 
-      transform.x = nextX;
-      transform.y = nextY;
-      transform.z = nextZ;
-
-      const anim = world.getComponent(id, 'AnimationState');
-      if (anim) {
-        anim.baseY = nextY;
+        if (cycle.headlightLeft) {
+          cycle.headlightLeft.visible = false;
+          cycle.headlightLeft.intensity = 0;
+        }
+        if (cycle.headlightRight) {
+          cycle.headlightRight.visible = false;
+          cycle.headlightRight.intensity = 0;
+        }
+        if (cycle.streetThrowLight) {
+          cycle.streetThrowLight.visible = false;
+          cycle.streetThrowLight.intensity = 0;
+        }
+        if (cycle.taillightGlow) {
+          cycle.taillightGlow.visible = false;
+          cycle.taillightGlow.intensity = 0;
+        }
+        if (cycle.headlightMaterials) {
+          for (const mat of cycle.headlightMaterials) {
+            mat.emissiveIntensity = 0;
+          }
+        }
       }
     }
   }
 }
 
 /**
- * MovementRotationSystem (priority 20): Resolves click/tap `NavigationTarget` ground locomotion,
- * optional keyboard movement, bounded stage clamping, and smooth exponential `RotationTarget` yaw/pitch.
+ * MovementRotationSystem (priority 20): Resolves `WASD` planar movement on `Player_Rig`
+ * (plus click/tap `NavigationTarget`), enforces `THREE.MathUtils.clamp` sidewalk boundaries,
+ * and smoothly rotates `Player_Rig` toward its travel direction.
  */
 export class MovementRotationSystem implements EcsSystem {
   public readonly name = 'MovementRotationSystem';
-  private readonly terrainHeightFn?: (x: number, z: number) => number;
   private waypointMarker: THREE.Object3D | null;
 
-  constructor(
-    terrainHeightFn?: (x: number, z: number) => number,
-    waypointMarker: THREE.Object3D | null = null
-  ) {
-    this.terrainHeightFn = terrainHeightFn;
+  constructor(waypointMarker: THREE.Object3D | null = null) {
     this.waypointMarker = waypointMarker;
   }
 
@@ -181,20 +298,30 @@ export class MovementRotationSystem implements EcsSystem {
   public update(world: World, { dt, elapsed }: SystemContext): void {
     let activeWaypointX = 0;
     let activeWaypointZ = 0;
-    let activeWaypointY = 0.025;
+    let activeWaypointY = 0.1;
     let hasActiveWaypoint = false;
 
-    // 1. Click/tap ground navigation (`NavigationTarget`) + Velocity / optional keyboard locomotion
     const movEntities = world.query('Transform', 'Velocity');
     for (const id of movEntities) {
       const transform = world.getComponent(id, 'Transform')!;
       const vel = world.getComponent(id, 'Velocity')!;
       const input = world.getComponent(id, 'InputState');
       const nav = world.getComponent(id, 'NavigationTarget');
-      const anim = world.getComponent(id, 'AnimationState');
+      const sidewalk = world.getComponent(id, 'SidewalkBounds');
+      const charAnim = world.getComponent(id, 'CharacterAnimation');
       const rot = world.getComponent(id, 'RotationTarget');
 
-      if (input && input.moveSpeed > 0 && (input.moveX !== 0 || input.moveZ !== 0)) {
+      const isCastingLocked = Boolean(charAnim && charAnim.activeClip === 'Casting');
+
+      if (isCastingLocked) {
+        vel.vx = 0;
+        vel.vz = 0;
+        if (nav) nav.active = false;
+      } else if (
+        input &&
+        input.moveSpeed > 0 &&
+        (Math.abs(input.moveX) > 0.001 || Math.abs(input.moveZ) > 0.001)
+      ) {
         if (nav) nav.active = false;
         vel.vx = input.moveX * input.moveSpeed;
         vel.vz = input.moveZ * input.moveSpeed;
@@ -204,19 +331,12 @@ export class MovementRotationSystem implements EcsSystem {
           rot.targetPitch = 0;
           rot.targetRoll = 0;
         }
-        if (anim) {
-          anim.excitement = Math.min(1, anim.excitement + dt * 2.0);
-        }
 
         transform.x += vel.vx * dt;
-        transform.y += vel.vy * dt;
         transform.z += vel.vz * dt;
-
-        const velDamp = Math.exp(-vel.damping * dt);
-        vel.vx *= velDamp;
-        vel.vy *= velDamp;
-        vel.vz *= velDamp;
       } else if (nav && nav.active) {
+        const prevX = transform.x;
+        const prevZ = transform.z;
         const dx = nav.targetX - transform.x;
         const dz = nav.targetZ - transform.z;
         const dist = Math.hypot(dx, dz);
@@ -228,8 +348,7 @@ export class MovementRotationSystem implements EcsSystem {
           vel.vz = 0;
           nav.active = false;
         } else {
-          // Smooth arrival deceleration ramp inside the final 0.65m prevents overshoot
-          const arrivalRamp = Math.min(1, Math.max(0.30, dist / 0.65));
+          const arrivalRamp = THREE.MathUtils.clamp(dist / 0.65, 0.35, 1.0);
           const desiredSpeed = nav.moveSpeed * arrivalRamp;
           const dirX = dx / dist;
           const dirZ = dz / dist;
@@ -245,8 +364,18 @@ export class MovementRotationSystem implements EcsSystem {
             rot.targetPitch = 0;
             rot.targetRoll = 0;
           }
-          if (anim) {
-            anim.excitement = Math.min(1, anim.excitement + dt * 1.4);
+
+          if (sidewalk) {
+            const clampedStep = clampToSidewalkBounds(transform.x, transform.z, sidewalk);
+            const movedDist = Math.hypot(clampedStep.x - prevX, clampedStep.z - prevZ);
+            transform.x = clampedStep.x;
+            transform.z = clampedStep.z;
+            if (dt > 0.001 && movedDist < step * 0.15) {
+              // Stop cleanly if a sidewalk corner blocks the straight segment
+              vel.vx = 0;
+              vel.vz = 0;
+              nav.active = false;
+            }
           }
 
           const remaining = Math.hypot(nav.targetX - transform.x, nav.targetZ - transform.z);
@@ -256,52 +385,45 @@ export class MovementRotationSystem implements EcsSystem {
             vel.vx = 0;
             vel.vz = 0;
             nav.active = false;
-          } else {
+          } else if (nav.active) {
             hasActiveWaypoint = true;
             activeWaypointX = nav.targetX;
             activeWaypointZ = nav.targetZ;
           }
         }
       } else {
-        transform.x += vel.vx * dt;
-        transform.y += vel.vy * dt;
-        transform.z += vel.vz * dt;
-
         const velDamp = Math.exp(-vel.damping * dt);
         vel.vx *= velDamp;
         vel.vy *= velDamp;
         vel.vz *= velDamp;
-        if (Math.hypot(vel.vx, vel.vz) < 0.02) {
+        if (Math.hypot(vel.vx, vel.vz) < 0.03) {
           vel.vx = 0;
           vel.vz = 0;
         }
+        transform.x += vel.vx * dt;
+        transform.y += vel.vy * dt;
+        transform.z += vel.vz * dt;
       }
 
       transform.rotX += vel.angularVx * dt;
       transform.rotY += vel.angularVy * dt;
       transform.rotZ += vel.angularVz * dt;
 
-      if (nav) {
-        transform.x = Math.max(nav.minX, Math.min(nav.maxX, transform.x));
-        transform.z = Math.max(nav.minZ, Math.min(nav.maxZ, transform.z));
+      if (sidewalk) {
+        const clamped = clampToSidewalkBounds(transform.x, transform.z, sidewalk);
+        transform.x = clamped.x;
+        transform.z = clamped.z;
+        transform.y = sidewalk.groundY;
+        activeWaypointY = sidewalk.groundY + 0.025;
+      } else if (nav) {
+        transform.x = THREE.MathUtils.clamp(transform.x, nav.minX, nav.maxX);
+        transform.z = THREE.MathUtils.clamp(transform.z, nav.minZ, nav.maxZ);
       } else if (input && input.boundsRadius > 0) {
-        const dist = Math.hypot(transform.x, transform.z + 1.5);
+        const dist = Math.hypot(transform.x, transform.z);
         if (dist > input.boundsRadius) {
           const ratio = input.boundsRadius / dist;
           transform.x *= ratio;
-          transform.z = -1.5 + (transform.z + 1.5) * ratio;
-        }
-      }
-
-      if (this.terrainHeightFn && (nav || (input && input.moveSpeed > 0))) {
-        const groundY = this.terrainHeightFn(transform.x, transform.z);
-        if (anim) {
-          anim.baseY = groundY;
-        } else {
-          transform.y = groundY;
-        }
-        if (hasActiveWaypoint) {
-          activeWaypointY = this.terrainHeightFn(activeWaypointX, activeWaypointZ) + 0.025;
+          transform.z *= ratio;
         }
       }
     }
@@ -315,31 +437,25 @@ export class MovementRotationSystem implements EcsSystem {
       }
     }
 
-    // 2. Smooth yaw/pitch lerp rotation
+    // Smooth shortest-arc yaw/pitch rotation
     const rotEntities = world.query('Transform', 'RotationTarget');
     for (const id of rotEntities) {
       const transform = world.getComponent(id, 'Transform')!;
       const rot = world.getComponent(id, 'RotationTarget')!;
       const input = world.getComponent(id, 'InputState');
       const nav = world.getComponent(id, 'NavigationTarget');
-      const vel = world.getComponent(id, 'Velocity');
+      const charAnim = world.getComponent(id, 'CharacterAnimation');
 
       const damp = 1 - Math.exp(-rot.lerpSpeed * dt);
-      const isLocomoting = Boolean(
-        (nav && nav.active) || (vel && Math.hypot(vel.vx, vel.vz) > 0.05)
-      );
 
-      if (nav) {
-        // Navigable avatar faces walking heading smoothly and holds arrival orientation calmly
-        const idleBreathYaw = isLocomoting ? 0 : Math.sin(elapsed * 0.75) * 0.035;
-        const desiredYaw = rot.targetYaw + idleBreathYaw;
+      if (charAnim || nav) {
         const diffYaw = Math.atan2(
-          Math.sin(desiredYaw - transform.rotY),
-          Math.cos(desiredYaw - transform.rotY)
+          Math.sin(rot.targetYaw - transform.rotY),
+          Math.cos(rot.targetYaw - transform.rotY)
         );
         transform.rotY += diffYaw * damp;
-        transform.rotX += (rot.targetPitch - transform.rotX) * damp;
-        transform.rotZ += (rot.targetRoll - transform.rotZ) * damp;
+        transform.rotX = THREE.MathUtils.lerp(transform.rotX, rot.targetPitch, damp);
+        transform.rotZ = THREE.MathUtils.lerp(transform.rotZ, rot.targetRoll, damp);
       } else if (input && input.pointerActive) {
         const diffYaw = Math.atan2(
           Math.sin(rot.targetYaw - transform.rotY),
@@ -364,95 +480,8 @@ export class MovementRotationSystem implements EcsSystem {
 }
 
 /**
- * WindSystem (priority 25): Applies realistic nocturnal urban canyon wind gusts & harmonic
- * sway to suspended neon banners, street lanterns, overhead power cables, and hologram totems.
- */
-export class WindSystem implements EcsSystem {
-  public readonly name = 'WindSystem';
-  private windStrength: number;
-
-  constructor(windStrength = 1.0) {
-    this.windStrength = windStrength;
-  }
-
-  public setWindStrength(strength: number): void {
-    this.windStrength = Math.max(0, Math.min(3, strength));
-  }
-
-  public update(world: World, { elapsed }: SystemContext): void {
-    const entities = world.query('Transform', 'WindSway');
-    if (entities.length === 0) return;
-
-    // Traveling street-canyon gust envelope
-    const globalGust =
-      (0.65 + 0.35 * Math.sin(elapsed * 0.72) + 0.22 * Math.sin(elapsed * 1.83 + 1.1)) *
-      this.windStrength;
-
-    for (const id of entities) {
-      const transform = world.getComponent(id, 'Transform')!;
-      const sway = world.getComponent(id, 'WindSway')!;
-
-      const t = elapsed * sway.frequency + sway.phase;
-      const flutter = Math.sin(t * 2.35 + sway.phase) * 0.28;
-      const env = globalGust * sway.gustFactor;
-
-      transform.rotZ = sway.baseRotZ + (Math.sin(t) * 0.72 + flutter + 0.35) * sway.swayAmpZ * env;
-      transform.rotX = sway.baseRotX + Math.cos(t * 0.88 + sway.phase) * sway.swayAmpX * env;
-      transform.rotY = sway.baseRotY + Math.sin(t * 0.55) * sway.swayAmpZ * 0.35 * env;
-    }
-  }
-}
-
-/**
- * NeonPulseSystem (priority 35): Drives cyberpunk holographic signs, neon pylons, and
- * core reactor harmonic pulses + subtle sign glitching (`NeonBeacon` + `Renderable`).
- */
-export class NeonPulseSystem implements EcsSystem {
-  public readonly name = 'NeonPulseSystem';
-
-  public update(world: World, { elapsed }: SystemContext): void {
-    const entities = world.query('NeonBeacon');
-    for (const id of entities) {
-      const beacon = world.getComponent(id, 'NeonBeacon')!;
-      const wave =
-        Math.sin(elapsed * beacon.pulseSpeed + beacon.phase) * 0.65 +
-        Math.sin(elapsed * beacon.pulseSpeed * 2.37 + beacon.phase * 1.7) * 0.35;
-
-      // Subtle deterministic neon tube micro-flicker when glitchRate > 0
-      let glitch = 1.0;
-      if (beacon.glitchRate && beacon.glitchRate > 0) {
-        const hash = Math.sin(Math.floor(elapsed * 14 + beacon.phase * 10) * 91.7) * 43758.5453;
-        const frac = hash - Math.floor(hash);
-        if (frac < beacon.glitchRate * 0.12) {
-          glitch = 0.42;
-        }
-      }
-
-      const factor = Math.max(0.2, (1 + wave * beacon.pulseAmplitude) * glitch);
-
-      if (beacon.emissiveMaterial) {
-        beacon.emissiveIntensityCache = beacon.baseEmissiveIntensity * factor;
-        beacon.emissiveMaterial.emissiveIntensity = beacon.emissiveIntensityCache;
-      }
-
-      const renderable = world.getComponent(id, 'Renderable');
-      if (renderable?.pointLight && renderable.baseLightIntensity !== undefined) {
-        renderable.pointLight.intensity = renderable.baseLightIntensity * factor;
-      }
-    }
-  }
-}
-
-declare module './World' {
-  interface NeonBeaconComponent {
-    emissiveIntensityCache?: number;
-  }
-}
-
-/**
- * CameraFollowSystem (priority 38): Keeps the active `THREE.PerspectiveCamera` stably centered
- * on and smoothly accompanying the primary `CameraFollow` entity across the stage ground,
- * using `deltaTime` exponential damping and zero per-frame allocations.
+ * CameraFollowSystem (priority 38): Fixed-direction 3rd-person camera smoothly following (`lerp`)
+ * `Player_Rig` across the sidewalk, while respecting `autoOrbit` when toggled via `setAutoOrbit`.
  */
 export class CameraFollowSystem implements EcsSystem {
   public readonly name = 'CameraFollowSystem';
@@ -476,24 +505,71 @@ export class CameraFollowSystem implements EcsSystem {
     const id = entities[0]!;
     const transform = world.getComponent(id, 'Transform')!;
     const follow = world.getComponent(id, 'CameraFollow')!;
-    const anim = world.getComponent(id, 'AnimationState');
 
-    const anchorY = anim ? anim.baseY : transform.y;
-    const desiredX = transform.x + follow.offsetX;
-    const desiredY = anchorY + follow.offsetY;
-    const desiredZ = transform.z + follow.offsetZ;
+    let offX = follow.offsetX;
+    let offZ = follow.offsetZ;
+
+    if (follow.autoOrbit) {
+      if (dt > 0) {
+        follow.orbitAngle += follow.orbitSpeed * dt;
+      }
+      const radius = Math.hypot(follow.offsetX, follow.offsetZ);
+      const baseAngle = Math.atan2(follow.offsetX, follow.offsetZ);
+      // Gentle bounded azimuth sweep around the fixed 3rd-person street vantage so walls never occlude
+      const sweepAngle = baseAngle + Math.sin(follow.orbitAngle) * 0.34;
+      offX = Math.sin(sweepAngle) * radius;
+      offZ = Math.cos(sweepAngle) * radius;
+    } else if (follow.orbitAngle !== 0 && dt > 0) {
+      follow.orbitAngle = THREE.MathUtils.lerp(
+        follow.orbitAngle,
+        0,
+        1 - Math.exp(-3.0 * dt)
+      );
+      if (Math.abs(follow.orbitAngle) < 0.001) follow.orbitAngle = 0;
+    }
+
+    const desiredX = transform.x + offX;
+    const desiredY = transform.y + follow.offsetY;
+    const desiredZ = transform.z + offZ;
+
+    const targetLookX = transform.x + follow.lookAtOffsetX;
+    const targetLookY = transform.y + follow.lookAtOffsetY;
+    const targetLookZ = transform.z + follow.lookAtOffsetZ;
 
     if (!follow.initialized || dt <= 0) {
       this.camera.position.set(desiredX, desiredY, desiredZ);
+      follow.currentLookX = targetLookX;
+      follow.currentLookY = targetLookY;
+      follow.currentLookZ = targetLookZ;
       follow.initialized = true;
     } else {
       const alpha = 1 - Math.exp(-follow.followSharpness * dt);
-      this.camera.position.x += (desiredX - this.camera.position.x) * alpha;
-      this.camera.position.y += (desiredY - this.camera.position.y) * alpha;
-      this.camera.position.z += (desiredZ - this.camera.position.z) * alpha;
+      this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, desiredX, alpha);
+      this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, desiredY, alpha);
+      this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, desiredZ, alpha);
+
+      follow.currentLookX = THREE.MathUtils.lerp(
+        follow.currentLookX ?? targetLookX,
+        targetLookX,
+        alpha
+      );
+      follow.currentLookY = THREE.MathUtils.lerp(
+        follow.currentLookY ?? targetLookY,
+        targetLookY,
+        alpha
+      );
+      follow.currentLookZ = THREE.MathUtils.lerp(
+        follow.currentLookZ ?? targetLookZ,
+        targetLookZ,
+        alpha
+      );
     }
 
-    this.lookTarget.set(transform.x, anchorY + follow.lookAtOffsetY, transform.z);
+    this.lookTarget.set(
+      follow.currentLookX ?? targetLookX,
+      follow.currentLookY ?? targetLookY,
+      follow.currentLookZ ?? targetLookZ
+    );
     this.camera.lookAt(this.lookTarget);
     this.camera.updateMatrixWorld();
   }
@@ -501,7 +577,7 @@ export class CameraFollowSystem implements EcsSystem {
 
 /**
  * RenderSyncSystem (priority 40): Synchronizes pure ECS `Transform` & `Renderable` state
- * onto Three.js `Object3D` transforms and dynamic `PointLight` position/flicker.
+ * onto Three.js `Object3D` transforms and optional `PointLight` flicker.
  */
 export class RenderSyncSystem implements EcsSystem {
   public readonly name = 'RenderSyncSystem';
@@ -516,16 +592,13 @@ export class RenderSyncSystem implements EcsSystem {
       r.object3D.rotation.set(t.rotX, t.rotY, t.rotZ);
       r.object3D.scale.set(t.scaleX, t.scaleY, t.scaleZ);
 
-      if (r.pointLight) {
-        // Keep attached pointLights synced when patrol drones / beacons move
-        if (!world.hasComponent(id, 'NeonBeacon') && r.baseLightIntensity !== undefined) {
-          const speed = r.lightFlickerSpeed ?? 7.2;
-          const flicker =
-            1 +
-            Math.sin(elapsed * speed + id * 1.7) * 0.12 +
-            Math.sin(elapsed * speed * 2.13 + id) * 0.06;
-          r.pointLight.intensity = r.baseLightIntensity * flicker;
-        }
+      if (r.pointLight && r.baseLightIntensity !== undefined) {
+        const speed = r.lightFlickerSpeed ?? 7.2;
+        const flicker =
+          1 +
+          Math.sin(elapsed * speed + id * 1.7) * 0.08 +
+          Math.sin(elapsed * speed * 2.13 + id) * 0.04;
+        r.pointLight.intensity = r.baseLightIntensity * flicker;
       }
     }
   }

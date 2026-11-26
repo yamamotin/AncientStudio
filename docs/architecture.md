@@ -10,6 +10,8 @@ AncientStudio/
 ├── assets/
 │   ├── css/style.css                  # Layout, retrato no hero, modos de cena e brilho
 │   ├── img/eron-portrait-ascii.png    # Retrato ASCII do hero na coluna esquerda
+│   ├── models/cena_completa.glb       # Cena 3D pré-construída (Cidade_Sketchfab_model, Player_Rig, Carro_Grupo)
+│   ├── draco/                         # Decoders Draco WASM/JS self-hosted (zero CDN)
 │   ├── js/
 │   │   ├── core.js                    # Helpers, prefers-reduced-motion
 │   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
@@ -26,7 +28,7 @@ AncientStudio/
 │   └── fonts/                         # JetBrains Mono self-hosted (zero CDN)
 │
 ├── ascii-engine-module/               # Pacote TypeScript/WebGL2 3D ASCII + ECS [agente 3D]
-│   ├── src/                           # Core, ECS, World, Entities, Shaders (PCF, water, objectOutline), VFX
+│   ├── src/                           # Core, ECS, GlbSceneLoader, UrbanGlbSceneBuilder, Mascot, Shaders, VFX
 │   ├── demo/                          # Demo standalone de desenvolvimento
 │   └── integration-entry.ts           # Fachada pública exportada para o bundle do portfólio
 │

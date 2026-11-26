@@ -1,10 +1,10 @@
 /* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
    Connects:
-   1. `#ascii-scene` -> Unified Cyberpunk Boulevard scenario (`mode: 'playground'`)
+   1. `#ascii-scene` -> Pre-built 3D Urban GLB scene (`./assets/models/cena_completa.glb` + `./assets/draco/`, `mode: 'playground'`)
       with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Com chuva")
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
-   Zero framework dependencies. The playground keeps scroll-safe passive pointer input;
-   the mascot has no pointer interaction and spins on its own via a single RAF loop. */
+   Zero framework dependencies and zero external CDNs. The playground keeps scroll-safe passive pointer input
+   and WASD + E character controls; the mascot has no pointer interaction and spins on its own via a single RAF loop. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -232,6 +232,9 @@ window.TP = window.TP || {};
 
     function setAutoOrbit(enabled) {
       stopOrbit();
+      if (state.instance && typeof state.instance.setAutoOrbit === 'function' && !isMascot) {
+        state.instance.setAutoOrbit(Boolean(enabled));
+      }
       if (!enabled || state.mode !== 'engine' || isMascot) return;
 
       state.orbitTimer = window.setInterval(function () {
@@ -330,8 +333,10 @@ window.TP = window.TP || {};
             }
           : {
               mode: 'playground',
-              mapId: 'cyberpunk-citadel',
-              fov: 106,
+              modelUrl: './assets/models/cena_completa.glb',
+              dracoDecoderPath: './assets/draco/',
+              fov: 74,
+              enableKeyboard: true,
               cellSize: 8,
               autoResponsiveDensity: true,
               enableShadows: true,
