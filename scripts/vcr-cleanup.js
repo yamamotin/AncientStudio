@@ -2,312 +2,676 @@
 'use strict';
 
 /**
- * Vercel Container Registry (VCR) retention automation for AncientStudio.
+ * Vercel Container Registry (VCR) retention cleanup for AncientStudio.
  *
- * Keeps strictly the N most recent images (default & minimum: 3 -> indices [0], [1], [2])
- * in the target VCR repository ("dockerfile") of project "ancientstudio", deleting
- * only surplus images starting at index 3.
+ * Strictly retains at most the N newest images (default: 3 -> indices [0..2])
+ * in the target VCR repository ("dockerfile" in project "ancientstudio") and
+ * deletes every older surplus image starting at index [3].
  *
- * Supports two execution backends:
- *   - "cli": Vercel CLI (`vercel vcr image ls` / `vercel vcr image delete --yes`)
- *   - "api": Vercel REST API (`/v1/vcr/repository/{repo}/images`)
- *
- * Security invariants:
- *   - Never logs or echoes VERCEL_TOKEN; passes token to Vercel CLI via environment
- *     variables (never on process argv) and redacts credentials from all outputs.
- *   - Enforces keepCount >= 3 and verifies top-3 protection right before deletion.
- *   - Refuses to delete anything if any image has a missing or invalid timestamp.
+ * Zero external runtime dependencies: uses Node.js built-ins only.
+ * Supports two backends:
+ *   1. "cli"  — Official Vercel CLI (`vercel vcr image ls` / `vercel vcr image delete`)
+ *   2. "api"  — Direct Vercel REST API (`/v1/vcr/repository/{repo}/images`)
+ *   3. "auto" — Uses Vercel CLI when installed and automatically falls back to
+ *               the direct Vercel REST API if CLI invocation fails.
  */
 
-const { execFile } = require('node:child_process');
+const { execFile, spawnSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_PROJECT = 'ancientstudio';
+const DEFAULT_KEEP_COUNT = 3;
 const DEFAULT_REPOSITORY = 'dockerfile';
-const MIN_PROTECTED_IMAGES = 3;
-const DEFAULT_PAGE_LIMIT = 100;
-const MAX_PAGINATION_PAGES = 50;
-const VERCEL_API_BASE = 'https://api.vercel.com';
+const DEFAULT_PROJECT = 'ancientstudio';
+const DEFAULT_API_BASE = 'https://api.vercel.com';
+const PAGE_LIMIT = 100;
+const MAX_PAGINATION_PAGES = 100;
 
-class VcrCleanupError extends Error {
-  constructor(message, { code = 'VCR_ERROR', exitCode = 1 } = {}) {
-    super(message);
-    this.name = 'VcrCleanupError';
-    this.code = code;
-    this.exitCode = exitCode;
+function cleanInput(value) {
+  if (value === undefined || value === null) return '';
+  let text = String(value).trim();
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
+    text = text.slice(1, -1).trim();
   }
-}
-
-function redactSecrets(input, secrets = []) {
-  let text = String(input ?? '');
-  for (const secret of secrets) {
-    if (typeof secret === 'string' && secret.trim().length >= 4) {
-      text = text.split(secret).join('[REDACTED]');
-      text = text.split(encodeURIComponent(secret)).join('[REDACTED]');
-    }
-  }
-  text = text.replace(/(Authorization:\s*Bearer\s+)[^\s"']+/gi, '$1[REDACTED]');
-  text = text.replace(/(--token(?:=|\s+))[^\s"']+/gi, '$1[REDACTED]');
   return text;
 }
 
-function parseBooleanFlag(value) {
+function cleanToken(value) {
+  // Strip accidental CR/LF or surrounding quotes/spaces pasted into secrets
+  // so HTTP Authorization headers never throw header-character TypeErrors.
+  return cleanInput(value).replace(/[\r\n\0-\x1f\x7f]+/g, '');
+}
+
+function redactSecrets(message, secrets = []) {
+  let output = String(message ?? '');
+  for (const rawSecret of secrets) {
+    const secret = cleanToken(rawSecret);
+    if (secret && secret.length >= 4) {
+      output = output.split(secret).join('[REDACTED]');
+    }
+    const rawTrimmed = String(rawSecret ?? '').trim();
+    if (rawTrimmed && rawTrimmed.length >= 4 && rawTrimmed !== secret) {
+      output = output.split(rawTrimmed).join('[REDACTED]');
+    }
+  }
+  return output
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/(--token(?:=|\s+))\S+/gi, '$1[REDACTED]')
+    .replace(/\bvc[pa]_[A-Za-z0-9_]+\b/g, '[REDACTED]');
+}
+
+function parseBoolean(value, fallback = false) {
   if (typeof value === 'boolean') return value;
-  if (value === undefined || value === null || value === '') return false;
+  if (value === undefined || value === null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on'].includes(normalized);
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
-function parseCliArgs(argv = [], env = process.env) {
-  const options = {
-    repository: env.VCR_REPOSITORY || DEFAULT_REPOSITORY,
-    project: env.VERCEL_PROJECT_ID || env.VCR_PROJECT || DEFAULT_PROJECT,
-    scope: env.VERCEL_ORG_ID || env.VERCEL_TEAM_ID || env.VCR_SCOPE || '',
-    token: env.VERCEL_TOKEN || '',
-    keepCount: env.VCR_KEEP_COUNT !== undefined && env.VCR_KEEP_COUNT !== ''
-      ? Number(env.VCR_KEEP_COUNT)
-      : MIN_PROTECTED_IMAGES,
-    dryRun: parseBooleanFlag(env.DRY_RUN),
-    backend: (env.VCR_BACKEND || 'auto').trim().toLowerCase(),
-    vercelBin: env.VERCEL_BIN || 'vercel',
-    apiBaseUrl: (env.VERCEL_API_BASE_URL || VERCEL_API_BASE).replace(/\/+$/, ''),
-    help: false
-  };
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const nextValue = () => {
-      if (i + 1 >= argv.length) {
-        throw new VcrCleanupError(`Missing value for option ${arg}`, {
-          code: 'INVALID_ARGS',
-          exitCode: 2
-        });
-      }
-      i += 1;
-      return argv[i];
-    };
-
-    if (arg === '--help' || arg === '-h') {
-      options.help = true;
-    } else if (arg === '--dry-run' || arg === '-n') {
-      options.dryRun = true;
-    } else if (arg === '--apply') {
-      options.dryRun = false;
-    } else if (arg === '--repository' || arg === '-r') {
-      options.repository = nextValue();
-    } else if (arg.startsWith('--repository=')) {
-      options.repository = arg.slice('--repository='.length);
-    } else if (arg === '--project' || arg === '-p') {
-      options.project = nextValue();
-    } else if (arg.startsWith('--project=')) {
-      options.project = arg.slice('--project='.length);
-    } else if (arg === '--scope' || arg === '-S') {
-      options.scope = nextValue();
-    } else if (arg.startsWith('--scope=')) {
-      options.scope = arg.slice('--scope='.length);
-    } else if (arg === '--keep' || arg === '-k') {
-      options.keepCount = Number(nextValue());
-    } else if (arg.startsWith('--keep=')) {
-      options.keepCount = Number(arg.slice('--keep='.length));
-    } else if (arg === '--backend' || arg === '-b') {
-      options.backend = nextValue().trim().toLowerCase();
-    } else if (arg.startsWith('--backend=')) {
-      options.backend = arg.slice('--backend='.length).trim().toLowerCase();
-    } else {
-      throw new VcrCleanupError(`Unknown argument: ${arg}`, {
-        code: 'INVALID_ARGS',
-        exitCode: 2
-      });
-    }
+function parseKeepCount(value, fallback = DEFAULT_KEEP_COUNT) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return fallback;
   }
-
-  return options;
-}
-
-function validateOptions(options) {
-  if (!options.repository || !String(options.repository).trim()) {
-    throw new VcrCleanupError('Repository name must not be empty.', {
-      code: 'INVALID_ARGS',
-      exitCode: 2
-    });
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid KEEP_COUNT "${value}": expected a positive integer >= 1 (default ${DEFAULT_KEEP_COUNT}).`);
   }
-  if (!options.project || !String(options.project).trim()) {
-    throw new VcrCleanupError('Project name or ID must not be empty.', {
-      code: 'INVALID_ARGS',
-      exitCode: 2
-    });
-  }
-  if (!Number.isInteger(options.keepCount) || options.keepCount < MIN_PROTECTED_IMAGES) {
-    throw new VcrCleanupError(
-      `Invalid keepCount (${options.keepCount}): retention must be an integer >= ${MIN_PROTECTED_IMAGES} so the 3 newest images are never deleted.`,
-      { code: 'INVALID_RETENTION', exitCode: 2 }
-    );
-  }
-  if (!['auto', 'cli', 'api'].includes(options.backend)) {
-    throw new VcrCleanupError(
-      `Invalid backend "${options.backend}". Expected one of: auto, cli, api.`,
-      { code: 'INVALID_ARGS', exitCode: 2 }
-    );
-  }
-  if (!options.token || !String(options.token).trim()) {
-    throw new VcrCleanupError(
-      'Missing VERCEL_TOKEN environment variable. Configure VERCEL_TOKEN with access to project "ancientstudio".',
-      { code: 'MISSING_TOKEN', exitCode: 2 }
-    );
-  }
-}
-
-function parseTimestampMs(rawValue, imageId) {
-  if (rawValue === undefined || rawValue === null || rawValue === '') {
-    throw new VcrCleanupError(
-      `Refusing to prune images: image "${imageId}" is missing a creation timestamp.`,
-      { code: 'MISSING_TIMESTAMP', exitCode: 1 }
-    );
-  }
-
-  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
-    // Normalize Unix seconds vs milliseconds
-    return rawValue < 1e11 ? Math.trunc(rawValue * 1000) : Math.trunc(rawValue);
-  }
-
-  const text = String(rawValue).trim();
-  if (/^\d+$/.test(text)) {
-    const numeric = Number(text);
-    if (Number.isFinite(numeric)) {
-      return numeric < 1e11 ? Math.trunc(numeric * 1000) : Math.trunc(numeric);
-    }
-  }
-
-  const parsed = Date.parse(text);
-  if (Number.isNaN(parsed)) {
-    throw new VcrCleanupError(
-      `Refusing to prune images: image "${imageId}" has an unparseable timestamp ("${text}").`,
-      { code: 'INVALID_TIMESTAMP', exitCode: 1 }
-    );
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid KEEP_COUNT "${value}": expected a positive integer >= 1 (default ${DEFAULT_KEEP_COUNT}).`);
   }
   return parsed;
 }
 
-function normalizeImageRecord(raw, originalIndex) {
+function parseCliArgs(argv) {
+  const options = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--dry-run') {
+      options.dryRun = true;
+    } else if (arg === '--no-dry-run') {
+      options.dryRun = false;
+    } else if (arg === '--allow-missing-token') {
+      options.allowMissingToken = true;
+    } else if (arg.startsWith('--keep=')) {
+      options.keepCount = arg.slice('--keep='.length);
+    } else if (arg === '--keep' && i + 1 < argv.length) {
+      options.keepCount = argv[++i];
+    } else if (arg.startsWith('--repository=')) {
+      options.repository = arg.slice('--repository='.length);
+    } else if (arg === '--repository' && i + 1 < argv.length) {
+      options.repository = argv[++i];
+    } else if (arg.startsWith('--project=')) {
+      options.project = arg.slice('--project='.length);
+    } else if (arg === '--project' && i + 1 < argv.length) {
+      options.project = argv[++i];
+    } else if (arg.startsWith('--scope=')) {
+      options.scope = arg.slice('--scope='.length);
+    } else if (arg === '--scope' && i + 1 < argv.length) {
+      options.scope = argv[++i];
+    } else if (arg.startsWith('--backend=')) {
+      options.backend = arg.slice('--backend='.length);
+    } else if (arg === '--backend' && i + 1 < argv.length) {
+      options.backend = argv[++i];
+    } else if (arg === '--help' || arg === '-h') {
+      options.help = true;
+    } else {
+      throw new Error(`Unknown CLI argument: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function parseTimestamp(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Support both Unix seconds and Unix milliseconds.
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  const str = String(value).trim();
+  if (/^\d+$/.test(str)) {
+    const num = Number(str);
+    if (Number.isFinite(num)) {
+      return num < 1e12 ? Math.round(num * 1000) : Math.round(num);
+    }
+  }
+  const parsed = Date.parse(str);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function shortDigest(digest) {
+  const clean = cleanInput(digest);
+  if (!clean) return '-';
+  if (clean.startsWith('sha256:')) {
+    return `sha256:${clean.slice('sha256:'.length, 'sha256:'.length + 12)}`;
+  }
+  return clean.slice(0, 12);
+}
+
+/**
+ * Normalizes a raw image entry returned by `vercel vcr image ls --json` or
+ * the Vercel VCR REST API into a consistent shape.
+ */
+function normalizeImage(raw) {
   if (!raw || typeof raw !== 'object') {
-    throw new VcrCleanupError(
-      `Invalid image record at index ${originalIndex}: expected object.`,
-      { code: 'INVALID_IMAGE_RECORD', exitCode: 1 }
-    );
+    throw new Error('Invalid VCR image entry: expected an object.');
   }
-  const id = String(raw.id || raw.imageId || '').trim();
+
+  const id = cleanInput(raw.id || raw.imageId || raw.digest || raw.manifestDigest);
   if (!id) {
-    throw new VcrCleanupError(
-      `Invalid image record at index ${originalIndex}: missing image id.`,
-      { code: 'MISSING_IMAGE_ID', exitCode: 1 }
-    );
+    throw new Error('Invalid VCR image entry: missing image identifier (id/digest).');
   }
-  const rawTimestamp = raw.createdAt ?? raw.pushedAt ?? raw.updatedAt;
-  const createdAtMs = parseTimestampMs(rawTimestamp, id);
+
+  const digest = cleanInput(raw.manifestDigest || raw.digest);
+  const rawTimestamp =
+    raw.createdAt ??
+    raw.created_at ??
+    raw.uploadedAt ??
+    raw.pushedAt ??
+    raw.updatedAt ??
+    raw.created ??
+    null;
+
+  const createdAtMs = parseTimestamp(rawTimestamp);
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.map((t) => String(t)).filter(Boolean)
+    : typeof raw.tag === 'string' && raw.tag
+      ? [raw.tag]
+      : [];
+
+  const status = cleanInput(raw.status || raw.state).toLowerCase() || 'unknown';
+  const sizeBytes =
+    typeof raw.sizeInBytes === 'number'
+      ? raw.sizeInBytes
+      : typeof raw.sizeBytes === 'number'
+        ? raw.sizeBytes
+        : typeof raw.size === 'number'
+          ? raw.size
+          : null;
 
   return {
     id,
+    digest,
     createdAtMs,
-    createdAtIso: new Date(createdAtMs).toISOString(),
-    manifestDigest: raw.manifestDigest || raw.digest || null,
-    tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
-    status: raw.status ? String(raw.status) : 'unknown',
-    kind: raw.kind ? String(raw.kind) : 'image',
-    sizeInBytes: typeof raw.sizeInBytes === 'number' ? raw.sizeInBytes : null,
-    originalIndex
+    createdAtIso: createdAtMs !== null ? new Date(createdAtMs).toISOString() : 'unknown',
+    tags,
+    status,
+    sizeBytes,
+    raw
   };
 }
 
+/**
+ * Deduplicates normalized images by `id` (keeping the newest metadata if page
+ * boundaries overlap during concurrent pushes) and sorts strictly newest-first.
+ */
 function sortImagesNewestFirst(rawImages) {
   if (!Array.isArray(rawImages)) {
-    throw new VcrCleanupError('Expected images list to be an array.', {
-      code: 'INVALID_IMAGE_LIST',
-      exitCode: 1
-    });
+    throw new Error('Expected image list to be an array.');
   }
-
-  const deduplicated = [];
-  const seenIds = new Set();
-  for (let i = 0; i < rawImages.length; i += 1) {
-    const normalized = normalizeImageRecord(rawImages[i], i);
-    if (!seenIds.has(normalized.id)) {
-      seenIds.add(normalized.id);
-      deduplicated.push(normalized);
+  const byId = new Map();
+  for (const item of rawImages) {
+    const normalized = normalizeImage(item);
+    const existing = byId.get(normalized.id);
+    if (
+      !existing ||
+      (normalized.createdAtMs !== null &&
+        (existing.createdAtMs === null || normalized.createdAtMs > existing.createdAtMs))
+    ) {
+      byId.set(normalized.id, normalized);
     }
   }
 
-  return deduplicated.sort((a, b) => {
-    if (b.createdAtMs !== a.createdAtMs) {
+  return Array.from(byId.values()).sort((a, b) => {
+    const aHasTime = a.createdAtMs !== null;
+    const bHasTime = b.createdAtMs !== null;
+    if (aHasTime && bHasTime && b.createdAtMs !== a.createdAtMs) {
       return b.createdAtMs - a.createdAtMs;
     }
-    if (a.originalIndex !== b.originalIndex) {
-      return a.originalIndex - b.originalIndex;
+    if (aHasTime !== bHasTime) {
+      // Valid timestamps rank ahead of missing/unparseable timestamps.
+      return aHasTime ? -1 : 1;
     }
+    // Deterministic tie-breaker for identical timestamps.
     return b.id.localeCompare(a.id);
   });
 }
 
-function planRetention(rawImages, keepCount = MIN_PROTECTED_IMAGES) {
-  if (!Number.isInteger(keepCount) || keepCount < MIN_PROTECTED_IMAGES) {
-    throw new VcrCleanupError(
-      `keepCount must be an integer >= ${MIN_PROTECTED_IMAGES} (received ${keepCount}).`,
-      { code: 'INVALID_RETENTION', exitCode: 2 }
-    );
-  }
-
+/**
+ * Strict retention planner:
+ *   1. Sorts images from newest [0] to oldest [N - 1].
+ *   2. Preserves strictly indices [0 .. keepCount - 1] (default [0], [1], [2]).
+ *   3. Marks every image from index [keepCount] onward (default [3..]) for deletion.
+ */
+function planRetention(rawImages, keepCount = DEFAULT_KEEP_COUNT) {
+  const keepLimit = parseKeepCount(keepCount);
   const sorted = sortImagesNewestFirst(rawImages);
-  const toKeep = sorted.slice(0, keepCount);
-  const toDelete = sorted.slice(keepCount);
+  const keep = [];
+  const remove = [];
 
-  assertRetentionSafety(sorted, toKeep, toDelete, keepCount);
+  sorted.forEach((image, index) => {
+    if (index < keepLimit) {
+      keep.push({ ...image, rank: index, reason: `recent#${index + 1}` });
+      return;
+    }
+    remove.push({ ...image, rank: index, reason: `surplus#${index + 1}` });
+  });
 
   return {
     total: sorted.length,
-    keepCount,
+    keepLimit,
     sorted,
-    toKeep,
-    toDelete
+    keep,
+    remove
   };
 }
 
-function assertRetentionSafety(sorted, toKeep, toDelete, keepCount) {
-  if (keepCount < MIN_PROTECTED_IMAGES) {
-    throw new VcrCleanupError(
-      `Safety invariant violated: keepCount (${keepCount}) < ${MIN_PROTECTED_IMAGES}.`,
-      { code: 'SAFETY_INVARIANT', exitCode: 1 }
+function extractImagesFromPayload(payload) {
+  if (Array.isArray(payload)) {
+    return { images: payload, nextCursor: null };
+  }
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Unexpected VCR list response: payload is not a JSON object or array.');
+  }
+
+  const list =
+    (Array.isArray(payload.images) && payload.images) ||
+    (Array.isArray(payload.items) && payload.items) ||
+    (Array.isArray(payload.data) && payload.data) ||
+    (payload.data && Array.isArray(payload.data.images) && payload.data.images) ||
+    null;
+
+  if (!list) {
+    throw new Error(
+      `Unexpected VCR list response keys (${Object.keys(payload).join(', ') || 'none'}): missing "images" array.`
     );
   }
 
-  if (sorted.length <= MIN_PROTECTED_IMAGES && toDelete.length > 0) {
-    throw new VcrCleanupError(
-      `Safety invariant violated: attempted to delete images when total (${sorted.length}) <= ${MIN_PROTECTED_IMAGES}.`,
-      { code: 'SAFETY_INVARIANT', exitCode: 1 }
+  const nextCursor =
+    payload.pagination?.next ??
+    payload.nextCursor ??
+    payload.cursor ??
+    payload.data?.nextCursor ??
+    null;
+
+  return {
+    images: list,
+    nextCursor: nextCursor !== null && nextCursor !== undefined && String(nextCursor).trim() !== ''
+      ? String(nextCursor).trim()
+      : null
+  };
+}
+
+function extractJsonDocument(stdout) {
+  const trimmed = String(stdout || '').trim();
+  if (!trimmed) {
+    throw new Error('Vercel CLI returned empty output when JSON was expected.');
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    // Strip any leading CLI update/deprecation banners printed on stdout.
+    const firstBrace = trimmed.indexOf('{');
+    const firstBracket = trimmed.indexOf('[');
+    const candidates = [firstBrace, firstBracket].filter((idx) => idx >= 0);
+    if (candidates.length > 0) {
+      const start = Math.min(...candidates);
+      return JSON.parse(trimmed.slice(start));
+    }
+    throw new Error(`Failed to parse Vercel CLI JSON output: ${trimmed.slice(0, 240)}`);
+  }
+}
+
+function hasVercelCli(vercelBin = 'vercel') {
+  const probe = spawnSync(vercelBin, ['--version'], {
+    stdio: 'ignore',
+    timeout: 10_000
+  });
+  return !probe.error && probe.status === 0;
+}
+
+/**
+ * Adapter 1: Official Vercel CLI (`vercel vcr image ls` / `vercel vcr image delete`).
+ * Verified against `vercel@66.6.0` (`packages/cli/src/commands/vcr/image/{ls,rm}.ts`).
+ */
+function createCliAdapter({
+  token,
+  scope,
+  project,
+  repository,
+  vercelBin = 'vercel',
+  execFileImpl = execFileAsync
+}) {
+  const sanitizedToken = cleanToken(token);
+  const cleanScope = cleanInput(scope);
+  const cleanProject = cleanInput(project);
+  const cleanRepo = cleanInput(repository);
+
+  const env = {
+    ...process.env,
+    VERCEL_TOKEN: sanitizedToken,
+    FORCE_COLOR: '0',
+    NO_COLOR: '1',
+    CI: '1'
+  };
+  if (cleanScope) {
+    env.VERCEL_ORG_ID = cleanScope;
+  }
+  if (cleanProject) {
+    env.VERCEL_PROJECT_ID = cleanProject;
+  }
+
+  function commonFlags() {
+    const flags = [];
+    if (cleanProject) {
+      flags.push('--project', cleanProject);
+    }
+    if (cleanScope) {
+      flags.push('--scope', cleanScope);
+    }
+    // Keep token strictly in env.VERCEL_TOKEN so it never appears in argv / ps.
+    flags.push('--non-interactive', '--no-color');
+    return flags;
+  }
+
+  async function runVercel(args) {
+    try {
+      const { stdout } = await execFileImpl(vercelBin, args, {
+        env,
+        timeout: 60_000,
+        maxBuffer: 10 * 1024 * 1024
+      });
+      return stdout;
+    } catch (error) {
+      const safeStderr = redactSecrets(error?.stderr || '', [token, sanitizedToken]).trim();
+      const safeStdout = redactSecrets(error?.stdout || '', [token, sanitizedToken]).trim();
+      const safeMsg = redactSecrets(error?.message || 'unknown CLI error', [token, sanitizedToken]);
+      const details = safeStderr || safeStdout || safeMsg;
+      const safeArgs = redactSecrets(args.join(' '), [token, sanitizedToken]);
+      const wrapped = new Error(`Vercel CLI failed (${vercelBin} ${safeArgs}): ${details}`);
+      wrapped.code = error?.code || 'VERCEL_CLI_ERROR';
+      throw wrapped;
+    }
+  }
+
+  return {
+    name: 'cli',
+    async listImages() {
+      const collected = [];
+      const seenCursors = new Set();
+      let cursor = null;
+
+      for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+        const args = ['vcr', 'image', 'ls', cleanRepo, '--json', '--limit', String(PAGE_LIMIT)];
+        if (cursor) {
+          // `vercel@66.6.0` uses `--next` (`--cursor` is deprecated).
+          args.push('--next', cursor);
+        }
+        args.push(...commonFlags());
+        const stdout = await runVercel(args);
+        const parsed = extractJsonDocument(stdout);
+        const { images, nextCursor } = extractImagesFromPayload(parsed);
+        collected.push(...images);
+        if (!nextCursor || images.length === 0 || seenCursors.has(nextCursor)) {
+          break;
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+
+      return collected;
+    },
+    async deleteImage(image) {
+      const args = [
+        'vcr',
+        'image',
+        'delete',
+        cleanRepo,
+        image.id,
+        '--yes',
+        '--json',
+        ...commonFlags()
+      ];
+      await runVercel(args);
+    }
+  };
+}
+
+/**
+ * Adapter 2: Direct Vercel REST API (`/v1/vcr/repository/{repo}/images`).
+ * Matches the endpoints in `packages/cli/src/commands/vcr/utils/paths.ts`.
+ */
+function createApiAdapter({
+  token,
+  scope,
+  project,
+  repository,
+  apiBase = DEFAULT_API_BASE,
+  fetchImpl = globalThis.fetch
+}) {
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Global fetch is unavailable; Node.js >= 18 is required for API mode.');
+  }
+
+  const sanitizedToken = cleanToken(token);
+  const cleanScope = cleanInput(scope);
+  const cleanProject = cleanInput(project);
+  const cleanRepo = cleanInput(repository);
+  const normalizedBase = cleanInput(apiBase).replace(/\/+$/, '') || DEFAULT_API_BASE;
+
+  async function apiRequest(method, urlPath, query = {}, { allowStatuses = [] } = {}) {
+    const url = new URL(`${normalizedBase}${urlPath}`);
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
+
+    let response;
+    try {
+      response = await fetchImpl(url.toString(), {
+        method,
+        headers: {
+          Authorization: `Bearer ${sanitizedToken}`,
+          Accept: 'application/json'
+        }
+      });
+    } catch (networkError) {
+      const safeMsg = redactSecrets(networkError?.message || networkError, [token, sanitizedToken]);
+      const err = new Error(`Vercel API network failure (${method} ${url.pathname}): ${safeMsg}`);
+      err.code = 'VERCEL_API_NETWORK_ERROR';
+      throw err;
+    }
+
+    const text = await response.text();
+    let json = null;
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch (_) {
+        json = null;
+      }
+    }
+
+    if (allowStatuses.includes(response.status)) {
+      return { status: response.status, ok: response.ok, data: json };
+    }
+
+    if (!response.ok) {
+      const apiMessage =
+        json?.error?.message ||
+        json?.message ||
+        text.slice(0, 240) ||
+        response.statusText ||
+        `HTTP ${response.status}`;
+      const safeMsg = redactSecrets(apiMessage, [token, sanitizedToken]);
+      const err = new Error(`Vercel API ${method} ${url.pathname} failed (${response.status}): ${safeMsg}`);
+      err.status = response.status;
+      err.code = json?.error?.code || `HTTP_${response.status}`;
+      throw err;
+    }
+
+    return { status: response.status, ok: true, data: json };
+  }
+
+  let resolvedScopePromise = null;
+
+  async function discoverProjectAcrossTeams(projectKey) {
+    const candidateTeamIds = [];
+    const seenTeams = new Set();
+    const pushTeam = (id) => {
+      const clean = cleanInput(id);
+      if (clean && !seenTeams.has(clean)) {
+        seenTeams.add(clean);
+        candidateTeamIds.push(clean);
+      }
+    };
+
+    const userRes = await apiRequest('GET', '/v2/user', {}, { allowStatuses: [400, 401, 403, 404] });
+    if (userRes.ok && userRes.data?.user?.defaultTeamId) {
+      pushTeam(userRes.data.user.defaultTeamId);
+    }
+
+    const teamsRes = await apiRequest(
+      'GET',
+      '/v2/teams',
+      { limit: 100 },
+      { allowStatuses: [400, 401, 403, 404] }
     );
+    if (teamsRes.ok && Array.isArray(teamsRes.data?.teams)) {
+      // Prioritize a team matching `cleanScope` by slug or id when provided.
+      const sortedTeams = [...teamsRes.data.teams].sort((a, b) => {
+        const aMatch = cleanScope && (a.id === cleanScope || a.slug === cleanScope) ? -1 : 0;
+        const bMatch = cleanScope && (b.id === cleanScope || b.slug === cleanScope) ? -1 : 0;
+        return aMatch - bMatch;
+      });
+      for (const team of sortedTeams) {
+        pushTeam(team?.id);
+      }
+    }
+
+    for (const candidateTeamId of candidateTeamIds) {
+      const probe = await apiRequest(
+        'GET',
+        `/v9/projects/${encodeURIComponent(projectKey)}`,
+        { teamId: candidateTeamId },
+        { allowStatuses: [400, 403, 404] }
+      );
+      if (probe.ok && probe.data) {
+        return {
+          teamId: cleanInput(probe.data.accountId) || candidateTeamId,
+          projectId: cleanInput(probe.data.id) || projectKey
+        };
+      }
+    }
+
+    return null;
   }
 
-  const protectedTopThreeIds = new Set(
-    sorted.slice(0, MIN_PROTECTED_IMAGES).map((img) => img.id)
-  );
-  const keepIds = new Set(toKeep.map((img) => img.id));
-  const oldestKeptMs = toKeep.length > 0 ? toKeep[toKeep.length - 1].createdAtMs : Infinity;
+  async function resolveScope() {
+    if (resolvedScopePromise) {
+      return resolvedScopePromise;
+    }
+    resolvedScopePromise = (async () => {
+      // Fast path when canonical IDs (`team_...` and `prj_...`) are already supplied.
+      if (cleanScope.startsWith('team_') && cleanProject.startsWith('prj_')) {
+        return { teamId: cleanScope, projectId: cleanProject };
+      }
 
-  for (const candidate of toDelete) {
-    if (protectedTopThreeIds.has(candidate.id) || keepIds.has(candidate.id)) {
-      throw new VcrCleanupError(
-        `Safety invariant violated: protected image "${candidate.id}" appeared in deletion set.`,
-        { code: 'SAFETY_INVARIANT', exitCode: 1 }
+      if (!cleanProject) {
+        return { teamId: cleanScope, projectId: '' };
+      }
+
+      // 1) Probe `/v9/projects/{project}` with provided `scope` (or default token scope).
+      const directQuery = cleanScope
+        ? cleanScope.startsWith('team_')
+          ? { teamId: cleanScope }
+          : { slug: cleanScope }
+        : {};
+
+      const directRes = await apiRequest(
+        'GET',
+        `/v9/projects/${encodeURIComponent(cleanProject)}`,
+        directQuery,
+        { allowStatuses: [400, 403, 404] }
       );
-    }
-    if (candidate.createdAtMs > oldestKeptMs) {
-      throw new VcrCleanupError(
-        `Safety invariant violated: candidate "${candidate.id}" (${candidate.createdAtIso}) is newer than kept image.`,
-        { code: 'SAFETY_INVARIANT', exitCode: 1 }
+      if (directRes.ok && directRes.data) {
+        return {
+          teamId: cleanInput(directRes.data.accountId) || cleanScope,
+          projectId: cleanInput(directRes.data.id) || cleanProject
+        };
+      }
+
+      // 2) Fallback: discover across accessible Northstar teams (`/v2/user` + `/v2/teams`).
+      const discovered = await discoverProjectAcrossTeams(cleanProject);
+      if (discovered) {
+        return discovered;
+      }
+
+      throw new Error(
+        `Could not resolve Vercel project "${cleanProject}"${cleanScope ? ` under scope "${cleanScope}"` : ''}. ` +
+          'Verify VERCEL_TOKEN permissions, VERCEL_ORG_ID (team_...), and VERCEL_PROJECT_ID (prj_... or project name).'
       );
-    }
+    })();
+    return resolvedScopePromise;
   }
+
+  return {
+    name: 'api',
+    async listImages() {
+      const { teamId, projectId } = await resolveScope();
+      const collected = [];
+      const seenCursors = new Set();
+      let cursor = null;
+
+      for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+        const { data } = await apiRequest(
+          'GET',
+          `/v1/vcr/repository/${encodeURIComponent(cleanRepo)}/images`,
+          {
+            teamId,
+            projectId,
+            limit: PAGE_LIMIT,
+            cursor
+          }
+        );
+        const { images, nextCursor } = extractImagesFromPayload(data || {});
+        collected.push(...images);
+        if (!nextCursor || images.length === 0 || seenCursors.has(nextCursor)) {
+          break;
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+
+      return collected;
+    },
+    async deleteImage(image) {
+      const { teamId, projectId } = await resolveScope();
+      try {
+        await apiRequest(
+          'DELETE',
+          `/v1/vcr/repository/${encodeURIComponent(cleanRepo)}/images/${encodeURIComponent(image.id)}`,
+          {
+            teamId,
+            projectId
+          }
+        );
+      } catch (error) {
+        // 404 means the image was already removed concurrently — idempotent success.
+        if (error.status === 404) {
+          return;
+        }
+        throw error;
+      }
+    }
+  };
 }
 
 function formatBytes(bytes) {
@@ -315,745 +679,322 @@ function formatBytes(bytes) {
     return '-';
   }
   if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let unitIdx = 0;
-  while (value >= 1024 && unitIdx < units.length - 1) {
-    value /= 1024;
-    unitIdx += 1;
-  }
-  return `${value.toFixed(1)} ${units[unitIdx]}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-function formatShortDigest(digest) {
-  if (!digest) return '-';
-  return String(digest).replace(/^sha256:/, '').slice(0, 12);
-}
-
-async function fetchVercelJson(fetchImpl, url, { method = 'GET', token, secrets = [] }) {
-  let response;
+function writeStepSummary(summaryPath, lines) {
+  if (!summaryPath) return;
   try {
-    response = await fetchImpl(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json'
+    appendFileSync(summaryPath, `${lines.join('\n')}\n`, 'utf8');
+  } catch (_) {
+    // Non-fatal outside GitHub Actions runners.
+  }
+}
+
+function buildMissingTokenGuidance({ project, repository }) {
+  return [
+    `VERCEL_TOKEN is not configured for ${project}/${repository}.`,
+    'Configure Repository Secrets in GitHub -> Settings -> Secrets and variables -> Actions:',
+    '  - VERCEL_TOKEN (required): Vercel access token with access to the AncientStudio team/project.',
+    '  - VERCEL_ORG_ID (recommended): Northstar Team ID (e.g. team_...) or team slug.',
+    '  - VERCEL_PROJECT_ID (optional): Project ID (e.g. prj_...) or project name ("ancientstudio").'
+  ];
+}
+
+async function runCleanup(rawOptions = {}) {
+  const rawToken = rawOptions.token ?? process.env.VERCEL_TOKEN ?? '';
+  const token = cleanToken(rawToken);
+  const scope = cleanInput(
+    rawOptions.scope ?? process.env.VERCEL_ORG_ID ?? process.env.VERCEL_TEAM_ID ?? ''
+  );
+  const project = cleanInput(
+    rawOptions.project ??
+      process.env.VERCEL_PROJECT_ID ??
+      process.env.VERCEL_PROJECT ??
+      DEFAULT_PROJECT
+  ) || DEFAULT_PROJECT;
+  const repository = cleanInput(
+    rawOptions.repository ?? process.env.VCR_REPOSITORY ?? DEFAULT_REPOSITORY
+  ) || DEFAULT_REPOSITORY;
+  const keepCount = parseKeepCount(rawOptions.keepCount ?? process.env.KEEP_COUNT ?? DEFAULT_KEEP_COUNT);
+  const dryRun = parseBoolean(rawOptions.dryRun ?? process.env.DRY_RUN, false);
+  const allowMissingToken = parseBoolean(
+    rawOptions.allowMissingToken ?? process.env.ALLOW_MISSING_TOKEN,
+    false
+  );
+  const backend = cleanInput(rawOptions.backend ?? process.env.VCR_BACKEND ?? 'auto').toLowerCase() || 'auto';
+  const summaryPath = rawOptions.summaryPath ?? process.env.GITHUB_STEP_SUMMARY ?? '';
+  const log = rawOptions.logger || ((msg) => console.log(msg));
+  const warn = rawOptions.warnLogger || ((msg) => console.warn(msg));
+
+  if (!['auto', 'cli', 'api'].includes(backend)) {
+    throw new Error(`Invalid VCR backend "${backend}": expected "auto", "cli", or "api".`);
+  }
+
+  if (!rawOptions.adapter && !token) {
+    const guidanceLines = buildMissingTokenGuidance({ project, repository });
+    if (allowMissingToken) {
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        log(`::warning::${guidanceLines[0]} Automatic VCR cleanup skipped until VERCEL_TOKEN is added.`);
       }
-    });
-  } catch (err) {
-    throw new VcrCleanupError(
-      `Network error communicating with Vercel API: ${redactSecrets(err.message || err, secrets)}`,
-      { code: 'NETWORK_ERROR', exitCode: 1 }
-    );
-  }
-
-  const rawBody = await response.text();
-  let parsed = null;
-  if (rawBody) {
-    try {
-      parsed = JSON.parse(rawBody);
-    } catch {
-      parsed = null;
+      for (const line of guidanceLines) {
+        warn(`[vcr-cleanup] WARN: ${line}`);
+      }
+      writeStepSummary(summaryPath, [
+        '### VCR Image Retention Cleanup (Skipped — Missing `VERCEL_TOKEN`)',
+        `- **Target**: \`${project}/${repository}\``,
+        `- **Retention policy**: keep newest \`${keepCount}\` images (\`[0..${keepCount - 1}]\`), delete \`[${keepCount}..]\``,
+        '- **Status**: `SKIPPED_NO_TOKEN` — `VERCEL_TOKEN` secret is not configured in GitHub Actions.',
+        '',
+        'Configure under **Settings → Secrets and variables → Actions → Repository secrets**:',
+        '- `VERCEL_TOKEN` *(required)*',
+        '- `VERCEL_ORG_ID` *(recommended — team ID `team_...`)*',
+        '- `VERCEL_PROJECT_ID` *(optional — project ID `prj_...` or `ancientstudio`)*'
+      ]);
+      return {
+        status: 'skipped-no-token',
+        exitCode: 0,
+        backend: 'none',
+        project,
+        repository,
+        keepLimit: keepCount,
+        dryRun,
+        total: 0,
+        kept: [],
+        deleted: []
+      };
     }
-  }
 
-  if (!response.ok) {
-    const apiMessage = redactSecrets(
-      parsed?.error?.message || parsed?.message || rawBody || `HTTP ${response.status}`,
-      secrets
-    );
-    const apiCode = parsed?.error?.code || parsed?.code || `HTTP_${response.status}`;
-    if (response.status === 401 || response.status === 403) {
-      throw new VcrCleanupError(
-        `Vercel authentication/authorization failed (${response.status} ${apiCode}): ${apiMessage}`,
-        { code: 'AUTH_ERROR', exitCode: 1 }
-      );
-    }
-    const err = new VcrCleanupError(
-      `Vercel API error (${response.status} ${apiCode}): ${apiMessage}`,
-      { code: apiCode, exitCode: 1 }
-    );
-    err.httpStatus = response.status;
+    writeStepSummary(summaryPath, [
+      '### VCR Image Retention Cleanup (Failed — Missing `VERCEL_TOKEN`)',
+      `- **Target**: \`${project}/${repository}\``,
+      '- **Error**: `VERCEL_TOKEN` is required to list or delete VCR images.',
+      '- Add `VERCEL_TOKEN` (plus optional `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`) in **Settings → Secrets and variables → Actions → Repository secrets**.'
+    ]);
+    const err = new Error(guidanceLines.join(' '));
+    err.code = 'MISSING_VERCEL_TOKEN';
     throw err;
   }
 
-  return parsed ?? {};
-}
+  let activeAdapter = rawOptions.adapter || null;
+  let rawImages = null;
 
-/**
- * Resolves `{ teamId, projectId, projectName }` when VERCEL_ORG_ID (`scope`) is omitted.
- * VCR endpoints require both `teamId` and `projectId` (or `--scope` + `--project` in Vercel CLI).
- */
-async function resolveProjectScope({
-  project,
-  scope,
-  token,
-  apiBaseUrl = VERCEL_API_BASE,
-  fetchImpl = globalThis.fetch
-}) {
-  const secrets = [token];
-
-  if (scope) {
-    const projectUrl = `${apiBaseUrl}/v9/projects/${encodeURIComponent(project)}?teamId=${encodeURIComponent(scope)}`;
-    // If scope is a slug instead of team_..., try teamSlug fallback if teamId fails with 400/404.
-    try {
-      const data = await fetchVercelJson(fetchImpl, projectUrl, { token, secrets });
-      return {
-        teamId: data.accountId || scope,
-        projectId: data.id || project,
-        projectName: data.name || project
-      };
-    } catch (err) {
-      if (!scope.startsWith('team_') && (err.httpStatus === 400 || err.httpStatus === 404)) {
-        const slugUrl = `${apiBaseUrl}/v9/projects/${encodeURIComponent(project)}?slug=${encodeURIComponent(scope)}`;
-        const data = await fetchVercelJson(fetchImpl, slugUrl, { token, secrets });
-        return {
-          teamId: data.accountId || scope,
-          projectId: data.id || project,
-          projectName: data.name || project
-        };
-      }
-      throw err;
-    }
-  }
-
-  // No explicit VERCEL_ORG_ID: query teams accessible to this token and locate the project.
-  const teamsData = await fetchVercelJson(
-    fetchImpl,
-    `${apiBaseUrl}/v2/teams?limit=100`,
-    { token, secrets }
-  );
-  const teams = Array.isArray(teamsData.teams) ? teamsData.teams : [];
-
-  for (const team of teams) {
-    if (!team?.id) continue;
-    const url = `${apiBaseUrl}/v9/projects/${encodeURIComponent(project)}?teamId=${encodeURIComponent(team.id)}`;
-    try {
-      const data = await fetchVercelJson(fetchImpl, url, { token, secrets });
-      return {
-        teamId: data.accountId || team.id,
-        projectId: data.id || project,
-        projectName: data.name || project
-      };
-    } catch (err) {
-      if (err.httpStatus === 404) {
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  // Fallback to personal account lookup if no team matched.
-  const directData = await fetchVercelJson(
-    fetchImpl,
-    `${apiBaseUrl}/v9/projects/${encodeURIComponent(project)}`,
-    { token, secrets }
-  );
-  if (!directData.accountId) {
-    throw new VcrCleanupError(
-      `Could not determine Vercel team/org ID for project "${project}". Set VERCEL_ORG_ID explicitly.`,
-      { code: 'MISSING_SCOPE', exitCode: 1 }
-    );
-  }
-  return {
-    teamId: directData.accountId,
-    projectId: directData.id || project,
-    projectName: directData.name || project
-  };
-}
-
-function createRestApiAdapter({
-  token,
-  project,
-  scope,
-  apiBaseUrl = VERCEL_API_BASE,
-  fetchImpl = globalThis.fetch
-}) {
-  const secrets = [token];
-  let resolvedPromise = null;
-
-  const getScope = () => {
-    if (!resolvedPromise) {
-      resolvedPromise = resolveProjectScope({
-        project,
-        scope,
-        token,
-        apiBaseUrl,
-        fetchImpl
-      });
-    }
-    return resolvedPromise;
-  };
-
-  return {
-    name: 'api',
-    async listAllImages(repository) {
-      const target = await getScope();
-      const allImages = [];
-      const seenCursors = new Set();
-      let cursor = null;
-
-      for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-        const query = new URLSearchParams({
-          teamId: target.teamId,
-          projectId: target.projectId,
-          limit: String(DEFAULT_PAGE_LIMIT)
-        });
-        if (cursor) {
-          query.set('cursor', cursor);
-        }
-        const url = `${apiBaseUrl}/v1/vcr/repository/${encodeURIComponent(repository)}/images?${query.toString()}`;
-        let payload;
-        try {
-          payload = await fetchVercelJson(fetchImpl, url, { token, secrets });
-        } catch (err) {
-          if (err.httpStatus === 404) {
-            return { images: [], repositoryMissing: true, target };
-          }
-          throw err;
-        }
-
-        const pageImages = Array.isArray(payload.images) ? payload.images : [];
-        allImages.push(...pageImages);
-
-        const nextCursor = payload.nextCursor ?? payload.pagination?.next ?? null;
-        if (!nextCursor) {
-          break;
-        }
-        if (seenCursors.has(nextCursor)) {
-          throw new VcrCleanupError(
-            `Detected repeated pagination cursor "${nextCursor}" while listing VCR images.`,
-            { code: 'PAGINATION_LOOP', exitCode: 1 }
-          );
-        }
-        seenCursors.add(nextCursor);
-        cursor = nextCursor;
-      }
-
-      return { images: allImages, repositoryMissing: false, target };
-    },
-
-    async deleteImage(repository, imageId) {
-      const target = await getScope();
-      const query = new URLSearchParams({
-        teamId: target.teamId,
-        projectId: target.projectId
-      });
-      const url = `${apiBaseUrl}/v1/vcr/repository/${encodeURIComponent(repository)}/images/${encodeURIComponent(imageId)}?${query.toString()}`;
-      await fetchVercelJson(fetchImpl, url, { method: 'DELETE', token, secrets });
-      return { imageId, repository, deleted: true };
-    }
-  };
-}
-
-function parseCliJsonPayload(stdout, stderr, secrets) {
-  const trimmed = String(stdout ?? '').trim();
-  if (!trimmed) {
-    throw new VcrCleanupError(
-      `Vercel CLI returned empty JSON output.${stderr ? ` Stderr: ${redactSecrets(stderr, secrets)}` : ''}`,
-      { code: 'CLI_INVALID_JSON', exitCode: 1 }
-    );
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // Extract trailing JSON object if CLI emitted informational lines before JSON.
-    const firstBrace = trimmed.indexOf('{');
-    const lastBrace = trimmed.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
+  if (activeAdapter) {
+    rawImages = await activeAdapter.listImages();
+  } else if (backend === 'cli') {
+    activeAdapter = createCliAdapter({ token, scope, project, repository });
+    rawImages = await activeAdapter.listImages();
+  } else if (backend === 'api') {
+    activeAdapter = createApiAdapter({ token, scope, project, repository });
+    rawImages = await activeAdapter.listImages();
+  } else {
+    // `auto`: prefer official Vercel CLI when installed, with automatic
+    // fallback to the direct Vercel REST API if CLI listing fails.
+    const cliAvailable =
+      typeof rawOptions.hasCliImpl === 'function' ? rawOptions.hasCliImpl() : hasVercelCli();
+    if (cliAvailable) {
+      const cliAdapter =
+        rawOptions.cliAdapter || createCliAdapter({ token, scope, project, repository });
       try {
-        return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
-      } catch {
-        // Fall through to structured error below.
-      }
-    }
-    throw new VcrCleanupError(
-      `Failed to parse Vercel CLI JSON output: ${redactSecrets(trimmed.slice(0, 400), secrets)}`,
-      { code: 'CLI_INVALID_JSON', exitCode: 1 }
-    );
-  }
-}
-
-function createCliAdapter({
-  token,
-  project,
-  scope,
-  vercelBin = 'vercel',
-  apiBaseUrl = VERCEL_API_BASE,
-  execFileImpl = execFileAsync,
-  fetchImpl = globalThis.fetch,
-  baseEnv = process.env
-}) {
-  const secrets = [token];
-  let resolvedScopePromise = null;
-
-  const ensureScope = async () => {
-    if (scope) {
-      return { teamId: scope, projectId: project, projectName: project };
-    }
-    if (!resolvedScopePromise) {
-      resolvedScopePromise = resolveProjectScope({
-        project,
-        scope: '',
-        token,
-        apiBaseUrl,
-        fetchImpl
-      });
-    }
-    return resolvedScopePromise;
-  };
-
-  const runVercelCli = async (args) => {
-    try {
-      return await execFileImpl(vercelBin, args, {
-        env: {
-          ...baseEnv,
-          VERCEL_TOKEN: token,
-          FORCE_COLOR: '0',
-          NO_COLOR: '1',
-          CI: '1'
-        },
-        maxBuffer: 10 * 1024 * 1024
-      });
-    } catch (err) {
-      const combined = redactSecrets(
-        [err.stdout, err.stderr, err.message].filter(Boolean).join('\n').trim(),
-        secrets
-      );
-      if (/not_found|repository.*not found|404/i.test(combined) && !/project.*not found|PROJECT_NOT_FOUND/i.test(combined)) {
-        const notFoundErr = new VcrCleanupError(combined, { code: 'REPOSITORY_NOT_FOUND', exitCode: 1 });
-        notFoundErr.repositoryNotFound = true;
-        throw notFoundErr;
-      }
-      if (/not_authorized|unauthorized|forbidden|invalid token|401|403/i.test(combined)) {
-        throw new VcrCleanupError(
-          `Vercel CLI authentication/authorization failed: ${combined}`,
-          { code: 'AUTH_ERROR', exitCode: 1 }
+        rawImages = await cliAdapter.listImages();
+        activeAdapter = cliAdapter;
+      } catch (cliError) {
+        const safeCliReason = redactSecrets(cliError?.message || cliError, [rawToken, token]);
+        warn(
+          `[vcr-cleanup] WARN: CLI backend failed (${safeCliReason}); falling back to direct Vercel REST API.`
         );
+        activeAdapter =
+          rawOptions.apiAdapter || createApiAdapter({ token, scope, project, repository });
+        rawImages = await activeAdapter.listImages();
       }
-      throw new VcrCleanupError(
-        `Vercel CLI command failed: ${combined}`,
-        { code: 'CLI_ERROR', exitCode: 1 }
-      );
+    } else {
+      activeAdapter =
+        rawOptions.apiAdapter || createApiAdapter({ token, scope, project, repository });
+      rawImages = await activeAdapter.listImages();
     }
-  };
-
-  return {
-    name: 'cli',
-    async listAllImages(repository) {
-      const target = await ensureScope();
-      const allImages = [];
-      const seenCursors = new Set();
-      let cursor = null;
-
-      for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-        const args = [
-          'vcr',
-          'image',
-          'ls',
-          repository,
-          '--json',
-          '--limit',
-          String(DEFAULT_PAGE_LIMIT),
-          '--project',
-          target.projectId,
-          '--scope',
-          target.teamId,
-          '--non-interactive',
-          '--no-color'
-        ];
-        if (cursor) {
-          args.push('--next', cursor);
-        }
-
-        let stdout;
-        let stderr;
-        try {
-          ({ stdout, stderr } = await runVercelCli(args));
-        } catch (err) {
-          if (err.repositoryNotFound) {
-            return { images: [], repositoryMissing: true, target };
-          }
-          throw err;
-        }
-
-        const payload = parseCliJsonPayload(stdout, stderr, secrets);
-        const pageImages = Array.isArray(payload.images) ? payload.images : [];
-        allImages.push(...pageImages);
-
-        const nextCursor = payload.nextCursor ?? payload.pagination?.next ?? null;
-        if (!nextCursor) {
-          break;
-        }
-        if (seenCursors.has(nextCursor)) {
-          throw new VcrCleanupError(
-            `Detected repeated pagination cursor "${nextCursor}" while listing VCR images via CLI.`,
-            { code: 'PAGINATION_LOOP', exitCode: 1 }
-          );
-        }
-        seenCursors.add(nextCursor);
-        cursor = nextCursor;
-      }
-
-      return { images: allImages, repositoryMissing: false, target };
-    },
-
-    async deleteImage(repository, imageId) {
-      const target = await ensureScope();
-      const args = [
-        'vcr',
-        'image',
-        'delete',
-        repository,
-        imageId,
-        '--yes',
-        '--json',
-        '--project',
-        target.projectId,
-        '--scope',
-        target.teamId,
-        '--non-interactive',
-        '--no-color'
-      ];
-      const { stdout, stderr } = await runVercelCli(args);
-      if (String(stdout ?? '').trim()) {
-        return parseCliJsonPayload(stdout, stderr, secrets);
-      }
-      return { imageId, repository, deleted: true };
-    }
-  };
-}
-
-async function isVercelCliInstalled(vercelBin, execFileImpl = execFileAsync) {
-  try {
-    await execFileImpl(vercelBin, ['--version'], { timeout: 10000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function buildStepSummaryMarkdown({
-  project,
-  repository,
-  backendName,
-  dryRun,
-  plan,
-  deletedIds,
-  repositoryMissing
-}) {
-  const modeLabel = dryRun ? 'DRY-RUN (no deletions executed)' : 'APPLY';
-  const lines = [
-    '### Vercel Container Registry (VCR) Cleanup',
-    '',
-    `- **Project:** \`${project}\``,
-    `- **Repository:** \`${repository}\``,
-    `- **Backend:** \`${backendName}\``,
-    `- **Mode:** \`${modeLabel}\``,
-    `- **Retention Policy:** Keep **${plan.keepCount}** newest images (\`[0..${plan.keepCount - 1}]\`)`,
-    `- **Total Found:** \`${plan.total}\` | **Kept:** \`${plan.toKeep.length}\` | **${dryRun ? 'Would Delete' : 'Deleted'}:** \`${dryRun ? plan.toDelete.length : deletedIds.length}\``,
-    ''
-  ];
-
-  if (repositoryMissing || plan.total === 0) {
-    lines.push('_No images currently stored in repository._', '');
-    return lines.join('\n');
   }
 
-  lines.push(
-    '| Index | Action | Image ID | Created (UTC) | Status | Size | Tags |',
-    '|---:|---|---|---|---|---|---|'
-  );
-  plan.sorted.forEach((img, idx) => {
-    const isKeep = idx < plan.keepCount;
-    const action = isKeep ? 'KEEP' : dryRun ? 'WOULD_DELETE' : 'DELETE';
-    const tags = img.tags.length > 0 ? img.tags.join(', ') : '<none>';
-    lines.push(
-      `| \`[${idx}]\` | **${action}** | \`${img.id}\` | \`${img.createdAtIso}\` | \`${img.status}\` | ${formatBytes(img.sizeInBytes)} | \`${tags}\` |`
-    );
-  });
-  lines.push('');
-  return lines.join('\n');
-}
+  const plan = planRetention(rawImages, keepCount);
 
-async function runCleanup(rawOptions, deps = {}) {
-  const options = { ...rawOptions };
-  validateOptions(options);
-
-  const secrets = [options.token].filter(Boolean);
-  const logger = deps.logger || ((line) => process.stdout.write(`${redactSecrets(line, secrets)}\n`));
-  const execFileImpl = deps.execFileImpl || execFileAsync;
-  const fetchImpl = deps.fetchImpl || globalThis.fetch;
-
-  let adapter = deps.adapter || null;
-  if (!adapter) {
-    let selectedBackend = options.backend;
-    if (selectedBackend === 'auto') {
-      selectedBackend = (await isVercelCliInstalled(options.vercelBin, execFileImpl))
-        ? 'cli'
-        : 'api';
-    }
-    adapter = selectedBackend === 'cli'
-      ? createCliAdapter({
-        token: options.token,
-        project: options.project,
-        scope: options.scope,
-        vercelBin: options.vercelBin,
-        apiBaseUrl: options.apiBaseUrl,
-        execFileImpl,
-        fetchImpl
-      })
-      : createRestApiAdapter({
-        token: options.token,
-        project: options.project,
-        scope: options.scope,
-        apiBaseUrl: options.apiBaseUrl,
-        fetchImpl
-      });
-  }
-
-  const modeLabel = options.dryRun ? 'DRY-RUN' : 'APPLY';
-  logger(
-    `[vcr-cleanup] Starting VCR cleanup | project="${options.project}" | repository="${options.repository}" | backend=${adapter.name} | keep=${options.keepCount} | mode=${modeLabel}`
+  log(
+    `[vcr-cleanup] target=${project}/${repository} backend=${activeAdapter.name || backend} ` +
+      `keep=${plan.keepLimit} dryRun=${dryRun} found=${plan.total}`
   );
 
-  const { images, repositoryMissing } = await adapter.listAllImages(options.repository);
-  const plan = planRetention(images, options.keepCount);
-
-  if (repositoryMissing || plan.total === 0) {
-    logger(
-      `[vcr-cleanup] Repository "${options.repository}" has 0 images. Retention limit (${options.keepCount}) satisfied; nothing to delete.`
+  for (const img of plan.keep) {
+    log(
+      `[vcr-cleanup] KEEP [${img.rank}] id=${img.id} digest=${shortDigest(img.digest)} ` +
+        `createdAt=${img.createdAtIso} size=${formatBytes(img.sizeBytes)} ` +
+        `tags=${img.tags.join(',') || '-'} status=${img.status} reason=${img.reason}`
     );
-    writeGitHubStepSummary({
-      summaryPath: deps.stepSummaryPath ?? process.env.GITHUB_STEP_SUMMARY,
-      project: options.project,
-      repository: options.repository,
-      backendName: adapter.name,
-      dryRun: options.dryRun,
-      plan,
-      deletedIds: [],
-      repositoryMissing
-    });
+  }
+
+  if (plan.remove.length === 0) {
+    log(
+      `[vcr-cleanup] Nothing to delete (${plan.total} image(s) <= keep limit ${plan.keepLimit}). Exiting cleanly.`
+    );
+    writeStepSummary(summaryPath, [
+      '### VCR Image Retention Cleanup',
+      `- **Target**: \`${project}/${repository}\``,
+      `- **Backend**: \`${activeAdapter.name || backend}\``,
+      `- **Dry run**: \`${dryRun}\``,
+      `- **Images found**: \`${plan.total}\` (keep limit: \`${plan.keepLimit}\`)`,
+      '- **Result**: No surplus images to remove (`0` deleted).'
+    ]);
     return {
-      mode: modeLabel,
-      backend: adapter.name,
-      total: 0,
-      keptIds: [],
-      candidateDeleteIds: [],
-      deletedIds: []
-    };
-  }
-
-  logger(
-    `[vcr-cleanup] Inspection plan (sorted newest -> oldest, total=${plan.total}):`
-  );
-  plan.sorted.forEach((img, index) => {
-    const keep = index < plan.keepCount;
-    const actionLabel = keep
-      ? 'KEEP        '
-      : options.dryRun
-        ? 'WOULD_DELETE'
-        : 'DELETE      ';
-    const tags = img.tags.length > 0 ? img.tags.join(',') : '<none>';
-    logger(
-      `  [${index}] ${actionLabel} id=${img.id}  created=${img.createdAtIso}  digest=${formatShortDigest(img.manifestDigest)}  status=${img.status}  size=${formatBytes(img.sizeInBytes)}  tags=${tags}`
-    );
-  });
-
-  const keptIds = plan.toKeep.map((img) => img.id);
-  const candidateDeleteIds = plan.toDelete.map((img) => img.id);
-
-  if (plan.toDelete.length === 0) {
-    logger(
-      `[vcr-cleanup] Retention satisfied: found ${plan.total} image(s) (<= ${plan.keepCount}). Preserving [${keptIds.join(', ')}]; no deletions needed.`
-    );
-    writeGitHubStepSummary({
-      summaryPath: deps.stepSummaryPath ?? process.env.GITHUB_STEP_SUMMARY,
-      project: options.project,
-      repository: options.repository,
-      backendName: adapter.name,
-      dryRun: options.dryRun,
-      plan,
-      deletedIds: [],
-      repositoryMissing: false
-    });
-    return {
-      mode: modeLabel,
-      backend: adapter.name,
-      total: plan.total,
-      keptIds,
-      candidateDeleteIds: [],
-      deletedIds: []
-    };
-  }
-
-  if (options.dryRun) {
-    logger(
-      `[vcr-cleanup] DRY-RUN complete: keeping ${keptIds.length} image(s) [${keptIds.join(', ')}]; would delete ${candidateDeleteIds.length} image(s) [${candidateDeleteIds.join(', ')}].`
-    );
-    writeGitHubStepSummary({
-      summaryPath: deps.stepSummaryPath ?? process.env.GITHUB_STEP_SUMMARY,
-      project: options.project,
-      repository: options.repository,
-      backendName: adapter.name,
-      dryRun: true,
-      plan,
-      deletedIds: [],
-      repositoryMissing: false
-    });
-    return {
-      mode: modeLabel,
-      backend: adapter.name,
-      total: plan.total,
-      keptIds,
-      candidateDeleteIds,
-      deletedIds: []
-    };
-  }
-
-  // Re-verify top-3 protection right before executing destructive calls.
-  assertRetentionSafety(plan.sorted, plan.toKeep, plan.toDelete, plan.keepCount);
-
-  const deletedIds = [];
-  const failures = [];
-
-  for (let i = 0; i < plan.toDelete.length; i += 1) {
-    const img = plan.toDelete[i];
-    const absoluteIndex = plan.keepCount + i;
-    logger(`[vcr-cleanup] Deleting [${absoluteIndex}] id=${img.id} (${img.createdAtIso})...`);
-    try {
-      await adapter.deleteImage(options.repository, img.id);
-      deletedIds.push(img.id);
-      logger(`[vcr-cleanup] Deleted [${absoluteIndex}] id=${img.id}.`);
-    } catch (err) {
-      const safeMsg = redactSecrets(err.message || err, secrets);
-      failures.push({ id: img.id, message: safeMsg });
-      logger(`[vcr-cleanup] ERROR deleting [${absoluteIndex}] id=${img.id}: ${safeMsg}`);
-    }
-  }
-
-  writeGitHubStepSummary({
-    summaryPath: deps.stepSummaryPath ?? process.env.GITHUB_STEP_SUMMARY,
-    project: options.project,
-    repository: options.repository,
-    backendName: adapter.name,
-    dryRun: false,
-    plan,
-    deletedIds,
-    repositoryMissing: false
-  });
-
-  if (failures.length > 0) {
-    throw new VcrCleanupError(
-      `Completed with ${failures.length} deletion error(s) out of ${plan.toDelete.length} surplus image(s); kept [${keptIds.join(', ')}], deleted [${deletedIds.join(', ')}].`,
-      { code: 'PARTIAL_DELETE_FAILURE', exitCode: 1 }
-    );
-  }
-
-  logger(
-    `[vcr-cleanup] Cleanup complete: kept ${keptIds.length} newest image(s) [${keptIds.join(', ')}] and deleted ${deletedIds.length} surplus image(s) [${deletedIds.join(', ')}].`
-  );
-
-  return {
-    mode: modeLabel,
-    backend: adapter.name,
-    total: plan.total,
-    keptIds,
-    candidateDeleteIds,
-    deletedIds
-  };
-}
-
-function writeGitHubStepSummary({
-  summaryPath,
-  project,
-  repository,
-  backendName,
-  dryRun,
-  plan,
-  deletedIds,
-  repositoryMissing
-}) {
-  if (!summaryPath) return;
-  try {
-    const markdown = buildStepSummaryMarkdown({
+      status: 'noop',
+      exitCode: 0,
+      backend: activeAdapter.name || backend,
       project,
       repository,
-      backendName,
+      keepLimit: plan.keepLimit,
       dryRun,
-      plan,
-      deletedIds,
-      repositoryMissing
-    });
-    appendFileSync(summaryPath, `${markdown}\n`, 'utf8');
-  } catch {
-    // Non-fatal if summary file is unwritable outside GitHub Actions.
+      total: plan.total,
+      kept: plan.keep,
+      deleted: []
+    };
   }
-}
 
-function printHelp(write = (msg) => process.stdout.write(`${msg}\n`)) {
-  write(`Usage: node scripts/vcr-cleanup.js [options]
+  const deleted = [];
+  const failures = [];
 
-Maintains at most the 3 newest images in Vercel Container Registry (VCR)
-repository "dockerfile" for project "ancientstudio", deleting older images
-starting at index 3.
-
-Options:
-  -r, --repository <name>   VCR repository name (default: "dockerfile")
-  -p, --project <name|id>   Vercel project name or ID (default: "ancientstudio")
-  -S, --scope <orgId|slug>  Vercel team/org ID or slug (env: VERCEL_ORG_ID)
-  -k, --keep <count>        Images to retain, minimum 3 (default: 3)
-  -b, --backend <mode>      "auto" | "cli" | "api" (default: "auto")
-  -n, --dry-run             Inspect and log KEEP / WOULD_DELETE without deleting
-      --apply               Execute deletions (default unless DRY_RUN=1)
-  -h, --help                Show this help message
-
-Environment variables:
-  VERCEL_TOKEN              Required. Vercel API/CLI token (never logged)
-  VERCEL_ORG_ID             Optional. Team ID (auto-discovered if omitted)
-  VERCEL_PROJECT_ID         Optional. Project ID or name (default: ancientstudio)
-  DRY_RUN                   Optional. Set "1" or "true" for dry-run mode`);
-}
-
-async function main(argv = process.argv.slice(2), env = process.env) {
-  const secrets = [env.VERCEL_TOKEN].filter(Boolean);
-  try {
-    const options = parseCliArgs(argv, env);
-    if (options.help) {
-      printHelp();
-      return 0;
+  for (const target of plan.remove) {
+    if (dryRun) {
+      log(
+        `[vcr-cleanup] WOULD_DELETE [${target.rank}] id=${target.id} digest=${shortDigest(target.digest)} ` +
+          `createdAt=${target.createdAtIso} size=${formatBytes(target.sizeBytes)} ` +
+          `tags=${target.tags.join(',') || '-'} status=${target.status} reason=${target.reason}`
+      );
+      deleted.push(target);
+      continue;
     }
-    await runCleanup(options);
-    return 0;
-  } catch (err) {
-    const exitCode = typeof err?.exitCode === 'number' ? err.exitCode : 1;
-    const safeMessage = redactSecrets(err?.message || String(err), secrets);
-    process.stderr.write(`[vcr-cleanup] ERROR: ${safeMessage}\n`);
-    return exitCode;
+
+    log(
+      `[vcr-cleanup] DELETE [${target.rank}] id=${target.id} digest=${shortDigest(target.digest)} ` +
+        `createdAt=${target.createdAtIso} size=${formatBytes(target.sizeBytes)} ` +
+        `tags=${target.tags.join(',') || '-'} status=${target.status} reason=${target.reason}`
+    );
+    try {
+      await activeAdapter.deleteImage(target);
+      deleted.push(target);
+    } catch (deleteError) {
+      const safeReason = redactSecrets(deleteError?.message || deleteError, [rawToken, token]);
+      warn(`[vcr-cleanup] ERROR deleting [${target.rank}] id=${target.id}: ${safeReason}`);
+      failures.push({ image: target, message: safeReason });
+    }
   }
+
+  if (failures.length > 0) {
+    writeStepSummary(summaryPath, [
+      '### VCR Image Retention Cleanup (Partial/Failed Deletion)',
+      `- **Target**: \`${project}/${repository}\``,
+      `- **Backend**: \`${activeAdapter.name || backend}\``,
+      `- **Images found**: \`${plan.total}\``,
+      `- **Kept**: \`${plan.keep.length}\` (\`[0..${plan.keep.length - 1}]\`)`,
+      `- **Deleted**: \`${deleted.length}\` / \`${plan.remove.length}\``,
+      `- **Failed**: \`${failures.length}\` (${failures.map((f) => `\`${f.image.id}\``).join(', ')})`
+    ]);
+    const aggregateError = new Error(
+      `Failed to delete ${failures.length} of ${plan.remove.length} surplus VCR image(s): ` +
+        failures.map((f) => `${f.image.id} (${f.message})`).join('; ')
+    );
+    aggregateError.code = 'VCR_DELETE_FAILED';
+    throw aggregateError;
+  }
+
+  log(
+    `[vcr-cleanup] Completed: kept=${plan.keep.length} ${dryRun ? 'wouldDelete' : 'deleted'}=${deleted.length}.`
+  );
+
+  writeStepSummary(summaryPath, [
+    '### VCR Image Retention Cleanup',
+    `- **Target**: \`${project}/${repository}\``,
+    `- **Backend**: \`${activeAdapter.name || backend}\``,
+    `- **Dry run**: \`${dryRun}\``,
+    `- **Images found**: \`${plan.total}\``,
+    `- **Kept**: \`${plan.keep.length}\` (${plan.keep.map((i) => `\`[${i.rank}] ${i.id}\``).join(', ') || 'none'})`,
+    `- **${dryRun ? 'Would delete' : 'Deleted'}**: \`${deleted.length}\` (${deleted.map((i) => `\`[${i.rank}] ${i.id}\``).join(', ')})`
+  ]);
+
+  return {
+    status: dryRun ? 'dry-run' : 'pruned',
+    exitCode: 0,
+    backend: activeAdapter.name || backend,
+    project,
+    repository,
+    keepLimit: plan.keepLimit,
+    dryRun,
+    total: plan.total,
+    kept: plan.keep,
+    deleted
+  };
+}
+
+function printHelp() {
+  console.log(
+    [
+      'Usage: node scripts/vcr-cleanup.js [options]',
+      '',
+      'Options:',
+      `  --keep <N>            Number of most recent images to keep (default: ${DEFAULT_KEEP_COUNT})`,
+      `  --repository <name>   VCR repository name (default: ${DEFAULT_REPOSITORY})`,
+      `  --project <id|name>   Vercel project name or ID (default: ${DEFAULT_PROJECT})`,
+      '  --scope <teamId>      Vercel team/org ID or slug (defaults to VERCEL_ORG_ID)',
+      '  --backend <mode>      Backend: auto | cli | api (default: auto)',
+      '  --dry-run             Simulate deletions without removing any image',
+      '  --no-dry-run          Execute real deletions (default)',
+      '  --allow-missing-token Exit 0 with warning if VERCEL_TOKEN is unset (CI automatic runs)',
+      '  -h, --help            Show this help message'
+    ].join('\n')
+  );
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const cliOptions = parseCliArgs(argv);
+  if (cliOptions.help) {
+    printHelp();
+    return 0;
+  }
+  await runCleanup(cliOptions);
+  return 0;
 }
 
 if (require.main === module) {
-  main().then((code) => {
-    process.exitCode = code;
-  });
+  main().then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (error) => {
+      const safeMessage = redactSecrets(error?.message || String(error), [process.env.VERCEL_TOKEN]);
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        console.error(`::error::[vcr-cleanup] ${safeMessage}`);
+      } else {
+        console.error(`[vcr-cleanup] ERROR: ${safeMessage}`);
+      }
+      process.exitCode = error?.code === 'MISSING_VERCEL_TOKEN' ? 2 : 1;
+    }
+  );
 }
 
 module.exports = {
-  DEFAULT_PROJECT,
+  DEFAULT_KEEP_COUNT,
   DEFAULT_REPOSITORY,
-  MIN_PROTECTED_IMAGES,
-  VcrCleanupError,
+  DEFAULT_PROJECT,
+  cleanInput,
+  cleanToken,
   redactSecrets,
+  parseBoolean,
+  parseKeepCount,
   parseCliArgs,
-  validateOptions,
-  parseTimestampMs,
+  parseTimestamp,
+  normalizeImage,
   sortImagesNewestFirst,
   planRetention,
-  assertRetentionSafety,
-  resolveProjectScope,
-  createRestApiAdapter,
+  extractImagesFromPayload,
+  extractJsonDocument,
   createCliAdapter,
+  createApiAdapter,
   runCleanup,
   main
 };

@@ -113,6 +113,16 @@ include `highlightColor`/`color`, `thickness`/`width`, `intensity`, `opacity` an
 `enabled`/`visible`. The effect is opt-in per object, not a global post-process.
 Frontend integration is intentionally pending after 2026-11-25.
 
+## Self-hosted 3D scene asset & Draco decoder (zero CDN)
+
+- Compressed scene model: `./assets/models/cena_completa.glb` (`KHR_draco_mesh_compression` + `EXT_texture_webp` at `1024px`, `11.52 MiB`, without Git LFS, preserving root nodes `Cidade_Sketchfab_model`, `Player_Rig`, `Carro_Grupo` and NLA tracks `Idle`, `Walking`, `Casting`).
+- Self-hosted Draco decoder directory: `./assets/draco/` (`draco_decoder.js`, `draco_decoder.wasm`, `draco_wasm_wrapper.js` copied from `three/examples/jsm/libs/draco/`).
+- Frontend decompression pipeline (`SceneGlbLoader` in `ascii-engine-module/src/world/SceneGlbLoader.ts`, exported on `window.ASCIIRealms` and wired via `TP.scene.loadSceneGlb()` / `TP.scene.getGlbMetrics()` in `assets/js/engine-adapter.js`):
+  1. `DRACOLoader` fetches `./assets/draco/draco_wasm_wrapper.js` (`text`) and `./assets/draco/draco_decoder.wasm` (`arraybuffer`, `Content-Type: application/wasm`) in parallel, compiles a Blob Web Worker URL, and initializes a load-balanced pool of **4 Web Workers** (`workerLimit = 4`) — rejecting any external CDN URL.
+  2. `SceneGlbLoader.load('./assets/models/cena_completa.glb')` downloads the `.glb` (`ArrayBuffer`) and calls `gltfLoader.parseAsync()`, dispatching all `154` Draco mesh primitives (`498,351` unique vertices, `438,122` triangles) via zero-copy `Transferable` `ArrayBuffer`s across the 4 WebAssembly Workers off the main UI thread while the browser decodes the `77` `EXT_texture_webp` textures asynchronously.
+  3. On `TP.scene.destroy()` / `loader.dispose()`, all 4 Web Workers are terminated (`worker.terminate()`), the `blob:` URL is revoked (`URL.revokeObjectURL`), and GPU geometries/materials/textures are disposed via `LifecycleManager.disposeObject3D`.
+- End-to-end benchmark: `node scripts/benchmark-site-load.js` and `tests/benchmark-site-load.test.js`.
+
 ## Rebuilding the bundle
 
 ```bash

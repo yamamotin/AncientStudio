@@ -97,6 +97,15 @@ export {
   MascotStageBuilder,
 } from './world/MascotStageBuilder';
 export {
+  DEFAULT_SCENE_GLB_URL,
+  type LoadedSceneGlbAsset,
+  REQUIRED_SCENE_NLA_TRACKS,
+  REQUIRED_SCENE_ROOT_NODES,
+  SceneGlbLoader,
+  type SceneGlbLoaderOptions,
+  type SceneGlbLoadMetrics,
+} from './world/SceneGlbLoader';
+export {
   type BuiltUrbanGlbStage,
   DEFAULT_URBAN_SIDEWALK_BOUNDS,
   URBAN_CAMERA_FOLLOW_DEFAULTS,

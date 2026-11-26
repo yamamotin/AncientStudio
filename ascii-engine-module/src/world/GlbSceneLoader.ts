@@ -39,6 +39,7 @@ export interface PreparedUrbanGlbAssets {
 export interface GlbSceneLoadOptions {
   modelUrl?: string;
   dracoDecoderPath?: string;
+  workerLimit?: number;
   onProgress?: (progress: SceneLoadProgress) => void;
 }
 
@@ -292,6 +293,10 @@ export class GlbSceneLoader {
       this.dracoLoader = new DRACOLoader();
     }
     this.dracoLoader.setDecoderPath(decoderPath);
+    this.dracoLoader.setWorkerLimit(
+      Math.max(1, Math.min(8, Math.round(options?.workerLimit ?? 4)))
+    );
+    this.dracoLoader.preload();
 
     if (!this.gltfLoader) {
       this.gltfLoader = new GLTFLoader();
@@ -350,6 +355,7 @@ export class GlbSceneLoader {
     if (!this.dracoLoader) {
       this.dracoLoader = new DRACOLoader();
       this.dracoLoader.setDecoderPath(DEFAULT_DRACO_DECODER_PATH);
+      this.dracoLoader.setWorkerLimit(4);
     }
     if (!this.gltfLoader) {
       this.gltfLoader = new GLTFLoader();

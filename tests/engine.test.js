@@ -4,6 +4,7 @@ const { readFileSync, existsSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { Worker: NodeThreadWorker } = require('node:worker_threads');
 const { assert, includesAll } = require('./helpers/assert');
 
 const root = path.resolve(__dirname, '..');
@@ -19,21 +20,139 @@ function createBundleSandbox(overrides = {}) {
   assert.ok(existsSync(bundlePath), 'Built portfolio bundle assets/js/ascii-engine.bundle.js must exist');
 
   let nowMs = 1000;
+  let nextBlobId = 1;
+  const blobRegistry = new Map();
+
   class MockHTMLElement {}
+
+  class MockImage {
+    constructor() {
+      this.width = 1;
+      this.height = 1;
+      this.onload = null;
+      this.onerror = null;
+    }
+    set src(_value) {
+      Promise.resolve().then(() => {
+        if (typeof this.onload === 'function') this.onload();
+      });
+    }
+  }
+
+  class SandboxRequest {
+    constructor(input, init) {
+      this.url = typeof input === 'string' ? input : input.url;
+      this.init = init || {};
+    }
+  }
+
+  class SandboxWebWorker {
+    constructor(scriptUrl) {
+      const source = blobRegistry.get(scriptUrl);
+      if (!source || typeof source.code !== 'string') {
+        throw new Error(`Unknown Worker Blob URL: ${scriptUrl}`);
+      }
+      const bootstrap = `
+        const { parentPort } = require('node:worker_threads');
+        globalThis.self = globalThis;
+        globalThis.postMessage = (data, transfer) => parentPort.postMessage(data, transfer || []);
+        parentPort.on('message', (data) => {
+          if (typeof globalThis.onmessage === 'function') {
+            globalThis.onmessage({ data });
+          }
+        });
+        ${source.code}
+      `;
+      this.onmessage = null;
+      this.onerror = null;
+      this._thread = new NodeThreadWorker(bootstrap, { eval: true });
+      this._thread.unref();
+      this._thread.on('message', (data) => {
+        if (typeof this.onmessage === 'function') {
+          this.onmessage({ data });
+        }
+      });
+      this._thread.on('error', (error) => {
+        if (typeof this.onerror === 'function') {
+          this.onerror(error);
+        }
+      });
+    }
+    postMessage(data, transfer) {
+      this._thread.postMessage(data, transfer || []);
+    }
+    terminate() {
+      return this._thread.terminate();
+    }
+  }
+
+  const SandboxURL = Object.assign(
+    function SandboxURL(input, base) {
+      return new URL(input, base);
+    },
+    {
+      createObjectURL(blob) {
+        const id = `blob:node-${nextBlobId++}`;
+        blobRegistry.set(id, {
+          blob,
+          code: Array.isArray(blob && blob.__parts) ? blob.__parts.join('') : ''
+        });
+        return id;
+      },
+      revokeObjectURL(id) {
+        blobRegistry.delete(id);
+      }
+    }
+  );
+
+  class SandboxBlob extends Blob {
+    constructor(parts = [], options = {}) {
+      super(parts, options);
+      this.__parts = parts;
+    }
+  }
+
+  async function sandboxFetch(input) {
+    const rawUrl = typeof input === 'string' ? input : input.url;
+    if (String(rawUrl).startsWith('blob:')) {
+      const entry = blobRegistry.get(rawUrl);
+      if (!entry) return new Response(null, { status: 404 });
+      return new Response(await entry.blob.arrayBuffer(), { status: 200 });
+    }
+    const cleanRel = String(rawUrl).replace(/^(\.\/|\/)+/, '');
+    const resolved = path.resolve(root, cleanRel);
+    if (!resolved.startsWith(root) || !existsSync(resolved)) {
+      return new Response(null, { status: 404 });
+    }
+    return new Response(readFileSync(resolved), { status: 200 });
+  }
 
   const sandbox = Object.assign(
     {
       window: {},
       self: {},
+      WebAssembly,
       ArrayBuffer,
+      Int8Array,
       Uint8Array,
+      Uint8ClampedArray,
+      Int16Array,
+      Uint16Array,
+      Int32Array,
+      Uint32Array,
+      Float32Array,
+      Float64Array,
       DataView,
       TextDecoder,
       TextEncoder,
-      URL: {
-        createObjectURL: () => 'blob:mock',
-        revokeObjectURL: () => {}
-      },
+      Blob: SandboxBlob,
+      Headers,
+      Request: SandboxRequest,
+      Response,
+      fetch: sandboxFetch,
+      Worker: SandboxWebWorker,
+      Image: MockImage,
+      URL: SandboxURL,
       Date: { now: () => nowMs },
       HTMLElement: MockHTMLElement,
       document: {

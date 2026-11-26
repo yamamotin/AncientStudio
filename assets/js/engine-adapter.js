@@ -488,6 +488,49 @@ window.TP = window.TP || {};
     initDeferredEngineLoad();
   }
 
+  var DEFAULT_DRACO_PATH = './assets/draco/';
+  var DEFAULT_GLB_URL = './assets/models/cena_completa.glb';
+  var sharedGlbLoader = null;
+  var lastGlbMetrics = null;
+
+  function ensureGlbLoader(options) {
+    var resolved = resolveEngine();
+    if (!resolved || !resolved.source || typeof resolved.source.SceneGlbLoader !== 'function') {
+      return null;
+    }
+    if (!sharedGlbLoader) {
+      sharedGlbLoader = new resolved.source.SceneGlbLoader({
+        decoderPath: (options && options.decoderPath) || DEFAULT_DRACO_PATH,
+        modelUrl: (options && options.modelUrl) || DEFAULT_GLB_URL,
+        workerLimit: (options && options.workerLimit) || 4,
+        decoderType: options && options.decoderType,
+        fetchImpl: options && options.fetchImpl
+      });
+    }
+    return sharedGlbLoader;
+  }
+
+  function disposeGlbLoader() {
+    if (sharedGlbLoader && typeof sharedGlbLoader.dispose === 'function') {
+      sharedGlbLoader.dispose();
+    }
+    sharedGlbLoader = null;
+  }
+
+  async function loadSceneGlb(options) {
+    var loader = ensureGlbLoader(options);
+    if (!loader) {
+      throw new Error('SceneGlbLoader is unavailable until ascii-engine.bundle.js is loaded.');
+    }
+    var url = (options && options.url) || DEFAULT_GLB_URL;
+    var asset = await loader.load(url);
+    lastGlbMetrics = asset.metrics;
+    if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('tp:scene-glb-loaded', { detail: asset.metrics }));
+    }
+    return asset;
+  }
+
   TP.scene = {
     create: function (container, options) {
       var controller = createController(container, options);
@@ -499,7 +542,14 @@ window.TP = window.TP || {};
     },
     setPaused: function (paused) { controllers.forEach(function (c) { c.setPaused(paused); }); },
     setPreset: function (name) { controllers.forEach(function (c) { c.setPreset(name); }); },
-    destroy: function () { controllers.forEach(function (c) { c.destroy(); }); controllers = []; },
+    loadSceneGlb: loadSceneGlb,
+    getGlbMetrics: function () { return lastGlbMetrics; },
+    disposeGlbLoader: disposeGlbLoader,
+    destroy: function () {
+      controllers.forEach(function (c) { c.destroy(); });
+      controllers = [];
+      disposeGlbLoader();
+    },
     getMode: function () { return controllers.length ? controllers[0].getMode() : 'fallback'; }
   };
 
