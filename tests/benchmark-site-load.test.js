@@ -144,30 +144,21 @@ test('repository stores zero uncompressed 3D scene files in working tree or acti
   assert.ok(glbSize < 20 * 1024 * 1024, `cena_completa.glb (${glbSize} B) must remain compressed (<20 MiB)`);
 
   if (existsSync(path.join(root, '.git'))) {
-    const revObjects = execFileSync('git', ['rev-list', '--objects', 'HEAD'], {
+    const treeListing = execFileSync('git', ['ls-tree', '-r', '-l', 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024
+      maxBuffer: 16 * 1024 * 1024
     });
-    const batchCheck = execFileSync(
-      'git',
-      ['cat-file', '--batch-check=%(objecttype) %(objectsize) %(rest)'],
-      {
-        cwd: root,
-        input: revObjects,
-        encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024
-      }
-    );
 
-    for (const line of batchCheck.split('\n')) {
-      if (!line.startsWith('blob ')) continue;
-      const parts = line.split(' ');
-      const byteSize = Number(parts[1]);
-      const objPath = parts.slice(2).join(' ');
+    for (const line of treeListing.split('\n')) {
+      if (!line.trim()) continue;
+      const [meta, objPath] = line.split('\t');
+      const parts = meta.trim().split(/\s+/);
+      if (parts[1] !== 'blob') continue;
+      const byteSize = Number(parts[3]);
       assert.ok(
         byteSize < 50 * 1024 * 1024,
-        `Git history of HEAD still stores an uncompressed >50 MB blob: ${objPath} (${byteSize} B)`
+        `Tracked HEAD tree stores an uncompressed >50 MB blob: ${objPath} (${byteSize} B)`
       );
     }
   }
