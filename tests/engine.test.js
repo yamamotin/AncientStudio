@@ -3,34 +3,99 @@
 const { readFileSync, existsSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const { assert, includesAll } = require('./helpers/assert');
 
 const root = path.resolve(__dirname, '..');
 const adapter = readFileSync(path.join(root, 'assets/js/engine-adapter.js'), 'utf8');
 const core = readFileSync(path.join(root, 'ascii-engine-module/src/index.ts'), 'utf8');
-const engineCore = readFileSync(path.join(root, 'ascii-engine-module/src/core/AsciiEngineCore.ts'), 'utf8');
+const engineCore = readFileSync(
+  path.join(root, 'ascii-engine-module/src/core/AsciiEngineCore.ts'),
+  'utf8'
+);
+
+function createBundleSandbox(overrides = {}) {
+  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
+  assert.ok(existsSync(bundlePath), 'Built portfolio bundle assets/js/ascii-engine.bundle.js must exist');
+
+  let nowMs = 1000;
+  class MockHTMLElement {}
+
+  const sandbox = Object.assign(
+    {
+      window: {},
+      self: {},
+      ArrayBuffer,
+      Uint8Array,
+      DataView,
+      TextDecoder,
+      TextEncoder,
+      URL: {
+        createObjectURL: () => 'blob:mock',
+        revokeObjectURL: () => {}
+      },
+      Date: { now: () => nowMs },
+      HTMLElement: MockHTMLElement,
+      document: {
+        createElement: () => ({ style: {}, getContext: () => null, addEventListener() {}, removeEventListener() {} }),
+        createElementNS: () => ({ style: {}, addEventListener() {}, removeEventListener() {} })
+      },
+      navigator: { userAgent: 'node' },
+      performance: { now: () => nowMs },
+      setTimeout,
+      clearTimeout,
+      __advanceClock(ms) {
+        nowMs += ms;
+      }
+    },
+    overrides
+  );
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
+  return sandbox;
+}
 
 test('engine core keeps its public facade intact', () => {
-  includesAll(core, ['export class AsciiSceneEngine', 'mount', 'pause', 'resume', 'updateConfig', 'destroy']);
+  includesAll(core, [
+    'export { AsciiEngineCore as AsciiSceneEngine',
+    'GlbSceneLoader',
+    'UrbanGlbSceneBuilder',
+    'MascotStageBuilder',
+    'TuxEntityFactory'
+  ]);
+  includesAll(engineCore, [
+    'mount()',
+    'pause()',
+    'resume()',
+    'updateConfig(',
+    'setAutoOrbit(',
+    'getScene()',
+    'destroy()'
+  ]);
 });
 
-test('adapter uses the real facade and preserves scroll-friendly pointer input', () => {
+test('adapter uses the real facade, relative GLB + Draco paths, and preserves scroll-friendly pointer input', () => {
   includesAll(adapter, [
     'AsciiSceneEngine',
+    "'./assets/models/cena_completa.glb'",
+    "'./assets/draco/'",
     'pointermove',
     'passive: true',
     'ResizeObserver',
     'requestAnimationFrame'
   ]);
   assert.match(adapter, /setAutoOrbit[\s\S]*PointerEvent/);
+  assert.doesNotMatch(adapter, /https?:\/\//i, 'adapter contains zero external CDN URLs');
 });
 
 test('adapter exposes the integration surface requested by the UI', () => {
-  includesAll(adapter, ['mount', 'setPaused', 'setPreset', 'destroy']);
+  includesAll(adapter, ['create', 'mount', 'setPaused', 'setPreset', 'setAutoOrbit', 'destroy']);
 });
 
 test('engine uses passive pointer listeners (no scroll blocking)', () => {
-  assert.match(engineCore, /addEventListener\('pointermove',[\s\S]{0,200}\{ passive: true \}/);
+  assert.match(engineCore, /addEventListener\('pointermove',[\s\S]{0,200}\{\s*passive:\s*true,?\s*\}/);
   const pointerInput = readFileSync(
     path.join(root, 'ascii-engine-module/src/input/PointerInput.ts'),
     'utf8'
@@ -38,10 +103,10 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
   includesAll(pointerInput, ['pointerdown', 'pointermove', 'pointerup', '{ passive: true }']);
 });
 
-test('playground exposes exactly three scene modes', () => {
+test('playground exposes exactly three scene modes and removes legacy procedural cyberpunk builders', () => {
   includesAll(adapter, [
-    'DEFAULT_MODE = \'night\'',
-    'SCENE_MODES = [\'day\', \'night\', \'rain\']',
+    "DEFAULT_MODE = 'night'",
+    "SCENE_MODES = ['day', 'night', 'rain']",
     "mode !== 'rain'",
     'atmosphere: atmosphere',
     'blockBlendWeight: preset.blockBlendWeight',
@@ -51,13 +116,81 @@ test('playground exposes exactly three scene modes', () => {
     'touchstart',
     'touchmove'
   ]);
-  assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette/);
+  assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette|cyberpunk-citadel/);
+
+  const removedProceduralFiles = [
+    'ascii-engine-module/src/world/PlaygroundSceneBuilder.ts',
+    'ascii-engine-module/src/entities/PlaygroundEntityFactory.ts',
+    'ascii-engine-module/src/world/MapLoader.ts',
+    'ascii-engine-module/src/world/SceneComposerKit.ts',
+    'ascii-engine-module/src/shaders/waterShader.ts',
+    'ascii-engine-module/src/ecs/EntityBlueprint.ts',
+    'ascii-engine-module/src/scene/noise.ts'
+  ];
+  for (const rel of removedProceduralFiles) {
+    assert.equal(existsSync(path.join(root, rel)), false, `Legacy procedural file must be removed: ${rel}`);
+  }
 });
 
-test('neofetch fallback is static ASCII art and stays pointer-free', () => {
-  const neofetch = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
+test('self-hosted Draco decoders and cena_completa.glb exist locally with zero external CDN usage', () => {
+  const requiredAssets = [
+    'assets/models/cena_completa.glb',
+    'assets/draco/draco_decoder.js',
+    'assets/draco/draco_decoder.wasm',
+    'assets/draco/draco_wasm_wrapper.js'
+  ];
+  for (const rel of requiredAssets) {
+    assert.ok(existsSync(path.join(root, rel)), `Missing required local 3D asset/decoder: ${rel}`);
+  }
 
-  // Placeholder: a fixed, cute Tux art; no raycaster, yaw advance or animation loop.
+  const requiredModules = [
+    'ascii-engine-module/src/core/EngineLoop.ts',
+    'ascii-engine-module/src/core/LifecycleManager.ts',
+    'ascii-engine-module/src/core/ResolutionController.ts',
+    'ascii-engine-module/src/ecs/World.ts',
+    'ascii-engine-module/src/ecs/SystemRunner.ts',
+    'ascii-engine-module/src/world/GlbSceneLoader.ts',
+    'ascii-engine-module/src/world/UrbanGlbSceneBuilder.ts',
+    'ascii-engine-module/src/world/MascotStageBuilder.ts',
+    'ascii-engine-module/src/entities/TuxEntityFactory.ts',
+    'ascii-engine-module/src/animation/AnimationSystem.ts',
+    'ascii-engine-module/src/vfx/VfxController.ts',
+    'ascii-engine-module/src/input/PointerInput.ts',
+    'ascii-engine-module/src/input/KeyboardInput.ts'
+  ];
+  for (const rel of requiredModules) {
+    assert.ok(existsSync(path.join(root, rel)), `Missing engine module: ${rel}`);
+  }
+
+  const loaderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/GlbSceneLoader.ts'),
+    'utf8'
+  );
+  assert.doesNotMatch(loaderSrc, /gstatic\.com|unpkg\.com|jsdelivr\.net/i);
+
+  const sandbox = createBundleSandbox();
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.DEFAULT_SCENE_MODEL_URL, './assets/models/cena_completa.glb');
+  assert.equal(pkg.DEFAULT_DRACO_DECODER_PATH, './assets/draco/');
+  assert.equal(pkg.normalizeRelativeDecoderPath('./assets/draco'), './assets/draco/');
+  assert.throws(
+    () => pkg.normalizeRelativeDecoderPath('https://www.gstatic.com/draco/v1/decoders/'),
+    /External CDN URLs are forbidden/
+  );
+  assert.throws(
+    () => pkg.normalizeRelativeModelUrl('https://cdn.example.com/cena_completa.glb'),
+    /External CDN URLs are forbidden/
+  );
+});
+
+test('neofetch fallback is static ASCII art and Tux 3D mascot stage stays intact and pointer-free', () => {
+  const neofetch = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
+  const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
+  const mascotBuilderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
+    'utf8'
+  );
+
   includesAll(neofetch, [
     'STATIC_PENGUIN',
     'renderStaticPenguinArt',
@@ -68,343 +201,278 @@ test('neofetch fallback is static ASCII art and stays pointer-free', () => {
   assert.doesNotMatch(neofetch, /AUTO_SPIN_RAD_PER_SEC|state\.yaw \+=|requestAnimationFrame|renderPenguinAscii/);
   assert.doesNotMatch(neofetch, /pointermove|pointerdown|updateFromClientPoint/);
 
-  // Engine: the mascot stage is pointer-inert via CSS and one integration-only
-  // group rotates the Tux root on yaw only; no pitch/badge updates remain.
   includesAll(adapter, [
     'TuxMascotRoot',
     'TuxAutoSpin',
     'data-pointer-locked',
     'data-auto-spin',
-    'getScene'
+    'getScene',
+    "background: '#13222E'",
+    "coolAmbient: '#1D2B36'",
+    'blockBlendWeight: 0.0',
+    'enableShadows: true'
   ]);
-  assert.doesNotMatch(neofetch, /angleBadge|state\.pitch|setAngles/);
-  assert.doesNotMatch(adapter, /updatePenguinFromPointer|penguinTargetYaw|windowPointerListener|stopImmediatePropagation/);
-});
+  includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
+  includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
-test('modular engine architecture exposes ECS, Lifecycle, World, Entities, VFX, and Input modules', () => {
-  const expectedFiles = [
-    'ascii-engine-module/src/core/EngineLoop.ts',
-    'ascii-engine-module/src/core/LifecycleManager.ts',
-    'ascii-engine-module/src/core/ResolutionController.ts',
-    'ascii-engine-module/src/ecs/World.ts',
-    'ascii-engine-module/src/ecs/SystemRunner.ts',
-    'ascii-engine-module/src/world/MapLoader.ts',
-    'ascii-engine-module/src/world/PlaygroundSceneBuilder.ts',
-    'ascii-engine-module/src/entities/TuxEntityFactory.ts',
-    'ascii-engine-module/src/entities/PlaygroundEntityFactory.ts',
-    'ascii-engine-module/src/animation/AnimationSystem.ts',
-    'ascii-engine-module/src/vfx/VfxController.ts',
-    'ascii-engine-module/src/input/PointerInput.ts',
-    'ascii-engine-module/src/input/KeyboardInput.ts'
-  ];
-
-  for (const rel of expectedFiles) {
-    assert.ok(existsSync(path.join(root, rel)), `Missing module: ${rel}`);
-  }
-});
-
-test('built portfolio IIFE bundle executes cleanly and runs ECS, TuxEntityFactory, and MapLoader', async () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  assert.ok(existsSync(bundlePath), 'Built portfolio bundle assets/js/ascii-engine.bundle.js must exist');
-
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const enginePkg = sandbox.ASCIIRealms;
-  assert.ok(enginePkg && typeof enginePkg.AsciiSceneEngine === 'function', 'ASCIIRealms.AsciiSceneEngine exported');
-
-  const THREE = enginePkg.THREE;
-  const ecs = new enginePkg.World();
-  const scene = new THREE.Scene();
-
-  const { entityId, rootGroup } = enginePkg.TuxEntityFactory.spawn(ecs, scene, {
-    position: [0, 0, 0],
-    includeShowcaseRig: true
-  });
-
-  assert.equal(ecs.getEntityCount(), 1, 'Tux entity registered in ECS World');
-  assert.ok(ecs.hasComponent(entityId, 'Transform'));
-  assert.ok(ecs.hasComponent(entityId, 'RotationTarget'));
-  assert.ok(ecs.hasComponent(entityId, 'AnimationState'));
-  assert.ok(ecs.hasComponent(entityId, 'InputState'));
-  assert.ok(ecs.hasComponent(entityId, 'Renderable'));
-
-  // Simulate pointer target yaw/pitch and run Movement + Animation + RenderSync systems
-  const input = ecs.getComponent(entityId, 'InputState');
-  const rotTarget = ecs.getComponent(entityId, 'RotationTarget');
-  input.pointerActive = true;
-  rotTarget.targetYaw = 0.85;
-  rotTarget.targetPitch = -0.22;
-
-  const runner = new enginePkg.SystemRunner()
-    .addSystem(new enginePkg.MovementRotationSystem())
-    .addSystem(new enginePkg.AnimationSystem())
-    .addSystem(new enginePkg.RenderSyncSystem());
-
-  runner.run(ecs, { dt: 0.05, elapsed: 0.5 });
-
-  const transform = ecs.getComponent(entityId, 'Transform');
-  assert.ok(transform.rotY > 0.2, 'Tux smoothly lerps yaw toward pointer target');
-  assert.ok(transform.rotX < -0.02, 'Tux smoothly lerps pitch toward pointer target');
-  assert.equal(rootGroup.rotation.y, transform.rotY, 'RenderSyncSystem syncs Three.js Object3D');
-
-  // Verify MapLoader consolidates exclusively onto the single cyberpunk-citadel scenario
-  assert.deepEqual(Array.from(enginePkg.MapLoader.listMapIds()), ['cyberpunk-citadel']);
-  const mapDef = enginePkg.MapLoader.load('cyberpunk-citadel');
-  assert.equal(mapDef.id, 'cyberpunk-citadel');
-  assert.ok(mapDef.buildings.length === 14 && mapDef.braziers.length === 2);
-
-  // Verify KeyboardInput stays disabled by default so page shortcuts/scroll are never hijacked
-  const kb = new enginePkg.KeyboardInput();
-  assert.equal(kb.isEnabled(), false);
-  const axes = kb.sampleAxes();
-  assert.equal(axes.moveX, 0);
-  assert.equal(axes.moveZ, 0);
-  assert.equal(axes.interactPressed, false);
-
-  // Verify centralized LifecycleManager.disposeObject3D cleans scene cleanly
-  enginePkg.LifecycleManager.disposeObject3D(scene);
-  assert.equal(scene.children.length, 0);
-});
-
-test('adaptive resolution & shader pipeline enforce DPR caps, subpixel guardrails, and water reflection sync', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const asciiShader = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
-    'utf8'
-  );
-  const waterShader = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
-    'utf8'
-  );
-  const sceneBuilder = readFileSync(
-    path.join(root, 'ascii-engine-module/src/world/PlaygroundSceneBuilder.ts'),
-    'utf8'
-  );
-  const neofetchSrc = readFileSync(path.join(root, 'assets/js/neofetch.js'), 'utf8');
-
-  // 1. Shader & mesh audit assertions: subdivided water plane, mirrored point reflections, sub-cell supersampling & cursor sync
-  includesAll(asciiShader, ['uSubCellSpread', 'sampleCellIntegrated', 'smoothstep']);
-  includesAll(waterShader, ['mirroredLight', 'hiFreqFade', 'uCursorPos', 'uTorch0']);
-  assert.match(sceneBuilder, /PlaneGeometry\(mapDef\.waterSize,\s*mapDef\.waterSize,\s*48,\s*48\)/);
-  includesAll(engineCore, ['uCursorPos', 'uCursorIntensity', 'uTorch0', 'computeAdaptiveResolution']);
-
-  // 2. Run ResolutionController across mobile coarse, Retina HD, and 4K UHD profiles via built bundle
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const { computeAdaptiveResolution, DEFAULT_ENGINE_CONFIG } = sandbox.ASCIIRealms;
-  assert.equal(typeof computeAdaptiveResolution, 'function');
-
-  // Mobile 360x300 @ DPR 3.0 (coarse pointer) -> DPR capped at 1.5, larger legible cells, 1/4 bloom
-  const mobileRes = computeAdaptiveResolution({
-    cssWidth: 360,
-    cssHeight: 300,
-    devicePixelRatio: 3.0,
-    config: DEFAULT_ENGINE_CONFIG,
-    isCoarsePointer: true
-  });
-  assert.equal(mobileRes.tier, 'mobile');
-  assert.ok(mobileRes.effectiveDpr <= 1.5, 'Mobile DPR capped at 1.5 for 60 FPS');
-  assert.ok(mobileRes.activeCellSize >= 11, 'Mobile enlarges cells for crisp readability');
-  assert.equal(mobileRes.bloomDownsample, 4);
-
-  // Desktop Retina 1440x680 @ DPR 2.5 -> DPR capped at maxPixelRatio (2.0), 96px HiDPI atlas, crisp dense grid
-  const uhdRes = computeAdaptiveResolution({
-    cssWidth: 1440,
-    cssHeight: 680,
-    devicePixelRatio: 2.5,
-    config: DEFAULT_ENGINE_CONFIG,
-    isCoarsePointer: false
-  });
-  assert.equal(uhdRes.tier, 'uhd');
-  assert.equal(uhdRes.effectiveDpr, 2);
-  assert.equal(uhdRes.atlasTileSize, 96);
-  assert.ok(uhdRes.columns <= 190 && uhdRes.columns > mobileRes.columns, 'Desktop scales up density within anti-noise cap');
-  assert.ok(uhdRes.cellPhysW >= 6 && uhdRes.cellPhysH >= 8, 'Integer physical cells never collapse to subpixel dust');
-
-  // Extreme 4K 3840x1600 @ DPR 2.0 -> column cap guardrail prevents subpixel noise
-  const extreme4k = computeAdaptiveResolution({
-    cssWidth: 3840,
-    cssHeight: 1600,
-    devicePixelRatio: 2.0,
-    config: DEFAULT_ENGINE_CONFIG,
-    isCoarsePointer: false
-  });
-  assert.ok(extreme4k.columns <= 190, '4K viewport respects max column cap to preserve ASCII aesthetic');
-
-  // Mascot mode (Neofetch Tux) -> tight 24..78 column guardrail matching Tux reference art
-  const mascotRes = computeAdaptiveResolution({
-    cssWidth: 420,
-    cssHeight: 240,
-    devicePixelRatio: 2.0,
-    config: Object.assign({}, DEFAULT_ENGINE_CONFIG, { mode: 'mascot', cellSize: 8 }),
-    isCoarsePointer: false
-  });
-  assert.ok(mascotRes.columns >= 24 && mascotRes.columns <= 78);
-
-  // 3. Fallback neofetch adaptive grid parity
-  const nfSandbox = {
-    window: {
-      innerWidth: 1280,
-      innerHeight: 800,
-      matchMedia: () => ({ matches: false }),
-      addEventListener: () => {}
-    },
-    document: { querySelector: () => null, getElementById: () => null, addEventListener: () => {} }
-  };
-  nfSandbox.window.TP = {};
-  nfSandbox.TP = nfSandbox.window.TP;
-  vm.createContext(nfSandbox);
-  vm.runInContext(neofetchSrc, nfSandbox);
-
-  const desktopFallback = nfSandbox.TP.neofetch.computeFallbackGrid(440, 240);
-  const compactFallback = nfSandbox.TP.neofetch.computeFallbackGrid(220, 180);
-  assert.ok(desktopFallback.cols > compactFallback.cols, 'Fallback raycaster scales Tux grid density with stage width');
-});
-
-test('ECS ordered pipeline, WebGL disposal lifecycle, Cyberpunk scene builder & smooth resolution transitions work end-to-end', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
+  const sandbox = createBundleSandbox();
   const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#13222E');
+  assert.equal(pkg.MASCOT_FLOOR_HEX, '#1D2B36');
 
-  // 1. Deterministic priority ordering & removal in SystemRunner
-  const runner = new pkg.SystemRunner();
-  runner
-    .addSystem(new pkg.RenderSyncSystem(), 40)
-    .addSystem(new pkg.PatrolSystem(), 15)
-    .addSystem(new pkg.NeonPulseSystem(), 35)
-    .addSystem(new pkg.AnimationSystem(), 30);
+  const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    mode: 'mascot',
+    fov: 38,
+    enableShadows: true
+  });
+  const stage = pkg.MascotStageBuilder.build(mascotConfig);
+  const ecs = new pkg.World();
+  const { entityId, rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(ecs, stage.scene, {
+    position: [0, 0.04, 0],
+    scale: 1.02,
+    includeShowcaseRig: false,
+    bobAmplitude: 0.018
+  });
 
-  const names = runner.getSystemNames();
-  assert.equal(names[0], 'PatrolSystem');
-  assert.equal(names[1], 'AnimationSystem');
-  assert.equal(names[2], 'NeonPulseSystem');
-  assert.equal(names[3], 'RenderSyncSystem');
-  assert.equal(runner.removeSystem('NeonPulseSystem'), true);
-  assert.equal(runner.getSystemNames().length, 3);
+  assert.equal(ecs.getEntityCount(), 1);
+  assert.ok(stage.backdropMesh && stage.floorMesh);
+  const torsoMesh = tuxRoot.getObjectByName('TuxTorso');
+  assert.ok(torsoMesh && torsoMesh.material.vertexColors === true);
 
-  // 2. Cyberpunk scene construction + ECS entity components + GPU disposal on World.destroyEntity / clear
-  const ecsWorld = new pkg.World();
-  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
-  assert.equal(cyberMap.id, 'cyberpunk-citadel');
-  assert.equal(cyberMap.themeStyle, 'cyberpunk');
-  assert.ok(cyberMap.buildings.length >= 10, 'Cyberpunk skyline includes urban megastructures');
-  assert.ok(cyberMap.drones.length >= 2, 'Cyberpunk skyline includes aerial hover-spinners');
-
-  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-  assert.ok(built.scene.fog, 'Cyberpunk scene includes depth fog');
-  assert.ok(ecsWorld.getEntityCount() >= 6, 'Spawns holo-reactor, neon pylons, hover-drones, and cyber-netrunner');
-
-  const droneEntities = ecsWorld.query('Transform', 'PatrolPath', 'NeonBeacon');
-  assert.ok(droneEntities.length >= 2, 'Hover-drones carry Transform + PatrolPath + NeonBeacon components');
-
-  const droneId = droneEntities[0];
-  const beforeX = ecsWorld.getComponent(droneId, 'Transform').x;
-
-  const fullRunner = new pkg.SystemRunner()
-    .addSystem(new pkg.PatrolSystem(), 15)
-    .addSystem(new pkg.MovementRotationSystem(built.terrainHeightAt), 20)
+  const runner = new pkg.SystemRunner()
+    .addSystem(new pkg.MovementRotationSystem(), 20)
     .addSystem(new pkg.AnimationSystem(), 30)
-    .addSystem(new pkg.NeonPulseSystem(), 35)
+    .addSystem(new pkg.RenderSyncSystem(), 40);
+  runner.run(ecs, { dt: 0.05, elapsed: 0.5 });
+  assert.equal(tuxRoot.position.y, ecs.getComponent(entityId, 'Transform').y);
+
+  ecs.clear(true);
+  pkg.LifecycleManager.disposeObject3D(stage.scene);
+  assert.equal(stage.scene.children.length, 0);
+});
+
+test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Player_Rig (WASD + NLA Idle/Walking/Casting + clamp), CameraFollow, Carro_Grupo 30s light cycle, and presets', async () => {
+  const sandbox = createBundleSandbox();
+  const pkg = sandbox.ASCIIRealms;
+  const THREE = pkg.THREE;
+
+  // Stub Three.js ImageLoader inside Node VM so GLTFLoader decodes all 186 meshes, skeletons, materials & NLA clips
+  THREE.ImageLoader.prototype.load = function (_url, onLoad) {
+    const img = { width: 2, height: 2, data: new Uint8Array(16) };
+    if (onLoad) onLoad(img);
+    return img;
+  };
+
+  const rawGlb = readFileSync(path.join(root, 'assets/models/cena_completa.glb'));
+  const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
+
+  const loader = new pkg.GlbSceneLoader();
+  const prepared = await loader.parseBuffer(glbBuffer, '');
+
+  // 1. Verify all 3 embedded root nodes & invisible helper sanitization
+  assert.equal(prepared.nodes.cidade.name, 'Cidade_Sketchfab_model');
+  assert.equal(prepared.nodes.playerRig.name, 'Player_Rig');
+  assert.equal(prepared.nodes.carroGrupo.name, 'Carro_Grupo');
+  assert.ok(prepared.clips.Idle && prepared.clips.Walking && prepared.clips.Casting, 'All 3 NLA clips extracted');
+
+  const helperBox = prepared.nodes.cidade.getObjectByName('Cidade_Object_331');
+  assert.ok(helperBox && helperBox.visible === false, 'Invisible exporter bounding box hidden cleanly');
+
+  // Verify Hips horizontal root offset normalization across Idle, Walking, and Casting
+  const walkHips = prepared.clips.Walking.tracks.find((t) => /hips\.position$/i.test(t.name));
+  const castHips = prepared.clips.Casting.tracks.find((t) => /hips\.position$/i.test(t.name));
+  assert.ok(Math.hypot(walkHips.values[0], walkHips.values[1]) < 0.1, 'Walking Hips aligned to Player_Rig foot pivot');
+  assert.ok(Math.hypot(castHips.values[0], castHips.values[1]) < 0.1, 'Casting Hips aligned to Player_Rig foot pivot');
+
+  // 2. Attach prepared GLB assets into ECS World & UrbanGlbSceneBuilder
+  const ecsWorld = new pkg.World();
+  const nightConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, { atmosphere: 'night' });
+  const stage = pkg.UrbanGlbSceneBuilder.createStage(nightConfig, ecsWorld, prepared);
+
+  assert.equal(ecsWorld.getEntityCount(), 3, 'Maps Cidade_Sketchfab_model, Player_Rig, and Carro_Grupo to 3 ECS entities');
+  assert.ok(stage.cidadeEntityId && stage.playerEntityId && stage.carroEntityId);
+
+  // Set up Input + ECS Systems + PerspectiveCamera
+  const mockListeners = {};
+  const mockContainer = {
+    style: {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 960, height: 540 }),
+    addEventListener(type, fn, opts) {
+      mockListeners[type] = { fn, opts };
+    },
+    removeEventListener(type) {
+      delete mockListeners[type];
+    }
+  };
+  const pointer = new pkg.PointerInput(mockContainer);
+  pointer.attach();
+  assert.equal(mockContainer.style.touchAction, 'pan-y');
+  assert.equal(mockListeners.pointermove.opts.passive, true);
+
+  const keyboard = new pkg.KeyboardInput({ enabled: true, focusTarget: mockContainer });
+  const camera = new THREE.PerspectiveCamera(74, 16 / 9, 0.15, 135);
+
+  const runner = new pkg.SystemRunner()
+    .addSystem(new pkg.InputSystem(pointer, keyboard, camera), 10)
+    .addSystem(new pkg.TrafficFlowSystem(), 15)
+    .addSystem(new pkg.MovementRotationSystem(stage.waypointMarker), 20)
+    .addSystem(new pkg.CharacterAnimationSystem(), 28)
+    .addSystem(new pkg.AnimationSystem(), 30)
+    .addSystem(new pkg.CameraFollowSystem(camera), 38)
     .addSystem(new pkg.RenderSyncSystem(), 40);
 
-  fullRunner.run(ecsWorld, { dt: 0.05, elapsed: 1.25 });
-  const afterX = ecsWorld.getComponent(droneId, 'Transform').x;
-  assert.notEqual(beforeX, afterX, 'PatrolSystem moves hover-drone along cyberpunk skyline corridor');
+  // Initial frame at t = 0: Player_Rig in Idle, camera snapped to fixed 3rd-person offset, Carro_Grupo active
+  runner.run(ecsWorld, { dt: 0, elapsed: 0 });
 
-  // Verify clean WebGL resource disposal & scene detachment when destroying an ECS entity
-  const countBeforeDestroy = ecsWorld.getEntityCount();
-  const droneRenderable = ecsWorld.getComponent(droneId, 'Renderable');
-  assert.ok(droneRenderable.object3D.parent !== null, 'Drone mesh attached to scene depth layer group');
-  assert.equal(ecsWorld.destroyEntity(droneId, true), true);
-  assert.equal(ecsWorld.getEntityCount(), countBeforeDestroy - 1);
-  assert.equal(droneRenderable.object3D.parent, null, 'destroyEntity detaches and disposes Object3D');
+  const playerTransform = ecsWorld.getComponent(stage.playerEntityId, 'Transform');
+  const charAnim = ecsWorld.getComponent(stage.playerEntityId, 'CharacterAnimation');
+  const camFollow = ecsWorld.getComponent(stage.playerEntityId, 'CameraFollow');
+  const carRenderable = ecsWorld.getComponent(stage.carroEntityId, 'Renderable');
+  const carTraffic = ecsWorld.getComponent(stage.carroEntityId, 'TrafficCycle');
 
-  ecsWorld.clear(true);
-  assert.equal(ecsWorld.getEntityCount(), 0, 'World.clear disposes all remaining entities');
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-  assert.equal(built.scene.children.length, 0);
+  assert.equal(charAnim.activeClip, 'Idle', 'Player_Rig starts in looped Idle animation');
+  assert.AlmostEqual = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
+  assert.AlmostEqual(camera.position.x, playerTransform.x + camFollow.offsetX);
+  assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
+  assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
 
-  // 3. Smooth resolution & fullscreen cell-density transition controller
-  const transition = new pkg.ResolutionTransitionController(14.0);
-  const compactProfile = pkg.computeAdaptiveResolution({
-    cssWidth: 620,
-    cssHeight: 360,
-    devicePixelRatio: 1.5,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
-    isCoarsePointer: false,
-    isFullscreen: false
-  });
-  const fullscreenProfile = pkg.computeAdaptiveResolution({
-    cssWidth: 1920,
-    cssHeight: 1080,
-    devicePixelRatio: 2.0,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
-    isCoarsePointer: false,
-    isFullscreen: true
-  });
+  // 3. WASD Locomotion (`KeyW` + `KeyA`), smooth rotation, Walking cross-fade, and sidewalk clamping
+  const startX = playerTransform.x;
+  const startZ = playerTransform.z;
+  keyboard.setKeyState('KeyW', true);
+  keyboard.setKeyState('KeyA', true);
 
-  transition.setTarget(compactProfile, true);
-  const initialSnap = transition.step(0);
-  assert.equal(initialSnap.isTransitioning, false);
-  assert.equal(initialSnap.cellH, compactProfile.cellPhysH);
+  for (let i = 1; i <= 10; i += 1) {
+    runner.run(ecsWorld, { dt: 0.05, elapsed: i * 0.05 });
+  }
 
-  // Expand to fullscreen -> smooth intermediate interpolation followed by exact integer snap
-  transition.setTarget(fullscreenProfile, false);
-  const midStep = transition.step(0.016);
-  assert.equal(midStep.isTransitioning, true, 'Fullscreen expansion interpolates smoothly without abrupt jump');
+  assert.equal(charAnim.activeClip, 'Walking', 'Pressing WASD cross-fades AnimationMixer to Walking');
+  assert.ok(playerTransform.x < startX && playerTransform.z < startZ, 'Player_Rig moves diagonally along XZ with W+A');
+  assert.ok(Math.abs(playerTransform.rotY) > 0.3, 'Player_Rig smoothly rotates toward WASD movement vector');
+
+  // Verify fixed-direction 3rd-person camera smoothly lerps along with Player_Rig
+  assert.ok(camera.position.x < startX + camFollow.offsetX, '3rd-person camera smoothly follows Player_Rig X');
+  assert.ok(camera.position.z < startZ + camFollow.offsetZ, '3rd-person camera smoothly follows Player_Rig Z');
+
+  // Drive hard into North wall (`KeyW` for 4 seconds) -> `THREE.MathUtils.clamp` keeps Player_Rig on sidewalk (`z >= -3.30`)
+  keyboard.setKeyState('KeyA', false);
+  for (let i = 1; i <= 80; i += 1) {
+    runner.run(ecsWorld, { dt: 0.05, elapsed: 0.5 + i * 0.05 });
+  }
   assert.ok(
-    midStep.cellH > Math.min(compactProfile.cellPhysH, fullscreenProfile.cellPhysH) &&
-      midStep.cellH < Math.max(compactProfile.cellPhysH, fullscreenProfile.cellPhysH),
-    'Intermediate frame smoothly blends physical cell height'
+    playerTransform.z >= pkg.DEFAULT_URBAN_SIDEWALK_BOUNDS.minZ - 1e-5,
+    `Sidewalk clamp prevents crossing north building wall (z=${playerTransform.z})`
   );
 
-  // Advance ~0.8s so exponential damping settles and snaps cleanly to exact integer grid
-  let settled = midStep;
-  for (let i = 0; i < 50; i += 1) {
-    settled = transition.step(0.02);
+  // Release WASD -> smoothly cross-fades back to Idle
+  keyboard.setKeyState('KeyW', false);
+  for (let i = 1; i <= 10; i += 1) {
+    runner.run(ecsWorld, { dt: 0.05, elapsed: 4.5 + i * 0.05 });
   }
-  assert.equal(settled.isTransitioning, false, 'Transition settles cleanly with zero residual drift');
-  assert.equal(settled.cellW, fullscreenProfile.cellPhysW);
-  assert.equal(settled.cellH, fullscreenProfile.cellPhysH);
+  assert.equal(charAnim.activeClip, 'Idle', 'Releasing WASD cross-fades AnimationMixer back to Idle');
+
+  // 4. Interaction key `E` triggers `Casting` (`THREE.LoopOnce`) and returns to `Idle` on completion
+  keyboard.setKeyState('KeyE', true);
+  runner.run(ecsWorld, { dt: 0.05, elapsed: 5.1 });
+  keyboard.setKeyState('KeyE', false);
+  assert.equal(charAnim.activeClip, 'Casting', 'Pressing E triggers Casting NLA clip');
+  assert.equal(charAnim.actions.Casting.loop, THREE.LoopOnce, 'Casting runs with THREE.LoopOnce');
+
+  // Advance past Casting duration (1.47s) -> automatically returns to Idle
+  for (let i = 1; i <= 35; i += 1) {
+    runner.run(ecsWorld, { dt: 0.05, elapsed: 5.1 + i * 0.05 });
+  }
+  assert.equal(charAnim.activeClip, 'Idle', 'Casting returns smoothly to Idle after completion');
+
+  // 5. Verify `setAutoOrbit` toggle on CameraFollow
+  camFollow.autoOrbit = true;
+  const fixedCamX = camera.position.x;
+  for (let i = 1; i <= 12; i += 1) {
+    runner.run(ecsWorld, { dt: 0.05, elapsed: 7.0 + i * 0.05 });
+  }
+  assert.notEqual(camera.position.x, fixedCamX, 'CameraFollowSystem gently orbits when setAutoOrbit(true) is active');
+  camFollow.autoOrbit = false;
+
+  // 6. Verify `Carro_Grupo` 30-second traffic cycle (8s moving with lights + 22s hidden)
+  runner.run(ecsWorld, { dt: 0.016, elapsed: 1.0 });
+  const zAt1s = ecsWorld.getComponent(stage.carroEntityId, 'Transform').z;
+  assert.equal(carRenderable.object3D.visible, true, 'Carro_Grupo is visible during 0..8s window (t=1s)');
+  assert.ok(carTraffic.headlightLeft.intensity > 0 && carTraffic.streetThrowLight.intensity > 0, 'Headlights illuminate avenue while moving');
+
+  runner.run(ecsWorld, { dt: 0.016, elapsed: 5.0 });
+  const zAt5s = ecsWorld.getComponent(stage.carroEntityId, 'Transform').z;
+  assert.equal(carRenderable.object3D.visible, true, 'Carro_Grupo remains visible at t=5s');
+  assert.ok(zAt5s > zAt1s, 'Carro_Grupo advances in a straight line along the left lateral avenue');
+  assert.AlmostEqual(
+    (zAt5s - zAt1s) / 4.0,
+    (carTraffic.endZ - carTraffic.startZ) / 8.0,
+    1e-2
+  );
+
+  // Hidden phase: 8s..30s (22 seconds hidden)
+  for (const hiddenTime of [8.05, 15.0, 29.95]) {
+    runner.run(ecsWorld, { dt: 0.016, elapsed: hiddenTime });
+    assert.equal(
+      carRenderable.object3D.visible,
+      false,
+      `Carro_Grupo must stay hidden (visible=false) during 22s pause (t=${hiddenTime}s)`
+    );
+    assert.equal(carTraffic.headlightLeft.intensity, 0, 'Headlights off while Carro_Grupo is hidden');
+    assert.equal(carTraffic.streetThrowLight.intensity, 0);
+  }
+
+  // Cycle restart at t = 30.5s
+  runner.run(ecsWorld, { dt: 0.016, elapsed: 30.5 });
+  assert.equal(carRenderable.object3D.visible, true, 'Carro_Grupo reappears cleanly when 30s cycle restarts');
+  assert.ok(carTraffic.headlightRight.intensity > 0, 'Headlights reactivate on cycle restart');
+
+  // 7. Verify UI Preset Integration (`day`, `night`, `rain`) + VfxController rain particles
+  const vfx = new pkg.VfxController({
+    scene: stage.scene,
+    config: nightConfig,
+    baseCameraPos: [camera.position.x, camera.position.y, camera.position.z],
+    lookAtTarget: [-2, 1.4, -1]
+  });
+  assert.equal(vfx.isRainActive(), false, 'No rain particles in night mode');
+
+  const dayConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    atmosphere: 'day',
+    palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#162029', coolAmbient: '#7A8894' })
+  });
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, dayConfig, ecsWorld);
+  vfx.applyConfig(dayConfig);
+  assert.equal(vfx.isRainActive(), false, 'No rain particles in day mode');
+  assert.ok(stage.keyDirLight.intensity > 2.5, 'Solar directional light stronger in day mode');
+  assert.ok(prepared.materials.roads[0].roughness > 0.85, 'Dry matte asphalt in day mode');
+  assert.ok(carTraffic.baseSpotIntensity < 8.0, 'Headlights dimmed in day mode');
+
+  const rainConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    atmosphere: 'rain',
+    windStrength: 1.45,
+    palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#0A0F14', coolAmbient: '#5E6C78' })
+  });
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, rainConfig, ecsWorld);
+  vfx.applyConfig(rainConfig);
+  assert.equal(vfx.isRainActive(), true, 'Rain particles active in rain mode');
+  assert.ok(prepared.materials.roads[0].roughness < 0.25, 'Mirror-wet reflective asphalt in rain mode');
+  assert.ok(stage.scene.fog.density > 0.02, 'Thicker storm mist in rain mode');
+  assert.ok(carTraffic.baseSpotIntensity >= 22.0, 'Headlights intensified against wet storm asphalt');
+
+  // 8. Complete leak-free disposal of ECS World, AnimationMixer, VfxController, Scene & DRACOLoader
+  pointer.detach();
+  keyboard.detach();
+  vfx.dispose();
+  ecsWorld.clear(true);
+  assert.equal(ecsWorld.getEntityCount(), 0);
+  prepared.dispose();
+  loader.dispose();
+  assert.equal(loader.isDisposed(), true);
+  pkg.LifecycleManager.disposeObject3D(stage.scene);
+  assert.equal(stage.scene.children.length, 0);
 });
 
-test('GPU lighten block-detail blend (~35%), WindSystem street props, and scroll-safe touch input work end-to-end', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const asciiShader = readFileSync(
+test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-object outline API work cleanly', () => {
+  const asciiShaderSrc = readFileSync(
     path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
     'utf8'
   );
@@ -412,857 +480,98 @@ test('GPU lighten block-detail blend (~35%), WindSystem street props, and scroll
     path.join(root, 'ascii-engine-module/src/shaders/glyphAtlas.ts'),
     'utf8'
   );
-  const pointerSrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/input/PointerInput.ts'),
-    'utf8'
-  );
 
-  // 1. Verify ~35% GPU lighten block-vs-detail composition in shader & procedural block tiles in atlas
-  includesAll(asciiShader, ['uBlockBlendWeight', 'uBlockCount', 'max(detailGlyphMask']);
-  includesAll(atlasSrc, ['blockCount = 4', 'bayer4']);
-  includesAll(pointerSrc, ['touchstart', 'touchmove', 'touchend', 'pan-y', '{ passive: true }']);
-
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.blockBlendWeight, 0.35, 'Default lighten block weight is ~35%');
-  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.windStrength, 1.0, 'Default wind strength active');
-
-  // 2. Verify layered Cyberpunk street props (streetpoles, hanging banners, overhead cables) & WindSystem
-  const ecsWorld = new pkg.World();
-  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
-  assert.ok(cyberMap.buildings.length >= 14, 'Layered foreground/midground/background cyberpunk buildings');
-  assert.ok(cyberMap.streetPoles.length >= 6, 'Street poles line both sides of the nocturnal boulevard');
-
-  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-  const windEntities = ecsWorld.query('Transform', 'WindSway');
-  assert.ok(windEntities.length >= 8, 'Hanging neon banners & overhead cables carry WindSway components');
-
-  const sampleWindId = windEntities[0];
-  const initialRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
-  const windSys = new pkg.WindSystem(1.2);
-  windSys.update(ecsWorld, { dt: 0.033, elapsed: 1.4 });
-  const swayedRotZ = ecsWorld.getComponent(sampleWindId, 'Transform').rotZ;
-  assert.notEqual(initialRotZ, swayedRotZ, 'WindSystem oscillates suspended street banners & cables');
-
-  // Verify central Netrunner avatar has articulated coatTail & high-contrast body components
-  const avatarAnim = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
-  assert.ok(avatarAnim && avatarAnim.parts && avatarAnim.parts.coatTail, 'Central Netrunner has wind-animated coatTail');
-
-  // 3. Verify PointerInput touchstart -> touchmove -> touchend drives dragYaw/normX passively without blocking scroll
-  const listeners = {};
-  const listenerOpts = {};
-  const mockContainer = {
-    style: {},
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
-    addEventListener(type, fn, opts) {
-      listeners[type] = fn;
-      listenerOpts[type] = opts;
-    },
-    removeEventListener(type) {
-      delete listeners[type];
-    }
-  };
-
-  const ptr = new pkg.PointerInput(mockContainer);
-  ptr.attach();
-  assert.equal(mockContainer.style.touchAction, 'pan-y', 'Preserves vertical page scrolling via touch-action: pan-y');
-  assert.equal(listenerOpts.touchstart.passive, true);
-  assert.equal(listenerOpts.touchmove.passive, true);
-  assert.equal(listenerOpts.touchend.passive, true);
-
-  listeners.touchstart({
-    isTrusted: true,
-    changedTouches: [{ identifier: 1, clientX: 200, clientY: 150 }]
-  });
-  listeners.touchmove({
-    isTrusted: true,
-    changedTouches: [{ identifier: 1, clientX: 290, clientY: 120 }]
-  });
-
-  const activeSnap = ptr.sample(0.016);
-  assert.equal(activeSnap.isTouch, true);
-  assert.equal(activeSnap.active, true);
-  assert.ok(activeSnap.dragYaw > 0.5, 'Horizontal touch swipe pans street camera smoothly');
-  assert.ok(activeSnap.normX > 0.3, 'Touch coordinates normalize cleanly to stage');
-
-  listeners.touchend({ touches: [] });
-  const releasedSnap = ptr.sample(0.016);
-  assert.equal(releasedSnap.isDown, false);
-  assert.equal(releasedSnap.active, true, 'Briefly holds view angle after finger release before smooth relax');
-
-  ptr.detach();
-  ecsWorld.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-});
-
-test('SceneComposerKit, SceneDepthRig & EntityBlueprintRegistry compose layered cyberpunk scenes cleanly', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  assert.ok(
-    existsSync(path.join(root, 'ascii-engine-module/src/ecs/EntityBlueprint.ts')),
-    'EntityBlueprint.ts module exists'
-  );
-  assert.ok(
-    existsSync(path.join(root, 'ascii-engine-module/src/world/SceneComposerKit.ts')),
-    'SceneComposerKit.ts module exists'
-  );
-
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-  assert.equal(typeof pkg.EntityBlueprintRegistry, 'function');
-  assert.equal(typeof pkg.SceneComposerKit, 'function');
-  assert.equal(typeof pkg.SceneDepthRig, 'function');
-
-  const ecsWorld = new pkg.World();
-  const cyberMap = pkg.MapLoader.load('cyberpunk-citadel');
-  const built = pkg.PlaygroundSceneBuilder.build(cyberMap, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-
-  // 1. DepthRig groups organize foreground, midground, background & sky layers
-  assert.ok(built.depthRig.foreground.children.length > 0, 'Foreground layer populated');
-  assert.ok(built.depthRig.midground.children.length > 0, 'Midground layer populated');
-  assert.ok(built.depthRig.background.children.length > 0, 'Background layer populated');
-  assert.ok(built.depthRig.sky.children.length > 0, 'Sky layer populated');
-
-  // 2. ECS DepthLayer & Blueprint Registry queries
-  const fgEntities = ecsWorld.queryByLayer('foreground');
-  const mgEntities = ecsWorld.queryByLayer('midground');
-  assert.ok(fgEntities.includes(built.avatarEntityId), 'Central Netrunner protagonist sits in foreground layer');
-  assert.ok(mgEntities.includes(built.shrineEntityId), 'Holo-Reactor sits in midground layer');
-  assert.equal(
-    ecsWorld.getComponent(built.avatarEntityId, 'DepthLayer').contrastPriority,
-    1.0,
-    'Foreground protagonist carries top silhouette contrast priority'
-  );
-
-  // 3. Blueprint Registry lists all reusable cyberpunk prefabs & supports role-scoped disposal
-  const bpIds = built.blueprintRegistry.listIds();
-  assert.ok(bpIds.includes('cyber.netrunner-avatar'));
-  assert.ok(bpIds.includes('cyber.wind-banner'));
-  assert.ok(bpIds.includes('cyber.hover-drone'));
-
-  const removedVehicles = ecsWorld.destroyEntitiesByRole('vehicle', true);
-  assert.ok(removedVehicles >= 3, 'destroyEntitiesByRole cleanly removes and disposes all hover-spinners');
-
-  // 4. Palette live-update via NeonMaterialBank
-  built.materialBank.updatePalette({
-    background: '#020308',
-    warmLight: '#00FFAA',
-    warmCore: '#FFEE55',
-    coolAmbient: '#22CCFF',
-    foliageAccent: '#5588FF',
-    cursorLight: '#FFFFFF'
-  });
-  assert.ok(built.materialBank.magenta.color.g > 0.8, 'NeonMaterialBank updates shared emissive materials in one call');
-
-  ecsWorld.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-});
-
-test('single scenario supports Dia/Noite/Com chuva modes, calibrated PCF street shadows, and grid-free 5:8 glyph rendering', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const html = readFileSync(path.join(root, 'index.html'), 'utf8');
-  const asciiShader = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
-    'utf8'
-  );
-  const waterShader = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
-    'utf8'
-  );
-
-  // 1. Legacy unused island noise & RPG presets removed; HTML exposes Noite / Dia / Com chuva
-  assert.equal(
-    existsSync(path.join(root, 'ascii-engine-module/src/scene/noise.ts')),
-    false,
-    'Unused legacy island noise module removed'
-  );
-  includesAll(html, [
-    'data-scene-mode="day"',
-    'data-scene-mode="night"',
-    'data-scene-mode="rain"'
-  ]);
-  assert.doesNotMatch(html, /value="sanctuary"|value="emerald"/);
-
-  // 2. Shader verification: street shader samples real-time directional PCF shadow map; ASCII shader eliminates grid seams
-  includesAll(waterShader, [
-    'uDirShadowMap',
-    'uDirShadowMatrix',
-    'sampleDirectionalShadow',
-    'unpackRGBAToDepth',
-    'uWetness',
-    'uRainIntensity',
-    'uDaylight',
-    'uAvatarPos'
-  ]);
-  includesAll(asciiShader, [
+  // 1. Modern 3D-wrapping ASCII shader invariants (luminance + linearized depth + view-normal Sobel + curvature wrap + soft knee, zero solid block blowout)
+  includesAll(asciiShaderSrc, [
+    'tNormal',
+    'tDepth',
+    'linearizeDepth',
+    'uCameraNear',
+    'uCameraFar',
+    'uVolumeWrapStrength',
+    'sampleCellIntegrated',
+    'uSubCellSpread',
     'uAtlasTileSize',
     'floor(uResolution * 0.5)',
     '0.55 / safeTileDims',
     'smoothBackdrop',
-    'uDaylight'
+    'uBlockBlendWeight',
+    'max(detailGlyphMask'
   ]);
-  assert.doesNotMatch(
-    asciiShader,
-    /clamp\(glyphUv,\s*0\.04,\s*0\.96\)|mod\(floor\(gl_FragCoord\.y\s*\*\s*0\.5\)/,
-    'Removed 4% square UV margin clamp and 2px scanline striping that caused inter-character grid lines'
-  );
+  assert.doesNotMatch(asciiShaderSrc, /b\s*==\s*3/, '100% solid block fill (█) is never emitted on highlights');
+  includesAll(atlasSrc, ['blockCount = 4', 'bayer4']);
 
-  // 3. Runtime verification of atmosphere modes, shadows, and 5:8 full-bleed glyph atlas
   const fillRectCalls = [];
-  const mockCanvas = {
-    width: 0,
-    height: 0,
-    getContext: () => ({
-      clearRect: () => {},
-      fillRect: (x, y, w, h) => {
-        fillRectCalls.push({ x, y, w, h });
-      },
-      fillText: () => {},
-      font: '',
-      textAlign: '',
-      textBaseline: '',
-      fillStyle: ''
-    })
-  };
-
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => mockCanvas },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-  assert.deepEqual(Array.from(pkg.MapLoader.listMapIds()), ['cyberpunk-citadel']);
-
-  // Verify 5:8 proportional glyph atlas & gutter-free solid block fill (`pad = 0`)
-  const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);
-  assert.equal(atlas.tileHeight, 64);
-  assert.equal(atlas.tileWidth, 40, 'Atlas tile width matches 5:8 (0.625) monospace cell aspect');
-  const solidBlockX = (atlas.totalGlyphs - 1) * atlas.tileWidth;
-  const solidBlockFill = fillRectCalls.find(
-    (c) => c.x === solidBlockX && c.y === 0 && c.w === atlas.tileWidth && c.h === atlas.tileHeight
-  );
-  assert.ok(solidBlockFill, 'Solid 100% block tile fills 100% of tileWidth x tileHeight with zero border gap');
-  atlas.texture.dispose();
-
-  // Verify shadows & Dia / Noite / Com chuva transitions on the unified scene
-  const ecsWorld = new pkg.World();
-  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
-  const nightConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, { atmosphere: 'night' });
-  const built = pkg.PlaygroundSceneBuilder.build(mapDef, nightConfig, ecsWorld);
-
-  assert.equal(built.moonDirLight.castShadow, true, 'Primary directional light casts PCF shadows');
-  assert.equal(built.moonDirLight.shadow.mapSize.width, 1536);
-  assert.ok(built.moonDirLight.shadow.normalBias > 0, 'normalBias tuned to prevent shadow acne');
-
-  let shadowCasterCount = 0;
-  let shadowReceiverCount = 0;
-  built.scene.traverse((obj) => {
-    if (obj.isMesh && obj.castShadow) shadowCasterCount += 1;
-    if (obj.isMesh && obj.receiveShadow) shadowReceiverCount += 1;
-  });
-  assert.ok(shadowCasterCount >= 40, 'Buildings, poles, overpass, props & protagonist cast shadows');
-  assert.ok(shadowReceiverCount >= 20, 'Foundation, sidewalks, curbs & facades receive shadows');
-  assert.ok(built.waterMaterial.uniforms.uDirShadowMap.value, 'Street shader initialized with shadow map texture');
-
-  const vfx = new pkg.VfxController({
-    scene: built.scene,
-    config: nightConfig,
-    baseCameraPos: mapDef.cameraAnchor,
-    lookAtTarget: mapDef.cameraLookAt
-  });
-
-  // Night mode ("Noite"): stars visible, moderate wetness, NO rain particles or raindrop splashes
-  assert.equal(vfx.isRainActive(), false);
-  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 0);
-  assert.equal(built.waterMaterial.uniforms.uDaylight.value, 0);
-  assert.equal(built.starPoints.visible, true);
-
-  // Day mode ("Dia"): sunlit angle, stars & searchlights off, dry pavement, high-contrast solar shadows, NO rain
-  const dayConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
-    atmosphere: 'day',
-    palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#1E3F66', coolAmbient: '#7AD4FF' })
-  });
-  pkg.PlaygroundSceneBuilder.applyAtmosphere(built, dayConfig);
-  vfx.applyConfig(dayConfig);
-  assert.equal(vfx.isRainActive(), false);
-  assert.equal(built.waterMaterial.uniforms.uDaylight.value, 1.0);
-  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 0);
-  assert.ok(built.waterMaterial.uniforms.uWetness.value < 0.2, 'Day mode uses dry sunlit asphalt');
-  assert.equal(built.starPoints.visible, false, 'Stars hidden in Day mode');
-  assert.ok(built.moonDirLight.intensity > 2.8, 'Solar directional light intensified in Day mode');
-
-  // Rain mode ("Com chuva"): active rain streaks, flooded reflective pavement (`uWetness > 0.9`), raindrop ripples (`uRainIntensity === 1`)
-  const rainConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
-    atmosphere: 'rain',
-    windStrength: 1.5
-  });
-  pkg.PlaygroundSceneBuilder.applyAtmosphere(built, rainConfig);
-  vfx.applyConfig(rainConfig);
-  assert.equal(vfx.isRainActive(), true, 'Rain particles active strictly in Com chuva mode');
-  assert.equal(built.waterMaterial.uniforms.uRainIntensity.value, 1.0);
-  assert.ok(built.waterMaterial.uniforms.uWetness.value > 0.9, 'Pavement mirror wetness maximized in Com chuva mode');
-  assert.ok(built.scene.fog.density > 0.02, 'Atmospheric storm mist thickens in Com chuva mode');
-
-  ecsWorld.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-});
-
-test('configurable per-object outline API is exported for on-demand targets, inactive by default, and supports optional highlightColor', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  assert.ok(
-    existsSync(path.join(root, 'ascii-engine-module/src/shaders/objectOutline.ts')),
-    'objectOutline.ts module exists'
-  );
-
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-  assert.equal(typeof pkg.applyObjectOutline, 'function');
-  assert.equal(typeof pkg.clearObjectOutline, 'function');
-  assert.equal(typeof pkg.getObjectOutlineState, 'function');
-  assert.equal(typeof pkg.AsciiSceneEngine.prototype.setObjectOutline, 'function');
-  assert.equal(typeof pkg.AsciiSceneEngine.prototype.clearObjectOutline, 'function');
-  assert.equal(typeof pkg.AsciiSceneEngine.prototype.getObjectOutlineState, 'function');
-
-  // 1. Default spawns (Playground & Tux mascot) have ZERO outlines applied globally or on Tux
-  const ecsWorld = new pkg.World();
-  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
-  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-
-  let defaultPlaygroundOutlines = 0;
-  built.scene.traverse((obj) => {
-    if (obj.name === pkg.OUTLINE_SHELL_NAME || (obj.userData && obj.userData.__isAsciiOutlineShell)) {
-      defaultPlaygroundOutlines += 1;
+  const sandbox = createBundleSandbox({
+    document: {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        style: {},
+        getContext: () => ({
+          clearRect: () => {},
+          fillRect: (x, y, w, h) => fillRectCalls.push({ x, y, w, h }),
+          fillText: () => {},
+          font: '',
+          textAlign: '',
+          textBaseline: '',
+          fillStyle: ''
+        })
+      })
     }
   });
-  assert.equal(defaultPlaygroundOutlines, 0, 'Playground has no global or default outline shells');
 
-  const mascotScene = new pkg.THREE.Scene();
-  const mascotEcs = new pkg.World();
-  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(mascotEcs, mascotScene, {
-    includeShowcaseRig: true
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.DEFAULT_PALETTE.background, '#0C1217');
+  assert.equal(pkg.DEFAULT_PALETTE.warmLight, '#4A7C7E');
+  assert.equal(pkg.DEFAULT_PALETTE.warmCore, '#8A99A6');
+  assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87');
+  assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540');
+
+  // 2. High-legibility 5:8 glyph atlas proportions
+  const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);
+  assert.equal(atlas.tileHeight, 64);
+  assert.equal(atlas.tileWidth, 40);
+  atlas.texture.dispose();
+
+  // 3. Adaptive resolution & smooth fullscreen transition controller
+  const mobileRes = pkg.computeAdaptiveResolution({
+    cssWidth: 360,
+    cssHeight: 300,
+    devicePixelRatio: 3.0,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: true
   });
-  const bystanderBox = new pkg.THREE.Mesh(
+  assert.equal(mobileRes.tier, 'mobile');
+  assert.ok(mobileRes.effectiveDpr <= 1.5);
+
+  const extreme4k = pkg.computeAdaptiveResolution({
+    cssWidth: 3840,
+    cssHeight: 1600,
+    devicePixelRatio: 2.0,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.ok(extreme4k.columns <= 190);
+
+  const transition = new pkg.ResolutionTransitionController(14.0);
+  transition.setTarget(mobileRes, true);
+  assert.equal(transition.step(0).isTransitioning, false);
+  transition.setTarget(extreme4k, false);
+  assert.equal(transition.step(0.016).isTransitioning, true);
+
+  // 4. Per-object silhouette outline helper stays opt-in and leak-free
+  const testScene = new pkg.THREE.Scene();
+  const box = new pkg.THREE.Mesh(
     new pkg.THREE.BoxGeometry(1, 1, 1),
     new pkg.THREE.MeshStandardMaterial({ color: 0x223344 })
   );
-  mascotScene.add(bystanderBox);
-
-  assert.equal(pkg.getObjectOutlineState(tuxRoot), null, 'Tux has no outline active by default');
-  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
-
-  // 2. On-demand application on a specific target (with default highlightColor when omitted)
-  const handle = pkg.applyObjectOutline(tuxRoot, { thickness: 1.4 });
-  const initialState = handle.getState();
-  assert.equal(initialState.enabled, true);
-  assert.equal(initialState.thickness, 1.4);
-  assert.equal(
-    initialState.highlightColor,
-    pkg.DEFAULT_OUTLINE_HIGHLIGHT_COLOR,
-    'Uses high-visibility default highlightColor when omitted'
-  );
-  assert.ok(initialState.outlinedMeshCount >= 8, 'Outlines Tux body, head, beak, eyes, wings, feet & tail');
-
-  // Verify bystander object in the same scene is completely unaffected (strictly per-target, not global)
-  assert.equal(pkg.getObjectOutlineState(bystanderBox), null);
-  let bystanderShells = 0;
-  bystanderBox.traverse((obj) => {
-    if (obj.name === pkg.OUTLINE_SHELL_NAME) bystanderShells += 1;
-  });
-  assert.equal(bystanderShells, 0, 'Non-targeted objects in scene receive zero outline shells');
-
-  // Verify showcase pedestal plinth was skipped by default (`excludePedestal: true`)
-  const plinth = tuxRoot.getObjectByName('TuxShowcasePlinth');
-  assert.ok(plinth, 'TuxShowcasePlinth exists when includeShowcaseRig is true');
-  assert.equal(
-    plinth.children.some((c) => c.name === pkg.OUTLINE_SHELL_NAME),
-    false,
-    'Showcase floor plinth is excluded by default so only the character silhouette is outlined'
-  );
-
-  // 3. Dynamic update: custom highlightColor, width alias, and visibility toggle without reallocating shells
-  const updated = handle.update({
-    highlightColor: '#FFD166',
-    width: 2.25,
-    intensity: 2.4,
-    opacity: 0.9
-  });
-  assert.equal(updated.highlightColor, '#FFD166', 'Custom highlightColor updates cleanly');
-  assert.equal(updated.thickness, 2.25, 'width alias updates outline thickness');
-  assert.equal(updated.intensity, 2.4);
-  assert.equal(updated.opacity, 0.9);
-  assert.equal(updated.outlinedMeshCount, initialState.outlinedMeshCount, 'Idempotent update creates zero duplicate shells');
-
-  const hidden = handle.setVisible(false);
-  assert.equal(hidden.enabled, false);
-  let visibleShellsWhileHidden = 0;
-  tuxRoot.traverse((obj) => {
-    if (obj.name === pkg.OUTLINE_SHELL_NAME && obj.visible) visibleShellsWhileHidden += 1;
-  });
-  assert.equal(visibleShellsWhileHidden, 0, 'setVisible(false) hides all outline shells on target');
-
-  // 4. Welded smooth corner normals on BoxGeometry (`aOutlineNormal` has symmetric ~0.577 components)
-  pkg.applyObjectOutline(bystanderBox, { color: 0x00ffcc, thickness: 1.0 });
-  const weldedAttr = bystanderBox.geometry.getAttribute('aOutlineNormal');
-  assert.ok(weldedAttr && weldedAttr.count === 24, 'BoxGeometry receives welded smooth outline normals');
-  assert.ok(
-    Math.abs(Math.abs(weldedAttr.getX(0)) - 1 / Math.sqrt(3)) < 0.02 &&
-      Math.abs(Math.abs(weldedAttr.getY(0)) - 1 / Math.sqrt(3)) < 0.02 &&
-      Math.abs(Math.abs(weldedAttr.getZ(0)) - 1 / Math.sqrt(3)) < 0.02,
-    'Cube corner welded normal is symmetric 1/sqrt(3) miter vector (gap-free corners)'
-  );
-
-  // 5. Clean disposal removes 100% of outline shells
-  const removedCount = handle.dispose();
-  assert.equal(removedCount, initialState.outlinedMeshCount);
-  assert.equal(pkg.getObjectOutlineState(tuxRoot), null);
-  let remainingShells = 0;
-  tuxRoot.traverse((obj) => {
-    if (obj.name === pkg.OUTLINE_SHELL_NAME) remainingShells += 1;
-  });
-  assert.equal(remainingShells, 0, 'dispose() detaches all outline shells cleanly');
-
-  pkg.clearObjectOutline(bystanderBox);
-  ecsWorld.clear(true);
-  mascotEcs.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-  pkg.LifecycleManager.disposeObject3D(mascotScene);
+  testScene.add(box);
+  assert.equal(pkg.getObjectOutlineState(box), null);
+  const handle = pkg.applyObjectOutline(box, { highlightColor: '#4A7C7E', thickness: 1.3 });
+  assert.equal(handle.getState().enabled, true);
+  assert.equal(handle.getState().highlightColor, '#4A7C7E');
+  assert.equal(handle.dispose(), 1);
+  assert.equal(pkg.getObjectOutlineState(box), null);
+  pkg.LifecycleManager.disposeObject3D(testScene);
 });
-
-test('neofetch mascot stage builds minimalist #13222E backdrop + #1D2B36 floor with balanced key/rim lights, soft shadow, and diffused reflection', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
-  const mascotBuilderSrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
-    'utf8'
-  );
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#13222E', 'Backdrop color matches #13222E slate-petrol reference');
-  assert.equal(pkg.MASCOT_FLOOR_HEX, '#1D2B36', 'Floor color matches #1D2B36 medium-low slate reference');
-
-  const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
-    mode: 'mascot',
-    enableShadows: true
-  });
-  const stage = pkg.MascotStageBuilder.build(mascotConfig);
-  const ecs = new pkg.World();
-  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(ecs, stage.scene, {
-    position: [0, 0.04, 0],
-    scale: 1.02,
-    includeShowcaseRig: false,
-    bobAmplitude: 0.018
-  });
-
-  // 1. Minimalist geometry: ONLY floor + backdrop around Tux (zero showcase plinth, zero particle clutter)
-  assert.ok(stage.backdropMesh && stage.backdropMesh.name === 'MascotStageBackdrop');
-  assert.ok(stage.floorMesh && stage.floorMesh.name === 'MascotStageFloor');
-  assert.equal(tuxRoot.getObjectByName('TuxShowcasePlinth'), undefined, 'Mascot stage omits pedestal clutter');
-
-  const topLevelMeshes = stage.scene.children.filter((c) => c.isMesh);
-  assert.equal(topLevelMeshes.length, 2, 'Scene contains only the floor plane and backdrop plane outside Tux');
-
-  // 2. Color-theory value hierarchy: Tux coat < #13222E backdrop < #1D2B36 floor
-  const bgCol = stage.backdropMaterial.uniforms.uBackdropColor.value;
-  const flCol = stage.floorMaterial.uniforms.uFloorColor.value;
-  assert.equal('#' + bgCol.getHexString().toUpperCase(), '#13222E');
-  assert.equal('#' + flCol.getHexString().toUpperCase(), '#1D2B36');
-  const bgLuma = 0.2126 * bgCol.r + 0.7152 * bgCol.g + 0.0722 * bgCol.b;
-  const flLuma = 0.2126 * flCol.r + 0.7152 * flCol.g + 0.0722 * flCol.b;
-  const torsoMesh = tuxRoot.getObjectByName('TuxTorso');
-  const headMesh = tuxRoot.getObjectByName('TuxHead');
-  assert.ok(torsoMesh && headMesh, 'Tux exposes unified TuxTorso and smooth TuxHead');
-  const coatCol = headMesh.material.color;
-  const coatLuma = 0.2126 * coatCol.r + 0.7152 * coatCol.g + 0.0722 * coatCol.b;
-  assert.ok(coatLuma < bgLuma && bgLuma < flLuma, 'Color-theory value order holds: Tux coat < #13222E backdrop < #1D2B36 floor');
-
-  // 3. Pure-ASCII unified smooth Tux body: single vertex-colored torso (zero intersecting belly sphere, zero flatShading, zero self-shadow blotches)
-  assert.equal(torsoMesh.material.vertexColors, true, 'Unified torso uses smooth vertex-colored plumage instead of intersecting belly mesh');
-  assert.ok(torsoMesh.geometry.getAttribute('color'), 'Torso geometry carries smooth per-vertex plumage colors');
-  const directRootMeshes = tuxRoot.children.filter((c) => c.isMesh);
-  assert.equal(directRootMeshes.length, 2, 'Root holds only unified TuxTorso + smooth tail (no intersecting belly sphere)');
-  tuxRoot.traverse((obj) => {
-    if (obj.isMesh) {
-      assert.equal(Boolean(obj.material.flatShading), false, `Mesh ${obj.name || 'part'} uses smooth shading (zero hard facets)`);
-      assert.equal(obj.receiveShadow, false, `Tux mesh ${obj.name || 'part'} disables self-shadowing to prevent belly blotches`);
-    }
-  });
-
-  // 4. Single unified pure-ASCII shader pipeline (parallel non-ASCII uMascotStudio / surfaceSrgb / solid block overrides removed)
-  const asciiShaderSrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
-    'utf8'
-  );
-  const tuxFactorySrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/entities/TuxEntityFactory.ts'),
-    'utf8'
-  );
-  assert.doesNotMatch(
-    asciiShaderSrc,
-    /uMascotStudio|mascotBlockMask|mascotCompositeMask|surfaceSrgb|cellSubstrate|linearToSrgb/,
-    'Removed parallel non-ASCII override pass and raw pixel/block bleed from asciiShader.ts'
-  );
-  assert.doesNotMatch(
-    tuxFactorySrc,
-    /flatShading:\s*true|facePatch/,
-    'Removed hard-faceted materials and overlapping facePatch spheres from TuxEntityFactory.ts'
-  );
-  assert.equal(stage.keyLight.castShadow, true, 'Main key light casts soft floor shadow');
-  assert.ok(stage.fillLight && stage.fillLight.intensity > 0 && stage.fillLight.intensity < 1.0, 'Soft fill light keeps belly illumination smooth');
-  assert.ok(stage.rimLight && stage.rimLight.intensity > 0 && stage.rimLight.intensity < 1.5, 'Discreet rim light separates dark edges');
-  includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
-
-  // 5. Adapter + CSS keep exact palette, pure-ASCII zero block fill (blockBlendWeight: 0.0), shadows enabled, and pointer-inert stage
-  includesAll(adapter, ["background: '#13222E'", "coolAmbient: '#1D2B36'", 'blockBlendWeight: 0.0', 'enableShadows: true']);
-  includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
-
-  ecs.clear(true);
-  pkg.LifecycleManager.disposeObject3D(stage.scene);
-});
-
-test('ASCII REALMS scene enforces Cyber Noir + Entropism palette, pure-ASCII light/reflection modulation, and Techwear avatar with mechanical arm (no sword)', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const asciiShaderSrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
-    'utf8'
-  );
-  const waterShaderSrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/shaders/waterShader.ts'),
-    'utf8'
-  );
-  const avatarFactorySrc = readFileSync(
-    path.join(root, 'ascii-engine-module/src/entities/PlaygroundEntityFactory.ts'),
-    'utf8'
-  );
-  const vm = require('node:vm');
-  const sandbox = {
-    window: {},
-    self: {},
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => 0 }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-
-  // 1. Contained Cyber Noir + Entropism palette in engine defaults and portfolio adapter
-  assert.equal(pkg.DEFAULT_PALETTE.background, '#0C1217', 'Entropic sky/background is #0C1217');
-  assert.equal(pkg.DEFAULT_PALETTE.warmLight, '#4A7C7E', 'Discreet punctual accent is #4A7C7E');
-  assert.equal(pkg.DEFAULT_PALETTE.warmCore, '#8A99A6', 'Mechanical highlight / steel-mist core is #8A99A6');
-  assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87', 'Cold steel ambient is #6E7B87');
-  assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540', 'Structures/ruins tone is #2A3540');
-  assert.ok(pkg.DEFAULT_ENGINE_CONFIG.bloomIntensity <= 0.30, 'Bloom stays restrained so highlights remain ASCII glyphs');
-  assert.doesNotMatch(
-    adapter,
-    /#FF2A85|#FFC145|#00F0FF|#FF1E75|#64F5FF/i,
-    'Exaggerated neon pink/yellow/cyan presets removed from portfolio adapter'
-  );
-  includesAll(adapter, ["background: '#0C1217'", "warmLight: '#4A7C7E'", "warmCore: '#8A99A6'", "foliageAccent: '#2A3540'"]);
-
-  // 2. Pure-ASCII light, floor (#1A222A), structure (#2A3540), and reflection clamping in shaders & scene builder
-  assert.doesNotMatch(asciiShaderSrc, /b\s*==\s*3/, '100% solid block fill (█) is never emitted on highlights');
-  includesAll(waterShaderSrc, ['#1A222A', '#0C1217', 'vec3(0.28, 0.32, 0.35)']);
-
-  const ecsWorld = new pkg.World();
-  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
-  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-
-  assert.equal('#' + built.scene.background.getHexString().toUpperCase(), '#0C1217', 'Scene sky matches #0C1217');
-  assert.equal('#' + built.scene.fog.color.getHexString().toUpperCase(), '#0C1217', 'Scene fog matches #0C1217');
-  assert.ok(
-    built.materialBank.cyan.emissiveIntensity < 1.0 &&
-      built.materialBank.magenta.emissiveIntensity < 1.0 &&
-      built.materialBank.amber.emissiveIntensity < 1.0,
-    'Emissive materials stay below blowout threshold (< 1.0) so ASCII glyph strokes remain legible'
-  );
-
-  // 3. Techwear / Darkwear protagonist (#14171C, #3B424C) with integrated Cybernetic Mechanical Arm (#6E7B87, #8A99A6) and zero glowing sword
-  assert.doesNotMatch(
-    avatarFactorySrc,
-    /bladeCore|plasma sword|katana/i,
-    'Glowing sword / luminous blade weapon completely removed from protagonist blueprint'
-  );
-  const avatarMeshComp = ecsWorld.getComponent(built.avatarEntityId, 'Renderable');
-  const avatarAnimComp = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
-  assert.ok(avatarMeshComp && avatarAnimComp, 'Protagonist entity carries Renderable and AnimationState components');
-
-  const mechArm = avatarMeshComp.object3D.getObjectByName('AvatarMechanicalArm');
-  const mechForearm = avatarMeshComp.object3D.getObjectByName('AvatarMechanicalForearm');
-  assert.ok(mechArm && mechForearm, 'Protagonist features articulated Cybernetic Mechanical Arm and Forearm');
-  assert.equal(avatarAnimComp.parts.rightArm, mechArm, 'Mechanical arm is wired to AnimationStateComponent.parts.rightArm');
-  assert.equal(avatarAnimComp.parts.rightForearm, mechForearm, 'Mechanical forearm is wired to AnimationStateComponent.parts.rightForearm');
-  assert.ok(avatarAnimComp.parts.leftArm && avatarAnimComp.parts.leftFoot && avatarAnimComp.parts.rightFoot);
-
-  const hexSet = new Set();
-  avatarMeshComp.object3D.traverse((node) => {
-    if (node.isMesh && node.material && node.material.color) {
-      hexSet.add('#' + node.material.color.getHexString().toUpperCase());
-    }
-  });
-  assert.ok(hexSet.has('#14171C') && hexSet.has('#3B424C'), 'Avatar garments use Techwear/Darkwear #14171C and #3B424C');
-  assert.ok(hexSet.has('#6E7B87') && hexSet.has('#8A99A6'), 'Mechanical arm uses #6E7B87 and #8A99A6');
-  assert.ok(hexSet.has('#4A7C7E'), 'Avatar includes discreet #4A7C7E punctual accent');
-
-  ecsWorld.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-});
-
-test('ASCII REALMS scene runs 106-degree FOV character-centered camera, click/tap ground navigation, dt walk-to-idle stride cycle, and leak-free input teardown', () => {
-  const bundlePath = path.join(root, 'assets/js/ascii-engine.bundle.js');
-  const vm = require('node:vm');
-  let nowMs = 1000;
-  class MockHTMLElement {}
-  const sandbox = {
-    window: {},
-    self: {},
-    Date: { now: () => nowMs },
-    HTMLElement: MockHTMLElement,
-    document: { createElement: () => ({ getContext: () => null }) },
-    navigator: { userAgent: 'node' },
-    performance: { now: () => nowMs }
-  };
-  sandbox.window = sandbox;
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(readFileSync(bundlePath, 'utf8'), sandbox);
-
-  const pkg = sandbox.ASCIIRealms;
-
-  // 1. FOV = 106° in playground mode while mascot mode keeps 38°
-  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.fov, 106, 'Default scene camera FOV is 106 degrees');
-  includesAll(adapter, ['fov: 106']);
-
-  const ecsWorld = new pkg.World();
-  const mapDef = pkg.MapLoader.load('cyberpunk-citadel');
-  const built = pkg.PlaygroundSceneBuilder.build(mapDef, pkg.DEFAULT_ENGINE_CONFIG, ecsWorld);
-
-  // Mock DOM container with listener tracking for PointerInput
-  const listeners = new Map();
-  const mockElement = {
-    style: {},
-    addEventListener(type, fn) {
-      listeners.set(type, fn);
-    },
-    removeEventListener(type, fn) {
-      if (listeners.get(type) === fn) listeners.delete(type);
-    },
-    getBoundingClientRect() {
-      return { left: 0, top: 0, width: 1000, height: 600 };
-    }
-  };
-
-  const pointerInput = new pkg.PointerInput(mockElement);
-  pointerInput.attach();
-  assert.ok(
-    listeners.has('pointerdown') && listeners.has('pointerup') && listeners.has('touchstart') && listeners.has('touchend'),
-    'PointerInput attaches passive click and touch tap listeners'
-  );
-
-  const keyboardStub = { sampleAxes: () => ({ moveX: 0, moveZ: 0 }) };
-  // Use the real Three.js PerspectiveCamera instance format via cloning / extracting constructor from scene lights' shadow camera or camera-compatible rig
-  // Construct a real PerspectiveCamera from built.moonDirLight's Three.js runtime via Object3D matrix math:
-  // Even cleaner: instantiate AsciiEngineCore camera behavior using a Three.js PerspectiveCamera from MapLoader/SceneBuilder!
-  // Let's verify via AsciiEngineCore's exported SystemRunner + a Three.js camera created by cloning shadow camera or minimal PerspectiveCamera:
-  const coreProbeContainer = Object.assign(new MockHTMLElement(), {
-    clientWidth: 1000,
-    clientHeight: 600,
-    style: {},
-    appendChild() {},
-    removeChild() {},
-    addEventListener() {},
-    removeEventListener() {},
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 })
-  });
-  const mascotCore = new pkg.AsciiSceneEngine(coreProbeContainer, { mode: 'mascot' });
-  const playgroundCore = new pkg.AsciiSceneEngine(coreProbeContainer, { mode: 'playground' });
-  assert.equal(mascotCore.getConfig().fov, 38, 'Mascot stage preserves 38-degree studio FOV');
-  assert.equal(playgroundCore.getConfig().fov, 106, 'Playground scene defaults to 106-degree FOV');
-
-  // Build real PerspectiveCamera with FOV = 106 matching AsciiEngineCore.initPlaygroundStage
-  const THREE_NS = Object.getPrototypeOf(built.scene);
-  void THREE_NS;
-  // Create a lightweight camera matching Three.js PerspectiveCamera projection + matrixWorldInverse for raycast & NDC centering verification
-  const fovRad = (106 * Math.PI) / 180;
-  const aspect = 1000 / 600;
-  const tanHalfFov = Math.tan(fovRad / 2);
-  const camera = built.moonDirLight.shadow.camera.clone();
-  camera.fov = 106;
-  camera.aspect = aspect;
-  camera.isPerspectiveCamera = true;
-  camera.updateProjectionMatrix = function () {
-    const near = 0.1;
-    const far = 120;
-    const top = near * Math.tan((this.fov * Math.PI) / 360);
-    const height = 2 * top;
-    const width = this.aspect * height;
-    this.projectionMatrix.makePerspective(-width / 2, width / 2, top, -top, near, far);
-    this.projectionMatrixInverse.copy(this.projectionMatrix).invert();
-  };
-  camera.updateProjectionMatrix();
-  camera.position.set(0, 3.25, 1.45);
-
-  const runner = new pkg.SystemRunner()
-    .addSystem(new pkg.InputSystem(pointerInput, keyboardStub, camera), 10)
-    .addSystem(new pkg.MovementRotationSystem(built.terrainHeightAt, built.waypointMarker), 20)
-    .addSystem(new pkg.WindSystem(), 25)
-    .addSystem(new pkg.AnimationSystem(), 30)
-    .addSystem(new pkg.CameraFollowSystem(camera), 38)
-    .addSystem(new pkg.RenderSyncSystem(), 40);
-
-  // Initial snap (dt = 0) centers camera on protagonist
-  runner.run(ecsWorld, { elapsed: 0, dt: 0, pointerX: 0, pointerY: 0, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
-  camera.updateMatrixWorld(true);
-
-  const avatarTransform = ecsWorld.getComponent(built.avatarEntityId, 'Transform');
-  const avatarNav = ecsWorld.getComponent(built.avatarEntityId, 'NavigationTarget');
-  const avatarAnim = ecsWorld.getComponent(built.avatarEntityId, 'AnimationState');
-  const avatarVel = ecsWorld.getComponent(built.avatarEntityId, 'Velocity');
-  const startZ = avatarTransform.z;
-
-  const chestPoint = camera.position.clone().set(avatarTransform.x, avatarAnim.baseY + 1.08, avatarTransform.z).project(camera);
-  assert.ok(
-    Math.abs(chestPoint.x) < 1e-4 && Math.abs(chestPoint.y) < 1e-4 && tanHalfFov > 1.3,
-    '106-degree FOV camera starts strictly centered on protagonist chest anchor'
-  );
-
-  // 2. Drag gesture (> 14px) is ignored (does NOT trigger navigation)
-  listeners.get('pointerdown')({ pointerId: 1, button: 0, clientX: 200, clientY: 200 });
-  listeners.get('pointermove')({ pointerId: 1, clientX: 245, clientY: 235 });
-  listeners.get('pointerup')({ pointerId: 1, clientX: 245, clientY: 235 });
-  assert.equal(pointerInput.consumeTap(), null, 'Scroll/drag > 14px does not trigger false ground tap');
-
-  // 3. Clean click on lower-forward boulevard projects onto ground plane and activates locomotion
-  listeners.get('pointerdown')({ pointerId: 2, button: 0, clientX: 620, clientY: 430 });
-  listeners.get('pointerup')({ pointerId: 2, clientX: 621, clientY: 430 });
-
-  runner.run(ecsWorld, { elapsed: 0.05, dt: 0.05, pointerX: 0.24, pointerY: -0.43, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
-  assert.equal(avatarNav.active, true, 'Ground click activates NavigationTargetComponent');
-  assert.equal(built.waypointMarker.visible, true, 'Discreet #4A7C7E waypoint marker appears while moving');
-  assert.equal(avatarAnim.isMoving, true, 'AnimationComponent enters walking state');
-
-  const targetX = avatarNav.targetX;
-  const targetZ = avatarNav.targetZ;
-  assert.ok(Math.hypot(targetX - avatarTransform.x, targetZ - startZ) > 0.3, 'Raycast selects distinct ground destination');
-
-  // Step forward in dt increments: verify stride animation & centered camera tracking during walk
-  let maxStrideAngle = 0;
-  let maxMechArmSwing = 0;
-  for (let step = 1; step <= 80 && avatarNav.active; step += 1) {
-    runner.run(ecsWorld, {
-      elapsed: 0.05 + step * 0.05,
-      dt: 0.05,
-      pointerX: 0,
-      pointerY: 0,
-      playableMoveX: 0,
-      playableMoveZ: 0,
-      windStrength: 0.5
-    });
-    maxStrideAngle = Math.max(maxStrideAngle, Math.abs(avatarAnim.parts.leftFoot.rotation.x));
-    maxMechArmSwing = Math.max(maxMechArmSwing, Math.abs(avatarAnim.parts.rightArm.rotation.x));
-  }
-
-  assert.ok(maxStrideAngle > 0.15, 'Legs articulate through natural stride cycle during walking');
-  assert.ok(maxMechArmSwing > 0.10, 'Cybernetic mechanical arm counter-swings naturally during walking');
-  assert.equal(avatarNav.active, false, 'Avatar reaches destination and clears active navigation');
-  assert.equal(built.waypointMarker.visible, false, 'Waypoint marker hides cleanly on arrival');
-  assert.equal(avatarVel.vx, 0);
-  assert.equal(avatarVel.vz, 0);
-  assert.ok(
-    Math.hypot(avatarTransform.x - targetX, avatarTransform.z - targetZ) < 1e-4,
-    'Avatar snaps cleanly to ground target without jitter or overshoot'
-  );
-
-  // Settle to idle over 0.6s and verify camera remains centered on new position + limbs return to rest
-  for (let step = 1; step <= 15; step += 1) {
-    runner.run(ecsWorld, {
-      elapsed: 5.0 + step * 0.05,
-      dt: 0.05,
-      pointerX: 0,
-      pointerY: 0,
-      playableMoveX: 0,
-      playableMoveZ: 0,
-      windStrength: 0.5
-    });
-  }
-  camera.updateMatrixWorld(true);
-  const arrivedNdc = camera.position.clone().set(avatarTransform.x, avatarAnim.baseY + 1.08, avatarTransform.z).project(camera);
-  assert.ok(
-    Math.abs(arrivedNdc.x) < 1e-3 && Math.abs(arrivedNdc.y) < 1e-3,
-    'Camera accompanies avatar and settles strictly centered at new ground coordinates'
-  );
-  assert.equal(avatarAnim.isMoving, false, 'Avatar returns to idle state after arrival');
-  assert.ok(avatarAnim.locomotionBlend < 0.02, 'Locomotion stride blend decays smoothly back to idle');
-
-  // 4. Touch tap (`touchstart` -> `touchend`) also triggers ground navigation cleanly
-  nowMs += 500;
-  listeners.get('touchstart')({ touches: [{ clientX: 400, clientY: 420 }] });
-  listeners.get('touchend')({ changedTouches: [{ clientX: 401, clientY: 420 }] });
-  runner.run(ecsWorld, { elapsed: 6.0, dt: 0.05, pointerX: -0.2, pointerY: -0.4, playableMoveX: 0, playableMoveZ: 0, windStrength: 0.5 });
-  assert.equal(avatarNav.active, true, 'Touch tap activates ground navigation on mobile devices');
-
-  // 5. Leak-free listener teardown
-  pointerInput.detach();
-  assert.equal(listeners.size, 0, 'PointerInput.detach() removes 100% of DOM event listeners');
-
-  ecsWorld.clear(true);
-  pkg.LifecycleManager.disposeObject3D(built.scene);
-});
-
