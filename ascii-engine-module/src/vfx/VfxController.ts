@@ -27,10 +27,10 @@ export class VfxController {
   private rainSpeeds: Float32Array | null = null;
   private rainActive = false;
 
-  private static readonly RAIN_COUNT = 520;
-  private static readonly RAIN_SPAN_X = 38;
-  private static readonly RAIN_SPAN_Z = 34;
-  private static readonly RAIN_TOP_Y = 16.0;
+  private static readonly RAIN_COUNT = 620;
+  private static readonly RAIN_SPAN_X = 46;
+  private static readonly RAIN_SPAN_Z = 44;
+  private static readonly RAIN_TOP_Y = 17.5;
   private static readonly RAIN_BOTTOM_Y = -0.35;
 
   constructor(options: VfxControllerOptions) {
@@ -139,13 +139,13 @@ export class VfxController {
       camera.lookAt(this.currentLookAt);
     }
 
-    // 2. Subtle interactive cursor light relative to camera focus in playground mode
+    // 2. Subtle interactive cursor light relative to 45-degree camera focus in playground mode
     if (this.config.mode === 'playground') {
-      const anchorX = camera.position.x - 0.9;
-      const anchorZ = camera.position.z - 8.2;
-      const targetLightX = anchorX + pointer.normX * 6.5;
-      const targetLightY = 1.7 + pointer.normY * 1.4;
-      const targetLightZ = anchorZ - pointer.normY * 4.2;
+      const anchorX = camera.position.x - 10.2;
+      const anchorZ = camera.position.z - 9.4;
+      const targetLightX = anchorX + pointer.normX * 7.2;
+      const targetLightY = 1.85 + pointer.normY * 1.4;
+      const targetLightZ = anchorZ - pointer.normY * 5.2;
 
       const lightLerp = 1 - Math.exp(-8.5 * dt);
       this.cursorLight.position.x += (targetLightX - this.cursorLight.position.x) * lightLerp;
@@ -156,13 +156,13 @@ export class VfxController {
       this.cursorLight.intensity = this.config.cursorLightIntensity * 2.2 * activeBoost;
     }
 
-    // 3. Storm rain particle advection anchored around camera X/Z so rain wraps the whole view
+    // 3. Storm rain particle advection anchored around 45-degree camera focus so rain wraps the whole view
     if (this.rainActive && this.rainPoints && this.rainPositions && this.rainSpeeds && dt > 0) {
       const pos = this.rainPositions;
       const speeds = this.rainSpeeds;
       const count = speeds.length;
-      const centerX = camera.position.x - 3.5;
-      const centerZ = camera.position.z - 6.0;
+      const centerX = camera.position.x - 9.5;
+      const centerZ = camera.position.z - 8.5;
       const halfX = VfxController.RAIN_SPAN_X * 0.5;
       const halfZ = VfxController.RAIN_SPAN_Z * 0.5;
       const windDriftX = -2.2 * this.config.windStrength;

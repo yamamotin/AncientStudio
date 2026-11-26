@@ -47,6 +47,7 @@ import {
 } from '../world/MascotStageBuilder';
 import {
   type BuiltUrbanGlbStage,
+  DEFAULT_URBAN_PLAYER_SPAWN,
   URBAN_CAMERA_FOLLOW_DEFAULTS,
   UrbanGlbSceneBuilder,
 } from '../world/UrbanGlbSceneBuilder';
@@ -271,8 +272,12 @@ export class AsciiEngineCore {
     this.builtUrbanStage = stage;
     this.scene = stage.scene;
 
-    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 74;
-    const defaultPlayerSpawn: [number, number, number] = [-2.0, 0.08635, -1.0];
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 66;
+    const defaultPlayerSpawn: [number, number, number] = [
+      DEFAULT_URBAN_PLAYER_SPAWN.x,
+      DEFAULT_URBAN_PLAYER_SPAWN.y,
+      DEFAULT_URBAN_PLAYER_SPAWN.z,
+    ];
     const initialCamPos: [number, number, number] = [
       defaultPlayerSpawn[0] + URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX,
       defaultPlayerSpawn[1] + URBAN_CAMERA_FOLLOW_DEFAULTS.offsetY,
@@ -284,7 +289,7 @@ export class AsciiEngineCore {
       defaultPlayerSpawn[2] + URBAN_CAMERA_FOLLOW_DEFAULTS.lookAtOffsetZ,
     ];
 
-    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.15, 135);
+    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.15, 160);
     camera.position.set(...initialCamPos);
     camera.lookAt(...initialLookAt);
     camera.updateMatrixWorld();
@@ -860,7 +865,7 @@ export class AsciiEngineCore {
         this.lastAutoPlaygroundFov !== null &&
         Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
       if (!wasCustomizedExternally) {
-        const autoFov = 74;
+        const autoFov = 66;
         this.camera.fov = autoFov;
         this.lastAutoPlaygroundFov = autoFov;
       }

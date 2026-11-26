@@ -429,7 +429,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.equal(mockListeners.pointermove.opts.passive, true);
 
   const keyboard = new pkg.KeyboardInput({ enabled: true, focusTarget: mockContainer });
-  const camera = new THREE.PerspectiveCamera(74, 16 / 9, 0.15, 135);
+  const camera = new THREE.PerspectiveCamera(66, 16 / 9, 0.15, 160);
 
   const runner = new pkg.SystemRunner()
     .addSystem(new pkg.InputSystem(pointer, keyboard, camera), 10)
@@ -440,7 +440,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
     .addSystem(new pkg.CameraFollowSystem(camera), 38)
     .addSystem(new pkg.RenderSyncSystem(), 40);
 
-  // Initial frame at t = 0: Player_Rig in Idle, camera snapped to fixed 3rd-person offset, Carro_Grupo active
+  // Initial frame at t = 0: Player_Rig in Idle, camera snapped to 45° CCW elevated pulled-back offset, Carro_Grupo active
   runner.run(ecsWorld, { dt: 0, elapsed: 0 });
 
   const playerTransform = ecsWorld.getComponent(stage.playerEntityId, 'Transform');
@@ -454,6 +454,21 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.AlmostEqual(camera.position.x, playerTransform.x + camFollow.offsetX);
   assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
   assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
+
+  // Verify 45° counter-clockwise camera rotation, top-to-ground tilt, pulled-back framing & architectural lights
+  const camAzimuthDeg = (Math.atan2(camFollow.offsetX, camFollow.offsetZ) * 180) / Math.PI;
+  const camDist3D = Math.hypot(camFollow.offsetX, camFollow.offsetY, camFollow.offsetZ);
+  assert.ok(camAzimuthDeg >= 43 && camAzimuthDeg <= 52, `Camera azimuth rotated ~45° CCW (${camAzimuthDeg.toFixed(1)}°)`);
+  assert.ok(camFollow.offsetY >= 10.0 && camDist3D >= 16.5, 'Camera is inclined top-to-ground and pulled back');
+  assert.ok(
+    stage.urbanLightRig &&
+      stage.urbanLightRig.storefrontEastLight.intensity > 5 &&
+      stage.urbanLightRig.storefrontWestLight.intensity > 5 &&
+      stage.urbanLightRig.streetLampWest.intensity > 8 &&
+      stage.urbanLightRig.streetLampCenter.intensity > 7 &&
+      stage.urbanLightRig.streetLampEast.intensity > 6,
+    'Storefront facade lights and streetlamps illuminate the nocturnal scene'
+  );
 
   // 3. WASD Locomotion (`KeyW` + `KeyA`), smooth rotation, Walking cross-fade, and sidewalk clamping
   const startX = playerTransform.x;
@@ -600,11 +615,14 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     'utf8'
   );
 
-  // 1. Modern 3D-wrapping ASCII shader invariants (luminance + linearized depth + view-normal Sobel + curvature wrap + soft knee, zero solid block blowout)
+  // 1. Modern 3D-wrapping ASCII shader invariants (glyph variety + ground reflections + linearized depth + view-normal Sobel + soft knee, zero solid block blowout)
   includesAll(asciiShaderSrc, [
     'tNormal',
     'tDepth',
     'linearizeDepth',
+    'glyphVarietyHash',
+    'sampleGroundReflection',
+    'uWetness',
     'uCameraNear',
     'uCameraFar',
     'uVolumeWrapStrength',
@@ -646,6 +664,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(pkg.DEFAULT_PALETTE.warmCore, '#8A99A6');
   assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87');
   assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540');
+  includesAll(pkg.DEFAULT_ASCII_RAMP, ['o', 'u', 's', 'a', '$', '8', 'Q', '=', '-', '~', '^', '*']);
 
   // 2. High-legibility 5:8 glyph atlas proportions
   const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);

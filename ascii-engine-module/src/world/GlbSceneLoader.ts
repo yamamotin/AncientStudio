@@ -31,6 +31,8 @@ export interface PreparedUrbanGlbAssets {
     sidewalks: THREE.MeshStandardMaterial[];
     windows: THREE.MeshStandardMaterial[];
     streetLamps: THREE.MeshStandardMaterial[];
+    foliage: THREE.MeshStandardMaterial[];
+    kioskGlass: THREE.MeshStandardMaterial[];
     carHeadlightCovers: THREE.MeshStandardMaterial[];
   };
   dispose: () => void;
@@ -159,6 +161,8 @@ export function extractAndPrepareGlbNodes(
   const sidewalks: THREE.MeshStandardMaterial[] = [];
   const windows: THREE.MeshStandardMaterial[] = [];
   const streetLamps: THREE.MeshStandardMaterial[] = [];
+  const foliage: THREE.MeshStandardMaterial[] = [];
+  const kioskGlass: THREE.MeshStandardMaterial[] = [];
   const carHeadlightCovers: THREE.MeshStandardMaterial[] = [];
   const seenMats = new Set<string>();
 
@@ -182,7 +186,7 @@ export function extractAndPrepareGlbNodes(
     }
 
     const matLabel = mats.map((m) => m?.name ?? '').join(' ').toLowerCase();
-    const isFoliage = /grass|leav/i.test(matLabel);
+    const isFoliage = /grass|leav|material\.005|material\.009/i.test(matLabel);
     mesh.castShadow = !isFoliage;
     mesh.receiveShadow = true;
 
@@ -198,6 +202,10 @@ export function extractAndPrepareGlbNodes(
         sidewalks.push(mat);
       } else if (/window|wiind/i.test(name)) {
         windows.push(mat);
+      } else if (/grass|leav|material\.005|material\.009/i.test(name)) {
+        foliage.push(mat);
+      } else if (/palettematerial005|material\.033/i.test(name)) {
+        kioskGlass.push(mat);
       } else if (
         mat.emissive &&
         (mat.emissive.r + mat.emissive.g + mat.emissive.b > 0.25)
@@ -263,6 +271,8 @@ export function extractAndPrepareGlbNodes(
       sidewalks,
       windows,
       streetLamps,
+      foliage,
+      kioskGlass,
       carHeadlightCovers,
     },
     dispose,

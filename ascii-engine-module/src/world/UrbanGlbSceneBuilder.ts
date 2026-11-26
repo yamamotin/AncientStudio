@@ -10,7 +10,7 @@ import type { PreparedUrbanGlbAssets } from './GlbSceneLoader';
 
 /**
  * Calibrated sidewalk boundary geometry derived from `Cidade_Sketchfab_model` world AABBs:
- * - Spawn anchor of `Player_Rig`: `(-2.0, 0.08635, -1.0)`
+ * - Initial promenade anchor of `Player_Rig`: `(-3.8, 0.08635, -1.1)`
  * - Central courtyard sidewalk: `x in [-5.55, +0.55]`, `z in [-3.30, +4.10]`
  * - Continuous East-West sidewalk promenade: `x in [-19.35, +10.75]`, `z in [-3.25, -1.92]`
  *   (narrowing to `z in [-2.50, -1.92]` in front of the west storefront `x in [-17.65, -9.35]`)
@@ -36,17 +36,28 @@ export const DEFAULT_URBAN_SIDEWALK_BOUNDS: SidewalkBoundsComponent = {
 };
 
 /**
- * Fixed-direction 3rd-person camera framing relative to `Player_Rig` (`[-2, 0.086, -1]`):
- * Keeps `Player_Rig` unobstructed in the foreground while framing the urban buildings
- * and the left lateral avenue (`x = -22.335`) where `Carro_Grupo` passes.
+ * Default promenade spawn coordinates for `Player_Rig` in the open central clearing
+ * between the East and West tree planters, centered in front of the storefront facade.
+ */
+export const DEFAULT_URBAN_PLAYER_SPAWN = {
+  x: -3.8,
+  y: 0.08635,
+  z: -1.1,
+} as const;
+
+/**
+ * Elevated 3rd-person camera rotated 45° counter-clockwise (`+X, +Z` -> looking North-West
+ * `-X, -Z`), tilted from top to ground (~41.5° pitch), and pulled back (~17.8m 3D distance)
+ * to frame the wide street, storefront facades, streetlamps, foliage, and `Carro_Grupo` avenue
+ * while smoothly following (`lerp`) `Player_Rig`.
  */
 export const URBAN_CAMERA_FOLLOW_DEFAULTS = {
-  offsetX: 0.9,
-  offsetY: 5.8,
-  offsetZ: 8.8,
-  lookAtOffsetX: -1.15,
-  lookAtOffsetY: 1.48,
-  lookAtOffsetZ: -0.75,
+  offsetX: 10.2,
+  offsetY: 11.2,
+  offsetZ: 9.4,
+  lookAtOffsetX: -2.3,
+  lookAtOffsetY: 0.95,
+  lookAtOffsetZ: -1.5,
   followSharpness: 6.5,
 } as const;
 
@@ -64,11 +75,24 @@ export const URBAN_TRAFFIC_DEFAULTS = {
   headingYaw: 0,
 } as const;
 
+export interface UrbanArchitecturalLightRig {
+  group: THREE.Group;
+  storefrontEastLight: THREE.PointLight;
+  storefrontWestLight: THREE.PointLight;
+  kioskWarmLight: THREE.PointLight;
+  streetLampWest: THREE.PointLight;
+  streetLampCenter: THREE.PointLight;
+  streetLampEast: THREE.PointLight;
+  emissiveFixtureMaterials: THREE.MeshStandardMaterial[];
+}
+
 export interface BuiltUrbanGlbStage {
   scene: THREE.Scene;
   ambientHemi: THREE.HemisphereLight;
   keyDirLight: THREE.DirectionalLight;
   rimDirLight: THREE.DirectionalLight;
+  urbanLightRig: UrbanArchitecturalLightRig;
+  playerRimLight: THREE.PointLight | null;
   waypointMarker: THREE.Mesh;
   /** Populated once `attachPreparedAssets(...)` mounts `cena_completa.glb` into the ECS World */
   cidadeEntityId: EntityId | null;
@@ -80,13 +104,109 @@ export interface BuiltUrbanGlbStage {
 /**
  * UrbanGlbSceneBuilder: Composes the `[ ASCII REALMS // SCENE ]` 3D environment around
  * `cena_completa.glb` (`Cidade_Sketchfab_model`, `Player_Rig`, `Carro_Grupo`), wiring
- * NLA `AnimationMixer` clips, `SidewalkBounds`, 30s `TrafficCycle` headlight rig, and
- * dynamic `day` / `night` / `rain` presets.
+ * NLA `AnimationMixer` clips, `SidewalkBounds`, 45° counter-clockwise elevated camera,
+ * storefront & streetlamp lighting, 30s `TrafficCycle` headlight rig, and `day`/`night`/`rain` presets.
  */
 export class UrbanGlbSceneBuilder {
+  private static createArchitecturalLightRig(scene: THREE.Scene): UrbanArchitecturalLightRig {
+    const group = new THREE.Group();
+    group.name = 'UrbanArchitecturalLightRig';
+
+    const emissiveFixtureMaterials: THREE.MeshStandardMaterial[] = [];
+
+    const makeFixtureMat = (hex: string, emissiveHex: string, intensity: number): THREE.MeshStandardMaterial => {
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(hex),
+        emissive: new THREE.Color(emissiveHex),
+        emissiveIntensity: intensity,
+        roughness: 0.35,
+        metalness: 0.1,
+      });
+      emissiveFixtureMaterials.push(mat);
+      return mat;
+    };
+
+    // 1. Storefront Facade Lights & Transom Glow Bars (quantized into warm `Q 8 $ # o a` glyphs)
+    const storefrontEastLight = new THREE.PointLight(new THREE.Color('#EEA84B'), 7.8, 16.5, 1.55);
+    storefrontEastLight.position.set(-4.35, 2.95, -2.75);
+    group.add(storefrontEastLight);
+
+    const eastSignGeo = new THREE.BoxGeometry(5.6, 0.28, 0.14);
+    const eastSignMat = makeFixtureMat('#3A2B1C', '#F4B458', 1.35);
+    const eastSignMesh = new THREE.Mesh(eastSignGeo, eastSignMat);
+    eastSignMesh.name = 'StorefrontEastTransom';
+    eastSignMesh.position.set(-4.35, 3.18, -3.46);
+    eastSignMesh.userData.skipObjectOutline = true;
+    group.add(eastSignMesh);
+
+    const storefrontWestLight = new THREE.PointLight(new THREE.Color('#E39E44'), 7.4, 16.5, 1.55);
+    storefrontWestLight.position.set(-13.25, 3.05, -1.85);
+    group.add(storefrontWestLight);
+
+    const westSignGeo = new THREE.BoxGeometry(5.2, 0.26, 0.14);
+    const westSignMat = makeFixtureMat('#38291A', '#ECA84C', 1.28);
+    const westSignMesh = new THREE.Mesh(westSignGeo, westSignMat);
+    westSignMesh.name = 'StorefrontWestTransom';
+    westSignMesh.position.set(-13.25, 3.22, -2.56);
+    westSignMesh.userData.skipObjectOutline = true;
+    group.add(westSignMesh);
+
+    // Sidewalk Kiosk Warm Counter Glow (projects warm reflections onto the foreground street)
+    const kioskWarmLight = new THREE.PointLight(new THREE.Color('#E8AA54'), 5.2, 12.5, 1.6);
+    kioskWarmLight.position.set(-3.42, 2.25, 3.55);
+    group.add(kioskWarmLight);
+
+    // 2. Streetlamps / Luminaires Along the Roadway (`Cidade_Object_336`, `302`, `225`)
+    const lampGlobeGeo = new THREE.SphereGeometry(0.22, 10, 8);
+    const lampGlobeMat = makeFixtureMat('#FFF2D6', '#F8C472', 1.65);
+
+    const streetLampWest = new THREE.PointLight(new THREE.Color('#F4BE6E'), 10.5, 23.0, 1.45);
+    streetLampWest.position.set(-17.99, 5.95, 3.14);
+    group.add(streetLampWest);
+
+    const globeWest = new THREE.Mesh(lampGlobeGeo, lampGlobeMat);
+    globeWest.name = 'StreetLampGlobeWest';
+    globeWest.position.set(-17.99, 6.18, 3.14);
+    globeWest.userData.skipObjectOutline = true;
+    group.add(globeWest);
+
+    const streetLampCenter = new THREE.PointLight(new THREE.Color('#EDB566'), 9.2, 20.0, 1.5);
+    streetLampCenter.position.set(-1.5, 5.65, 3.85);
+    group.add(streetLampCenter);
+
+    const globeCenter = new THREE.Mesh(lampGlobeGeo, lampGlobeMat);
+    globeCenter.name = 'StreetLampGlobeCenter';
+    globeCenter.position.set(-1.5, 5.88, 3.72);
+    globeCenter.userData.skipObjectOutline = true;
+    group.add(globeCenter);
+
+    const streetLampEast = new THREE.PointLight(new THREE.Color('#E4AC5E'), 7.8, 18.5, 1.55);
+    streetLampEast.position.set(8.4, 5.95, 4.83);
+    group.add(streetLampEast);
+
+    const globeEast = new THREE.Mesh(lampGlobeGeo, lampGlobeMat);
+    globeEast.name = 'StreetLampGlobeEast';
+    globeEast.position.set(8.4, 6.18, 4.83);
+    globeEast.userData.skipObjectOutline = true;
+    group.add(globeEast);
+
+    scene.add(group);
+
+    return {
+      group,
+      storefrontEastLight,
+      storefrontWestLight,
+      kioskWarmLight,
+      streetLampWest,
+      streetLampCenter,
+      streetLampEast,
+      emissiveFixtureMaterials,
+    };
+  }
+
   /**
-   * Creates the base `THREE.Scene`, directional PCF shadow rig, hemisphere fill, fog,
-   * and ground navigation ring before (or synchronously alongside) `.glb` attachment.
+   * Creates the base `THREE.Scene`, directional PCF shadow rig, hemisphere fill,
+   * architectural storefront/streetlamp lights, fog, and ground navigation ring.
    */
   public static createStage(
     config: EngineConfig,
@@ -96,20 +216,20 @@ export class UrbanGlbSceneBuilder {
     const scene = new THREE.Scene();
     const bgColor = new THREE.Color(config.palette.background);
     scene.background = bgColor;
-    scene.fog = new THREE.FogExp2(bgColor.getHex(), 0.016);
+    scene.fog = new THREE.FogExp2(bgColor.getHex(), 0.015);
 
     const ambientHemi = new THREE.HemisphereLight(
       new THREE.Color(config.palette.coolAmbient),
-      new THREE.Color('#0C1217'),
-      0.92
+      new THREE.Color('#090E13'),
+      0.78
     );
     scene.add(ambientHemi);
 
     const keyDirLight = new THREE.DirectionalLight(
       new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#C8D6E2'), 0.45),
-      1.75
+      1.48
     );
-    keyDirLight.position.set(14, 26, 16);
+    keyDirLight.position.set(16, 28, 18);
     keyDirLight.target.position.set(-6, 0.5, 0);
     scene.add(keyDirLight.target);
 
@@ -117,21 +237,23 @@ export class UrbanGlbSceneBuilder {
     keyDirLight.shadow.mapSize.width = 1536;
     keyDirLight.shadow.mapSize.height = 1536;
     keyDirLight.shadow.camera.near = 2.0;
-    keyDirLight.shadow.camera.far = 78.0;
-    keyDirLight.shadow.camera.left = -28;
-    keyDirLight.shadow.camera.right = 22;
-    keyDirLight.shadow.camera.top = 24;
-    keyDirLight.shadow.camera.bottom = -24;
+    keyDirLight.shadow.camera.far = 86.0;
+    keyDirLight.shadow.camera.left = -32;
+    keyDirLight.shadow.camera.right = 24;
+    keyDirLight.shadow.camera.top = 26;
+    keyDirLight.shadow.camera.bottom = -26;
     keyDirLight.shadow.bias = -0.0005;
     keyDirLight.shadow.normalBias = 0.035;
     scene.add(keyDirLight);
 
     const rimDirLight = new THREE.DirectionalLight(
       new THREE.Color(config.palette.warmLight),
-      0.55
+      0.52
     );
-    rimDirLight.position.set(-18, 12, -14);
+    rimDirLight.position.set(-20, 14, -15);
     scene.add(rimDirLight);
+
+    const urbanLightRig = UrbanGlbSceneBuilder.createArchitecturalLightRig(scene);
 
     // Subtle #4A7C7E sidewalk waypoint ring for click/tap movement feedback
     const waypointGeo = new THREE.RingGeometry(0.24, 0.36, 24);
@@ -152,6 +274,8 @@ export class UrbanGlbSceneBuilder {
       ambientHemi,
       keyDirLight,
       rimDirLight,
+      urbanLightRig,
+      playerRimLight: null,
       waypointMarker,
       cidadeEntityId: null,
       playerEntityId: null,
@@ -217,6 +341,17 @@ export class UrbanGlbSceneBuilder {
 
     // 2. Controllable Character Entity (`Player_Rig` with NLA `Idle` / `Walking` / `Casting`)
     const groundY = playerRig.position.y || DEFAULT_URBAN_SIDEWALK_BOUNDS.groundY;
+    const spawnX = DEFAULT_URBAN_PLAYER_SPAWN.x;
+    const spawnZ = DEFAULT_URBAN_PLAYER_SPAWN.z;
+    playerRig.position.set(spawnX, groundY, spawnZ);
+
+    // Subtle crisp ivory silhouette catchlight on `Player_Rig` so character reads cleanly against dark pavement
+    const rigScale = Math.max(0.001, Math.abs(playerRig.scale.y || 1));
+    const playerRimLight = new THREE.PointLight(new THREE.Color('#DCEAF6'), 2.4, 5.2, 1.75);
+    playerRimLight.position.set(0, 2.45 / rigScale, 0.22 / rigScale);
+    playerRig.add(playerRimLight);
+    stage.playerRimLight = playerRimLight;
+
     const sidewalkBounds: SidewalkBoundsComponent = {
       ...DEFAULT_URBAN_SIDEWALK_BOUNDS,
       obstacles: DEFAULT_URBAN_SIDEWALK_BOUNDS.obstacles.map((o) => ({ ...o })),
@@ -285,9 +420,9 @@ export class UrbanGlbSceneBuilder {
         contrastPriority: 1.0,
       })
       .addComponent(playerId, 'Transform', {
-        x: playerRig.position.x,
+        x: spawnX,
         y: groundY,
-        z: playerRig.position.z,
+        z: spawnZ,
         rotX: playerRig.rotation.x,
         rotY: playerRig.rotation.y,
         rotZ: playerRig.rotation.z,
@@ -325,8 +460,8 @@ export class UrbanGlbSceneBuilder {
         boundsRadius: 0,
       })
       .addComponent(playerId, 'NavigationTarget', {
-        targetX: playerRig.position.x,
-        targetZ: playerRig.position.z,
+        targetX: spawnX,
+        targetZ: spawnZ,
         active: false,
         moveSpeed: 3.6,
         arrivalRadius: 0.14,
@@ -352,33 +487,33 @@ export class UrbanGlbSceneBuilder {
     // 3. Moving Light-Source Vehicle Entity (`Carro_Grupo` on Left Lateral Avenue)
     const carScale = Math.max(0.0001, Math.abs(carroGrupo.scale.x));
     const invScale = 1 / carScale;
-    const beamColor = new THREE.Color('#D8E6F0').lerp(new THREE.Color(config.palette.warmCore), 0.35);
-    const streetPoolColor = new THREE.Color(config.palette.warmLight).lerp(beamColor, 0.55);
+    const beamColor = new THREE.Color('#F4DDA8');
+    const streetPoolColor = new THREE.Color('#EBBA70');
 
-    const headlightLeft = new THREE.SpotLight(beamColor, 18.0, 30.0, Math.PI * 0.26, 0.55, 1.35);
+    const headlightLeft = new THREE.SpotLight(beamColor, 21.0, 34.0, Math.PI * 0.28, 0.55, 1.3);
     headlightLeft.position.set(-1.12 * invScale, 1.18 * invScale, 0.24 * invScale);
-    headlightLeft.target.position.set(-0.6 * invScale, -0.22 * invScale, 16.0 * invScale);
+    headlightLeft.target.position.set(-0.4 * invScale, -0.25 * invScale, 17.5 * invScale);
     carroGrupo.add(headlightLeft);
     carroGrupo.add(headlightLeft.target);
 
-    const headlightRight = new THREE.SpotLight(beamColor, 18.0, 32.0, Math.PI * 0.28, 0.55, 1.35);
+    const headlightRight = new THREE.SpotLight(beamColor, 21.0, 36.0, Math.PI * 0.30, 0.55, 1.3);
     headlightRight.position.set(1.12 * invScale, 1.18 * invScale, 0.24 * invScale);
-    // Slight inward/rightward aim sweeps moving illumination across adjacent building facades!
-    headlightRight.target.position.set(3.8 * invScale, 0.35 * invScale, 15.5 * invScale);
+    // Angled inward sweep illuminates curb, lamppost, and adjacent building facades as car passes!
+    headlightRight.target.position.set(4.5 * invScale, 0.42 * invScale, 16.5 * invScale);
     carroGrupo.add(headlightRight);
     carroGrupo.add(headlightRight.target);
 
-    const streetThrowLight = new THREE.PointLight(streetPoolColor, 9.5, 24.0, 1.45);
-    streetThrowLight.position.set(0.6 * invScale, 1.45 * invScale, 3.2 * invScale);
+    const streetThrowLight = new THREE.PointLight(streetPoolColor, 11.5, 26.0, 1.4);
+    streetThrowLight.position.set(0.8 * invScale, 1.35 * invScale, 4.2 * invScale);
     carroGrupo.add(streetThrowLight);
 
-    const taillightGlow = new THREE.PointLight(new THREE.Color('#9E3B3B'), 2.4, 8.5, 1.7);
+    const taillightGlow = new THREE.PointLight(new THREE.Color('#B53D3D'), 2.8, 9.5, 1.65);
     taillightGlow.position.set(0, 1.05 * invScale, -9.5 * invScale);
     carroGrupo.add(taillightGlow);
 
     for (const mat of assets.materials.carHeadlightCovers) {
       mat.emissive = beamColor.clone();
-      mat.emissiveIntensity = 0.85;
+      mat.emissiveIntensity = 1.05;
     }
 
     const carroId = ecsWorld.createEntity();
@@ -416,9 +551,9 @@ export class UrbanGlbSceneBuilder {
         headlightRight,
         streetThrowLight,
         taillightGlow,
-        baseSpotIntensity: 18.0,
-        basePointIntensity: 9.5,
-        baseTailIntensity: 2.4,
+        baseSpotIntensity: 21.0,
+        basePointIntensity: 11.5,
+        baseTailIntensity: 2.8,
         headlightMaterials: assets.materials.carHeadlightCovers,
       })
       .addComponent(carroId, 'Renderable', {
@@ -434,7 +569,8 @@ export class UrbanGlbSceneBuilder {
   }
 
   /**
-   * Synchronizes lighting, fog, wet/dry road & sidewalk materials, building window emissives,
+   * Synchronizes directional/hemisphere lights, architectural storefront & streetlamp rigs,
+   * fog, wet/dry reflective road & sidewalk materials, foliage tones, building windows,
    * and `Carro_Grupo` headlight intensities across `'day'`, `'night'`, and `'rain'` presets.
    */
   public static applyAtmosphere(
@@ -449,78 +585,137 @@ export class UrbanGlbSceneBuilder {
     const fog = stage.scene.fog as THREE.FogExp2 | null;
     if (fog && fog.isFogExp2) {
       fog.color.copy(bg);
-      fog.density = mode === 'rain' ? 0.023 : mode === 'day' ? 0.011 : 0.016;
+      fog.density = mode === 'rain' ? 0.023 : mode === 'day' ? 0.010 : 0.015;
     }
 
     const cool = new THREE.Color(config.palette.coolAmbient);
     const warm = new THREE.Color(config.palette.warmLight);
-    const core = new THREE.Color(config.palette.warmCore);
+    const rig = stage.urbanLightRig;
 
     if (mode === 'day') {
       stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#D5E2EC'), 0.55);
       stage.ambientHemi.groundColor.set('#222D36');
-      stage.ambientHemi.intensity = 1.65;
+      stage.ambientHemi.intensity = 1.55;
 
       stage.keyDirLight.color.set('#E2ECF4');
       stage.keyDirLight.intensity = 2.95;
-      stage.keyDirLight.position.set(18, 32, 14);
+      stage.keyDirLight.position.set(18, 32, 16);
 
       stage.rimDirLight.color.copy(cool);
-      stage.rimDirLight.intensity = 0.72;
+      stage.rimDirLight.intensity = 0.68;
+
+      rig.storefrontEastLight.intensity = 1.2;
+      rig.storefrontWestLight.intensity = 1.1;
+      rig.kioskWarmLight.intensity = 0.8;
+      rig.streetLampWest.intensity = 1.0;
+      rig.streetLampCenter.intensity = 0.9;
+      rig.streetLampEast.intensity = 0.8;
+      for (const m of rig.emissiveFixtureMaterials) {
+        m.emissiveIntensity = 0.25;
+      }
+      if (stage.playerRimLight) {
+        stage.playerRimLight.intensity = 0.9;
+      }
     } else if (mode === 'rain') {
       stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#090E13');
-      stage.ambientHemi.intensity = 0.85;
+      stage.ambientHemi.groundColor.set('#080C10');
+      stage.ambientHemi.intensity = 0.72;
 
       stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#9BB0C2'), 0.35);
-      stage.keyDirLight.intensity = 1.45;
-      stage.keyDirLight.position.set(11, 25, 16);
+      stage.keyDirLight.intensity = 1.28;
+      stage.keyDirLight.position.set(14, 27, 18);
 
       stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.68;
+      stage.rimDirLight.intensity = 0.64;
+
+      rig.storefrontEastLight.intensity = 9.2;
+      rig.storefrontWestLight.intensity = 8.6;
+      rig.kioskWarmLight.intensity = 6.4;
+      rig.streetLampWest.intensity = 12.2;
+      rig.streetLampCenter.intensity = 10.8;
+      rig.streetLampEast.intensity = 9.0;
+      for (const m of rig.emissiveFixtureMaterials) {
+        m.emissiveIntensity = 1.65;
+      }
+      if (stage.playerRimLight) {
+        stage.playerRimLight.intensity = 2.8;
+      }
     } else {
-      // 'night'
+      // 'night' — dark Cyber-Noir base with warm amber storefront/streetlamp pools & wet sheen
       stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#0C1217');
-      stage.ambientHemi.intensity = 0.96;
+      stage.ambientHemi.groundColor.set('#090E13');
+      stage.ambientHemi.intensity = 0.78;
 
-      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C4D3E0'), 0.42);
-      stage.keyDirLight.intensity = 1.78;
-      stage.keyDirLight.position.set(14, 26, 16);
+      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C4D3E0'), 0.40);
+      stage.keyDirLight.intensity = 1.48;
+      stage.keyDirLight.position.set(16, 28, 18);
 
       stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.58;
+      stage.rimDirLight.intensity = 0.54;
+
+      rig.storefrontEastLight.intensity = 7.8;
+      rig.storefrontWestLight.intensity = 7.4;
+      rig.kioskWarmLight.intensity = 5.2;
+      rig.streetLampWest.intensity = 10.5;
+      rig.streetLampCenter.intensity = 9.2;
+      rig.streetLampEast.intensity = 7.8;
+      for (const m of rig.emissiveFixtureMaterials) {
+        m.emissiveIntensity = 1.40;
+      }
+      if (stage.playerRimLight) {
+        stage.playerRimLight.intensity = 2.4;
+      }
     }
 
     stage.keyDirLight.castShadow = config.enableShadows;
     (stage.waypointMarker.material as THREE.MeshBasicMaterial).color.copy(warm);
 
-    // Update road wetness, sidewalk sheen, and building window / streetlamp emissives
+    // Update road wetness, sidewalk specular sheen, foliage tones, and window/lamp emissives
     if (stage.assets) {
-      const roadRoughness = mode === 'rain' ? 0.16 : mode === 'day' ? 0.92 : 0.62;
-      const roadMetalness = mode === 'rain' ? 0.36 : mode === 'day' ? 0.04 : 0.14;
+      const roadRoughness = mode === 'rain' ? 0.14 : mode === 'day' ? 0.90 : 0.30;
+      const roadMetalness = mode === 'rain' ? 0.42 : mode === 'day' ? 0.04 : 0.28;
       for (const mat of stage.assets.materials.roads) {
         mat.roughness = roadRoughness;
         mat.metalness = roadMetalness;
       }
 
-      const sidewalkRoughness = mode === 'rain' ? 0.22 : mode === 'day' ? 0.88 : 0.68;
-      const sidewalkMetalness = mode === 'rain' ? 0.26 : 0.05;
+      const sidewalkRoughness = mode === 'rain' ? 0.20 : mode === 'day' ? 0.88 : 0.42;
+      const sidewalkMetalness = mode === 'rain' ? 0.32 : mode === 'day' ? 0.05 : 0.18;
       for (const mat of stage.assets.materials.sidewalks) {
         mat.roughness = sidewalkRoughness;
         mat.metalness = sidewalkMetalness;
       }
 
-      const windowGlow = mode === 'day' ? 0.05 : mode === 'rain' ? 0.52 : 0.46;
-      const windowTint = warm.clone().lerp(core, 0.45);
+      // Warm golden-amber window glow on storefronts & upper stories (`Q 8 $ # o a` reference look)
+      const windowGlow = mode === 'day' ? 0.06 : mode === 'rain' ? 0.78 : 0.68;
+      const windowAmber = new THREE.Color('#E8A64B');
       for (const mat of stage.assets.materials.windows) {
         if (mat.emissive) {
-          mat.emissive.copy(windowTint);
+          mat.emissive.copy(windowAmber);
           mat.emissiveIntensity = windowGlow;
         }
       }
 
-      const lampScale = mode === 'day' ? 0.18 : mode === 'rain' ? 0.92 : 0.82;
+      const kioskGlow = mode === 'day' ? 0.08 : mode === 'rain' ? 0.65 : 0.56;
+      const kioskAmber = new THREE.Color('#DE9E48');
+      for (const mat of stage.assets.materials.kioskGlass) {
+        if (mat.emissive) {
+          mat.emissive.copy(kioskAmber);
+          mat.emissiveIntensity = kioskGlow;
+        }
+      }
+
+      // Contained dark-emerald / moss-sage lift on foliage canopies & grass beds
+      const foliageLift = mode === 'day' ? 0.02 : mode === 'rain' ? 0.11 : 0.09;
+      const mossEmissive = new THREE.Color('#1E462E');
+      for (const mat of stage.assets.materials.foliage) {
+        if (mat.emissive) {
+          mat.emissive.copy(mossEmissive);
+          mat.emissiveIntensity = foliageLift;
+        }
+      }
+
+      const lampScale = mode === 'day' ? 0.18 : mode === 'rain' ? 1.25 : 1.12;
       for (const mat of stage.assets.materials.streetLamps) {
         mat.emissiveIntensity = lampScale;
       }
@@ -535,13 +730,13 @@ export class UrbanGlbSceneBuilder {
           traffic.basePointIntensity = 2.8;
           traffic.baseTailIntensity = 0.8;
         } else if (mode === 'rain') {
-          traffic.baseSpotIntensity = 24.0;
-          traffic.basePointIntensity = 12.5;
-          traffic.baseTailIntensity = 3.2;
+          traffic.baseSpotIntensity = 26.0;
+          traffic.basePointIntensity = 14.0;
+          traffic.baseTailIntensity = 3.4;
         } else {
-          traffic.baseSpotIntensity = 19.5;
-          traffic.basePointIntensity = 10.0;
-          traffic.baseTailIntensity = 2.5;
+          traffic.baseSpotIntensity = 21.0;
+          traffic.basePointIntensity = 11.5;
+          traffic.baseTailIntensity = 2.8;
         }
       }
     }

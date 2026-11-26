@@ -107,9 +107,11 @@ export {
 } from './world/SceneGlbLoader';
 export {
   type BuiltUrbanGlbStage,
+  DEFAULT_URBAN_PLAYER_SPAWN,
   DEFAULT_URBAN_SIDEWALK_BOUNDS,
   URBAN_CAMERA_FOLLOW_DEFAULTS,
   URBAN_TRAFFIC_DEFAULTS,
+  type UrbanArchitecturalLightRig,
   UrbanGlbSceneBuilder,
 } from './world/UrbanGlbSceneBuilder';
 

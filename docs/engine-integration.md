@@ -72,15 +72,21 @@ its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):
   pass with attached `SpotLight`s and `PointLight` illuminating asphalt and
   building facades, followed by **22s** hidden out of frame with `visible = false`).
 
-A fixed-direction 3rd-person camera (`CameraFollowSystem`) accompanies
-`Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when toggled. The
+A 45°-counter-clockwise elevated 3rd-person camera (`CameraFollowSystem`,
+`fov: 66°`, inclined top-to-ground and pulled back to frame the wide street,
+storefront facades, streetlamps, trees and vehicle lane) accompanies
+`Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when toggled.
+Storefront facade lights (`StorefrontEastTransom`, `StorefrontWestTransom`,
+sidewalk kiosk glow) and streetlamp luminaires (`StreetLampGlobeWest/Center/East`)
+cast warm pools onto wet asphalt alongside `Carro_Grupo`'s headlights. The
 full-screen ASCII post-processing shader (`AsciiPostProcessor` + `asciiShader.ts`)
-samples sub-cell integrated luminance, linearized depth, and dual 3x3 Sobel
-normal-depth contours (`tNormal` + `tDepth`) with surface-normal curvature
-relief and soft-shoulder highlight compression so 3D volumes remain crisp and
-cohesive without blown-out blocks or oversaturation. The adapter maps the three
-UI buttons (`day`, `night`, `rain`) to lighting, fog, car headlights, pavement
-wetness and 3D rain particles.
+combines sub-cell integrated luminance, deterministic 2D glyph-variety modulation
+(`glyphVarietyHash` over `o, u, s, a, $, 8, Q, =, -, ~, ^, *`), linearized depth,
+dual 3x3 Sobel contours (`tNormal` + `tDepth`), vertical rippled ground/asphalt
+reflections (`sampleGroundReflection`), and contained typographic light halos
+without blown-out blocks or oversaturation. The adapter maps the three UI buttons
+(`day`, `night`, `rain`) to lighting, fog, car headlights, pavement wetness and
+3D rain particles.
 [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier
 engine-side tools added on that date.
 

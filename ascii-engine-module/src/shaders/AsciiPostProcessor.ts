@@ -20,9 +20,9 @@ export interface PostProcessRenderMetrics {
  * AsciiPostProcessor: Multi-pass GPU post-processing pipeline:
  * 1. Offscreen Scene Color + Depth RenderTarget (`HalfFloatType` + `DepthTexture`)
  * 2. Offscreen View-Space Normal RenderTarget (`MeshNormalMaterial` — supports both static & skinned glTF meshes)
- * 3. Downsampled Soft-Knee Bloom RenderTarget
- * 4. Full-screen 3D-Wrapping ASCII Composite Shader (sub-cell supersampling + Linear-Depth/Normal Sobel
- *    + view-normal curvature relief + soft-shoulder tone curve + high-legibility 5:8 glyph atlas)
+ * 3. Downsampled 13-tap Soft-Knee Bloom RenderTarget (contained typographic light halos)
+ * 4. Full-screen 3D-Wrapping ASCII Composite Shader (sub-cell supersampling + glyph-variety hash
+ *    + Linear-Depth/Normal Sobel + vertical rippled ground reflections + 5:8 glyph atlas)
  */
 export class AsciiPostProcessor {
   private sceneTarget: THREE.WebGLRenderTarget;
@@ -34,6 +34,7 @@ export class AsciiPostProcessor {
   private readonly bloomMaterial: THREE.ShaderMaterial;
   private readonly compositeMaterial: THREE.ShaderMaterial;
   private readonly transitionController = new ResolutionTransitionController(14.0);
+  private readonly camWorldDir = new THREE.Vector3();
 
   private readonly quadGeometry: THREE.PlaneGeometry;
   private readonly bloomQuad: THREE.Mesh;
@@ -142,6 +143,9 @@ export class AsciiPostProcessor {
         uDofFocus: { value: config.dofFocusDistance },
         uDofStrength: { value: config.dofStrength },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
+        uWetness: { value: AsciiPostProcessor.resolveWetness(config) },
+        uCamPitchCos: { value: 0.75 },
+        uCamPitchSin: { value: 0.66 },
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 140.0 },
         uVolumeWrapStrength: { value: config.mode === 'mascot' ? 0.0 : 1.0 },
@@ -161,6 +165,13 @@ export class AsciiPostProcessor {
     this.compositeQuad = new THREE.Mesh(this.quadGeometry, this.compositeMaterial);
     this.postScene = new THREE.Scene();
     this.postScene.add(this.compositeQuad);
+  }
+
+  private static resolveWetness(config: EngineConfig): number {
+    if (config.mode === 'mascot') return 0.0;
+    if (config.atmosphere === 'rain') return 1.0;
+    if (config.atmosphere === 'day') return 0.22;
+    return 0.62;
   }
 
   private computeAtlasSignature(config: EngineConfig, tileSize: number): string {
@@ -250,6 +261,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uDofFocus!.value = config.dofFocusDistance;
     this.compositeMaterial.uniforms.uDofStrength!.value = config.dofStrength;
     this.compositeMaterial.uniforms.uDaylight!.value = config.atmosphere === 'day' ? 1.0 : 0.0;
+    this.compositeMaterial.uniforms.uWetness!.value = AsciiPostProcessor.resolveWetness(config);
     this.compositeMaterial.uniforms.uVolumeWrapStrength!.value =
       config.mode === 'mascot' ? 0.0 : 1.0;
 
@@ -286,6 +298,13 @@ export class AsciiPostProcessor {
       this.compositeMaterial.uniforms.uCameraNear!.value = persp.near;
       this.compositeMaterial.uniforms.uCameraFar!.value = persp.far;
     }
+
+    // Extract camera downward pitch sin/cos so view-space normals reconstruct upward ground planes
+    camera.getWorldDirection(this.camWorldDir);
+    const pitchSin = THREE.MathUtils.clamp(-this.camWorldDir.y, -0.99, 0.99);
+    const pitchCos = Math.sqrt(Math.max(0.01, 1 - pitchSin * pitchSin));
+    this.compositeMaterial.uniforms.uCamPitchSin!.value = pitchSin;
+    this.compositeMaterial.uniforms.uCamPitchCos!.value = pitchCos;
 
     // Pass 1: Lit 3D Scene + Hardware DepthTexture
     renderer.setRenderTarget(this.sceneTarget);
