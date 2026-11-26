@@ -31,6 +31,7 @@ export {
   type ComponentName,
   type DepthLayerComponent,
   type EntityId,
+  type ForegroundOccludersComponent,
   type InputStateComponent,
   type LifecycleTagComponent,
   type NavigationTargetComponent,
@@ -49,6 +50,7 @@ export {
   clampToSidewalkBounds,
   type EcsSystem,
   InputSystem,
+  LineOfSightOcclusionSystem,
   MovementRotationSystem,
   RenderSyncSystem,
   type SystemContext,
@@ -82,6 +84,8 @@ export {
 export { VfxController, type VfxControllerOptions } from './vfx/VfxController';
 export {
   extractAndPrepareGlbNodes,
+  type ForegroundOccluderGroup,
+  type ForegroundOccluderRole,
   GLB_NODE_NAMES,
   GlbSceneLoader,
   type GlbSceneLoadOptions,

@@ -168,17 +168,21 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 reflAcc = vec3(0.0);
     float weightSum = 0.0;
 
-    for (int i = 1; i <= 4; i++) {
+    for (int i = 1; i <= 6; i++) {
       float fi = float(i);
-      float w = 1.0 / (0.85 + fi * 0.65);
+      float w = 1.0 / (0.75 + fi * 0.55);
+      float subWave = sin(wavePhase + fi * 0.85) * cellUvSpan.x * (0.45 + 0.55 * uWetness);
       vec2 sampleUv = clamp(
-        centerUv + vec2(rippleX * (0.6 + fi * 0.2), fi * cellUvSpan.y * 3.1),
+        centerUv + vec2(rippleX * 0.65 + subWave * 0.55, fi * cellUvSpan.y * 2.75),
         vec2(0.002),
         vec2(0.998)
       );
       vec3 sCol = texture2D(tScene, sampleUv).rgb;
       vec3 bCol = texture2D(tBloom, sampleUv).rgb;
-      reflAcc += (sCol * 0.55 + bCol * 1.15) * w;
+      float sLum = getLuma(sCol);
+      // Emphasize luminous character rims, lanterns, storefronts & passing car beams on wet pavement
+      float specBoost = smoothstep(0.18, 0.78, sLum);
+      reflAcc += (sCol * (0.42 + 0.52 * specBoost) + bCol * 1.25) * w;
       weightSum += w;
     }
 
@@ -292,31 +296,34 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float volumeRelief = (zenithCatch + grazingRim) * isGeometry * uVolumeWrapStrength;
 
     // Contained typographic light halo: bloom lifts nearby character indices into bright symbols
-    vec3 haloLift = bloomCol * (uBloomIntensity * 0.88);
-    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.58;
+    vec3 haloLift = bloomCol * (uBloomIntensity * 0.92);
+    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.68;
 
     // Soft-shoulder tone curve compresses bright lamp/headlight peaks smoothly without solid clipping
-    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.38)) * 1.26;
+    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.36)) * 1.28;
 
-    // Selective chromatic discipline: dark desaturated stone/asphalt base with warm-amber & moss-green accents
+    // Selective chromatic discipline: dark desaturated stone/asphalt base with amber, cyan & moss accents
     float rawLuma = getLuma(combinedSignal);
-    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.65, 0.0, 1.0);
-    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.92, combinedHdr.b * 0.95)) * 2.4, 0.0, 1.0);
-    float baseSatKeep = mix(0.64, 0.94, max(warmAccentMask, foliageMask));
+    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.68, 0.0, 1.0);
+    float coolCyanMask = clamp((combinedHdr.b - combinedHdr.r) * 1.55, 0.0, 1.0);
+    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.92, combinedHdr.b * 0.95)) * 2.45, 0.0, 1.0);
+    float baseSatKeep = mix(0.60, 0.94, max(max(warmAccentMask, foliageMask), coolCyanMask * 0.85));
     if (uVolumeWrapStrength > 0.5) {
       combinedSignal = mix(vec3(rawLuma), combinedSignal, baseSatKeep);
     }
 
-    float luma = clamp(pow(clamp(getLuma(combinedSignal), 0.0, 1.0), 0.82) + volumeRelief, 0.0, 1.0);
+    float luma = clamp(pow(clamp(getLuma(combinedSignal), 0.0, 1.0), 0.81) + volumeRelief, 0.0, 1.0);
 
-    // 5. Select Primary Detail ASCII Glyph (Diverse Alphanumeric/Symbolic Ramp vs Sharp Contour)
+    // 5. Select Primary Detail ASCII Glyph (2-Octave Organic Cluster + Cell Variety vs Sharp Contour)
     float varietyJitter = 0.0;
     if (uVolumeWrapStrength > 0.5) {
-      float midtoneEnvelope = smoothstep(0.035, 0.16, luma) * (1.0 - smoothstep(0.86, 0.985, luma));
-      float hashVal = glyphVarietyHash(cellIndex + floor(viewN.xy * 5.0));
+      float midtoneEnvelope = smoothstep(0.03, 0.15, luma) * (1.0 - smoothstep(0.87, 0.988, luma));
+      float fineHash = glyphVarietyHash(cellIndex + floor(viewN.xy * 5.0));
+      float macroClusterHash = glyphVarietyHash(floor(cellIndex * 0.37) + vec2(17.3, 9.1));
+      float blendedHash = fineHash * 0.68 + macroClusterHash * 0.32;
       // Subtle animated ripple shimmer exclusively on wet ground reflection cells
-      float wetRippleShift = upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.3 - uTime * 2.6) * 1.35;
-      varietyJitter = (hashVal * 6.4 + wetRippleShift) * midtoneEnvelope;
+      float wetRippleShift = upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 2.65) * 1.55;
+      varietyJitter = (blendedHash * 7.2 + wetRippleShift) * midtoneEnvelope;
     }
 
     float detailTileIndex = floor(luma * (uRampCount - 1.0) + 0.5 + varietyJitter);
@@ -324,7 +331,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     // Reserve directional bars ('|' '/' '\' '_') strictly for true silhouettes & sharp 3D creases
     // so broad surfaces never degenerate into long repetitive rows of dashes!
-    float edgeThresh = uVolumeWrapStrength > 0.5 ? 0.52 : 0.30;
+    float edgeThresh = uVolumeWrapStrength > 0.5 ? 0.54 : 0.30;
     bool useStructuralEdge =
       (combinedEdge > edgeThresh) &&
       (luma > 0.04) &&
@@ -374,15 +381,19 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     if (uVolumeWrapStrength > 0.5) {
       // Warm golden-amber ink on storefront lights, streetlamps & headlight halos (Image 2 & 3 reference)
-      vec3 amberInk = vec3(1.02, 0.78, 0.44);
-      charColor = mix(charColor, mix(charColor, amberInk, 0.48), warmAccentMask * smoothstep(0.24, 0.82, luma));
+      vec3 amberInk = vec3(1.04, 0.79, 0.44);
+      charColor = mix(charColor, mix(charColor, amberInk, 0.50), warmAccentMask * smoothstep(0.22, 0.82, luma));
+
+      // Contained cool cyber-slate/cyan accent on neon trim & wet reflections (Image 3 & 4 reference)
+      vec3 cyanInk = vec3(0.58, 0.84, 0.94);
+      charColor = mix(charColor, mix(charColor, cyanInk, 0.38), coolCyanMask * smoothstep(0.20, 0.80, luma));
 
       // Contained dark-emerald / sage ink on foliage & grass canopies (Image 1, 3 & 4 reference)
-      vec3 mossInk = vec3(0.30, 0.62, 0.42);
-      charColor = mix(charColor, mix(charColor, mossInk, 0.42), foliageMask * (1.0 - warmAccentMask * 0.7));
+      vec3 mossInk = vec3(0.28, 0.64, 0.42);
+      charColor = mix(charColor, mix(charColor, mossInk, 0.45), foliageMask * (1.0 - warmAccentMask * 0.7));
 
-      // Crisp ivory-white core on peak light glyphs without losing character legibility
-      charColor = mix(charColor, vec3(1.06, 1.02, 0.94), smoothstep(0.80, 0.98, luma) * 0.55);
+      // Crisp ivory-white core on peak light & character rim glyphs without losing legibility
+      charColor = mix(charColor, vec3(1.06, 1.03, 0.96), smoothstep(0.78, 0.97, luma) * 0.58);
     }
 
     if (useStructuralEdge) {

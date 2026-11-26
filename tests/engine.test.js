@@ -429,7 +429,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.equal(mockListeners.pointermove.opts.passive, true);
 
   const keyboard = new pkg.KeyboardInput({ enabled: true, focusTarget: mockContainer });
-  const camera = new THREE.PerspectiveCamera(66, 16 / 9, 0.15, 160);
+  const camera = new THREE.PerspectiveCamera(64, 16 / 9, 0.15, 160);
 
   const runner = new pkg.SystemRunner()
     .addSystem(new pkg.InputSystem(pointer, keyboard, camera), 10)
@@ -438,9 +438,10 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
     .addSystem(new pkg.CharacterAnimationSystem(), 28)
     .addSystem(new pkg.AnimationSystem(), 30)
     .addSystem(new pkg.CameraFollowSystem(camera), 38)
+    .addSystem(new pkg.LineOfSightOcclusionSystem(camera), 39)
     .addSystem(new pkg.RenderSyncSystem(), 40);
 
-  // Initial frame at t = 0: Player_Rig in Idle, camera snapped to 45° CCW elevated pulled-back offset, Carro_Grupo active
+  // Initial frame at t = 0: Player_Rig in Idle, camera snapped to exact 45° CCW elevated pulled-back offset, Carro_Grupo active
   runner.run(ecsWorld, { dt: 0, elapsed: 0 });
 
   const playerTransform = ecsWorld.getComponent(stage.playerEntityId, 'Transform');
@@ -448,6 +449,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const camFollow = ecsWorld.getComponent(stage.playerEntityId, 'CameraFollow');
   const carRenderable = ecsWorld.getComponent(stage.carroEntityId, 'Renderable');
   const carTraffic = ecsWorld.getComponent(stage.carroEntityId, 'TrafficCycle');
+  const fgOccluders = ecsWorld.getComponent(stage.cidadeEntityId, 'ForegroundOccluders');
 
   assert.equal(charAnim.activeClip, 'Idle', 'Player_Rig starts in looped Idle animation');
   assert.AlmostEqual = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
@@ -455,20 +457,44 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
   assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
 
-  // Verify 45° counter-clockwise camera rotation, top-to-ground tilt, pulled-back framing & architectural lights
+  // Verify exact 45° counter-clockwise camera rotation, top-to-ground tilt, pulled-back framing & cyber lights
   const camAzimuthDeg = (Math.atan2(camFollow.offsetX, camFollow.offsetZ) * 180) / Math.PI;
   const camDist3D = Math.hypot(camFollow.offsetX, camFollow.offsetY, camFollow.offsetZ);
-  assert.ok(camAzimuthDeg >= 43 && camAzimuthDeg <= 52, `Camera azimuth rotated ~45° CCW (${camAzimuthDeg.toFixed(1)}°)`);
-  assert.ok(camFollow.offsetY >= 10.0 && camDist3D >= 16.5, 'Camera is inclined top-to-ground and pulled back');
+  assert.AlmostEqual(camAzimuthDeg, 45.0, 0.5);
+  assert.ok(camFollow.offsetY >= 11.0 && camDist3D >= 18.0, 'Camera is inclined top-to-ground and pulled back');
   assert.ok(
     stage.urbanLightRig &&
-      stage.urbanLightRig.storefrontEastLight.intensity > 5 &&
-      stage.urbanLightRig.storefrontWestLight.intensity > 5 &&
-      stage.urbanLightRig.streetLampWest.intensity > 8 &&
-      stage.urbanLightRig.streetLampCenter.intensity > 7 &&
-      stage.urbanLightRig.streetLampEast.intensity > 6,
-    'Storefront facade lights and streetlamps illuminate the nocturnal scene'
+      stage.urbanLightRig.storefrontEastLight.intensity > 6 &&
+      stage.urbanLightRig.storefrontWestLight.intensity > 6 &&
+      stage.urbanLightRig.kioskWarmLight.intensity > 4 &&
+      stage.urbanLightRig.streetLampWest.intensity > 9 &&
+      stage.urbanLightRig.streetLampCenter.intensity > 8 &&
+      stage.urbanLightRig.streetLampEast.intensity > 7 &&
+      stage.urbanLightRig.avenueBeaconLight.intensity > 4,
+    'Storefront facade lights, streetlamps, and cyber avenue beacon illuminate the nocturnal scene'
   );
+
+  // Verify foreground obstacles (eastTree, westTree, frontSign) are identified and cleared from camera sightline
+  assert.ok(fgOccluders && fgOccluders.groups.length === 3, 'Identifies eastTree, westTree, and frontSign occluders');
+  const roles = Array.from(fgOccluders.groups.map((g) => String(g.role))).sort();
+  assert.deepEqual(roles, ['eastTree', 'frontSign', 'westTree']);
+  for (const grp of fgOccluders.groups) {
+    assert.equal(grp.occluded, true, `${grp.role} is occluded at central spawn so center & Player_Rig stay clear`);
+    assert.ok(grp.meshes.every((m) => m.visible === false), `${grp.role} obstructing meshes hidden cleanly`);
+  }
+
+  // Real Three.js raycast from camera to Player_Rig confirms 100% unobstructed line-of-sight
+  stage.scene.updateMatrixWorld(true);
+  const losRay = new THREE.Raycaster();
+  const targetTorso = new THREE.Vector3(playerTransform.x, playerTransform.y + 1.05, playerTransform.z);
+  const rayDir = targetTorso.clone().sub(camera.position);
+  const rayLen = rayDir.length();
+  losRay.set(camera.position, rayDir.normalize());
+  losRay.far = rayLen - 0.2;
+  const blockingHits = losRay
+    .intersectObject(prepared.nodes.cidade, true)
+    .filter((h) => h.object.visible);
+  assert.equal(blockingHits.length, 0, 'Camera -> Player_Rig line of sight is 100% unobstructed');
 
   // 3. WASD Locomotion (`KeyW` + `KeyA`), smooth rotation, Walking cross-fade, and sidewalk clamping
   const startX = playerTransform.x;

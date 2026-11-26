@@ -72,17 +72,24 @@ its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):
   pass with attached `SpotLight`s and `PointLight` illuminating asphalt and
   building facades, followed by **22s** hidden out of frame with `visible = false`).
 
-A 45°-counter-clockwise elevated 3rd-person camera (`CameraFollowSystem`,
-`fov: 66°`, inclined top-to-ground and pulled back to frame the wide street,
-storefront facades, streetlamps, trees and vehicle lane) accompanies
-`Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when toggled.
+A 45°-counter-clockwise elevated 3/4 camera (`CameraFollowSystem`, `fov: 64°`,
+`offset: (10.6, 11.6, 10.6)`, inclined top-to-ground and pulled back to widen
+framing of the street, storefront facades, streetlamps and vehicle lane)
+accompanies `Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when
+toggled. `LineOfSightOcclusionSystem` (ECS priority `39`) dynamically inspects
+the two foreground plaza trees (`Cidade_leaves_0_3` and `Cidade_leaves001_1_7`)
+and the hanging front sign (`Cidade_Plane052/053` + `Cylinder001..005`) without
+modifying `cena_completa.glb` on disk, clearing obstructing foreground meshes
+whenever they enter the camera-to-`Player_Rig` or central plaza sightline.
 Storefront facade lights (`StorefrontEastTransom`, `StorefrontWestTransom`,
-sidewalk kiosk glow) and streetlamp luminaires (`StreetLampGlobeWest/Center/East`)
-cast warm pools onto wet asphalt alongside `Carro_Grupo`'s headlights. The
-full-screen ASCII post-processing shader (`AsciiPostProcessor` + `asciiShader.ts`)
-combines sub-cell integrated luminance, deterministic 2D glyph-variety modulation
+`StorefrontEastNeon`, `StorefrontWestNeon`, `KioskCanopyGlow`), streetlamp
+luminaires (`StreetLampGlobeWest/Center/East`), and the distant avenue beacon
+(`AvenueCyberBeacon`) cast warm amber and contained cyber-cyan reflections onto
+wet asphalt alongside `Carro_Grupo`'s headlights. The full-screen ASCII
+post-processing shader (`AsciiPostProcessor` + `asciiShader.ts`) combines
+sub-cell integrated luminance, 2-octave deterministic glyph-variety modulation
 (`glyphVarietyHash` over `o, u, s, a, $, 8, Q, =, -, ~, ^, *`), linearized depth,
-dual 3x3 Sobel contours (`tNormal` + `tDepth`), vertical rippled ground/asphalt
+dual 3x3 Sobel contours (`tNormal` + `tDepth`), 6-tap vertical rippled ground
 reflections (`sampleGroundReflection`), and contained typographic light halos
 without blown-out blocks or oversaturation. The adapter maps the three UI buttons
 (`day`, `night`, `rain`) to lighting, fog, car headlights, pavement wetness and

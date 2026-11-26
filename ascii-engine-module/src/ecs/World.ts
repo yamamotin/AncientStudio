@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import { LifecycleManager } from '../core/LifecycleManager';
+import type { ForegroundOccluderGroup } from '../world/GlbSceneLoader';
 
 /**
  * Lean, cache-friendly Entity-Component-System (ECS) World.
@@ -246,6 +247,21 @@ export interface CameraFollowComponent {
   initialized: boolean;
 }
 
+/**
+ * ForegroundOccludersComponent: Runtime line-of-sight occlusion metadata for foreground
+ * obstacles in `Cidade_Sketchfab_model` (the two plaza trees & hanging front sign) so they
+ * never block `Player_Rig` or the central plaza vista without modifying `.glb` on disk.
+ */
+export interface ForegroundOccludersComponent {
+  groups: ForegroundOccluderGroup[];
+  centralFocusX: number;
+  centralFocusY: number;
+  centralFocusZ: number;
+  playerClearanceRadius: number;
+  centralNdcHalfWidth: number;
+  centralNdcHalfHeight: number;
+}
+
 export interface ComponentMap {
   Transform: TransformComponent;
   Velocity: VelocityComponent;
@@ -254,6 +270,7 @@ export interface ComponentMap {
   CharacterAnimation: CharacterAnimationComponent;
   SidewalkBounds: SidewalkBoundsComponent;
   TrafficCycle: TrafficCycleComponent;
+  ForegroundOccluders: ForegroundOccludersComponent;
   Renderable: RenderableComponent;
   DepthLayer: DepthLayerComponent;
   LifecycleTag: LifecycleTagComponent;
@@ -275,6 +292,7 @@ export class World {
     CharacterAnimation: new Map(),
     SidewalkBounds: new Map(),
     TrafficCycle: new Map(),
+    ForegroundOccluders: new Map(),
     Renderable: new Map(),
     DepthLayer: new Map(),
     LifecycleTag: new Map(),

@@ -10,6 +10,7 @@ import { computeAdaptiveResolution } from './ResolutionController';
 import {
   CameraFollowSystem,
   InputSystem,
+  LineOfSightOcclusionSystem,
   MovementRotationSystem,
   RenderSyncSystem,
   SystemRunner,
@@ -272,7 +273,7 @@ export class AsciiEngineCore {
     this.builtUrbanStage = stage;
     this.scene = stage.scene;
 
-    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 66;
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 64;
     const defaultPlayerSpawn: [number, number, number] = [
       DEFAULT_URBAN_PLAYER_SPAWN.x,
       DEFAULT_URBAN_PLAYER_SPAWN.y,
@@ -311,6 +312,7 @@ export class AsciiEngineCore {
       .addSystem(new CharacterAnimationSystem(), 28)
       .addSystem(new AnimationSystem(), 30)
       .addSystem(new CameraFollowSystem(camera), 38)
+      .addSystem(new LineOfSightOcclusionSystem(camera), 39)
       .addSystem(new RenderSyncSystem(), 40);
 
     // Stream & decode `./assets/models/cena_completa.glb` via self-hosted `./assets/draco/`
@@ -865,7 +867,7 @@ export class AsciiEngineCore {
         this.lastAutoPlaygroundFov !== null &&
         Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
       if (!wasCustomizedExternally) {
-        const autoFov = 66;
+        const autoFov = 64;
         this.camera.fov = autoFov;
         this.lastAutoPlaygroundFov = autoFov;
       }
