@@ -104,35 +104,139 @@
       </div>
 
       <div id="panel-etl" class="tabpanel" role="tabpanel" aria-labelledby="tab-etl" tabindex="0">
-        <p class="muted" data-i18n="etl.hint">Simulador de extração, limpeza e validação. Tenta a API Python local quando ela está no ar; caso contrário usa o modo sim.</p>
-        <button id="extract-button" class="cmd-button" type="button" data-i18n="etl.button">GET /api/v1/extract</button>
+        <p class="muted" data-i18n="etl.hint">Conectores públicos de dados e ETL: consulta municipal IBGE/TSE, triagem pública PROJUDI (LGPD) e normalização contábil, com fallback automático em hospedagem estática.</p>
+        <div class="playground-grid">
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="etl.municipioTitle">IBGE + TSE // Governança Pública Municipal</h3>
+            <div class="playground-fields">
+              <label class="field-group">
+                <span data-i18n="etl.cidadeLabel">Município</span>
+                <input id="etl-cidade" class="select-control" type="text" value="Paranavaí" autocomplete="off">
+              </label>
+              <label class="field-group field-group--compact">
+                <span data-i18n="etl.ufLabel">UF</span>
+                <input id="etl-uf" class="select-control" type="text" maxlength="2" value="PR" autocomplete="off">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="transparencia-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.municipioButton">GET /api/v1/transparencia/municipio</button>
+              <button id="extract-button" class="cmd-button" type="button" data-i18n="etl.button">GET /api/v1/etl/datasets/ledger/summary</button>
+            </div>
+          </div>
+
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="etl.projudiTitle">PROJUDI // Consulta Processual Pública (LGPD)</h3>
+            <div class="playground-fields">
+              <label class="field-group">
+                <span data-i18n="etl.cpfLabel">CPF (validação mod-11)</span>
+                <input id="projudi-cpf" class="select-control" type="text" value="111.444.777-35" autocomplete="off">
+              </label>
+              <label class="field-group field-group--compact">
+                <span data-i18n="etl.tribunalLabel">Tribunal</span>
+                <select id="projudi-tribunal" class="select-control">
+                  <option value="TJPR" selected>TJPR</option>
+                  <option value="TJSP">TJSP</option>
+                  <option value="TJMG">TJMG</option>
+                  <option value="TJSC">TJSC</option>
+                  <option value="TJRS">TJRS</option>
+                </select>
+              </label>
+              <label class="field-group field-group--wide">
+                <span data-i18n="etl.processoLabel">Processo CNJ (20 dígitos)</span>
+                <input id="projudi-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="projudi-consulta-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.projudiConsultaBtn">POST /api/v1/projudi/processos/consulta</button>
+              <button id="projudi-detalhe-button" class="cmd-button" type="button" data-i18n="etl.projudiDetalheBtn">GET /api/v1/projudi/processos/{numero}</button>
+            </div>
+          </div>
+        </div>
         <p id="extract-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
-        <pre id="extract-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
+        <pre id="extract-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
       </div>
 
       <div id="panel-fintech" class="tabpanel" role="tabpanel" aria-labelledby="tab-fintech" tabindex="0" hidden>
-        <p class="muted" data-i18n="gateway.hint">Integração de pagamentos e notas fiscais com status HTTP, latência e payload — dados fictícios de demonstração.</p>
-        <button id="invoice-button" class="cmd-button" type="button" data-i18n="gateway.button">POST /api/v1/invoices/parse</button>
+        <p class="muted" data-i18n="gateway.hint">APIs Financeiras e Tributárias: séries oficiais BCB SGS (Selic, IPCA, PTAX), instituições PIX/ISPB, tabela NCM do Portal Único Siscomex sem acentos e gateway fiscal idempotente.</p>
+        <div class="playground-grid">
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="fintech.bcbTitle">Banco Central // Séries SGS &amp; Instituições PIX</h3>
+            <div class="playground-fields">
+              <label class="field-group field-group--compact">
+                <span data-i18n="fintech.ultimosLabel">Períodos SGS</span>
+                <input id="bcb-ultimos" class="select-control" type="number" min="1" max="30" value="5">
+              </label>
+              <label class="field-group">
+                <span data-i18n="fintech.buscaLabel">Instituição ou ISPB</span>
+                <input id="bcb-busca" class="select-control" type="text" value="Nubank" autocomplete="off">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="bcb-indicadores-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.bcbIndicadoresBtn">GET /api/v1/bcb/indicadores</button>
+              <button id="bcb-instituicoes-button" class="cmd-button" type="button" data-i18n="fintech.bcbInstituicoesBtn">GET /api/v1/bcb/instituicoes</button>
+            </div>
+          </div>
+
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="fintech.siscomexTitle">Portal Único Siscomex // Classificação NCM &amp; Fiscal</h3>
+            <div class="playground-fields">
+              <label class="field-group field-group--wide">
+                <span data-i18n="fintech.ncmLabel">Descrição do produto ou código NCM</span>
+                <input id="siscomex-query" class="select-control" type="text" value="computadores portateis" autocomplete="off">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="siscomex-ncm-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.siscomexBtn">GET /api/v1/siscomex/ncm</button>
+              <button id="invoice-button" class="cmd-button" type="button" data-i18n="gateway.button">POST /api/v1/gateway/invoices/submit</button>
+            </div>
+          </div>
+        </div>
         <p id="invoice-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
-        <pre id="invoice-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
+        <pre id="invoice-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
       </div>
 
       <div id="panel-workflow" class="tabpanel" role="tabpanel" aria-labelledby="tab-workflow" tabindex="0" hidden>
-        <p class="muted" data-i18n="workflow.hint">Orquestração de fluxos com n8n, worker Python, LLM e persistência em SQL.</p>
+        <p class="muted" data-i18n="workflow.hint">Pipelines de IA &amp; Automação n8n: extração determinística de fases/métricas processuais pronta para LLM (ready_for_llm) e disparo autenticado de webhooks n8n.</p>
         <p class="sr-only" data-i18n="workflow.diagramAria">Diagrama: Webhook para Python Worker, LLM/IA e SQL Database.</p>
         <pre class="ascii-diagram">+---------+     +---------------+     +--------+     +--------------+
 | Webhook | --&gt; | Python Worker | --&gt; | LLM/IA | --&gt; | SQL Database |
 +---------+     +---------------+     +--------+     +--------------+
      ^                   |                   |
      +-------------------+-------------------+   n8n orchestration</pre>
-        <label class="sr-only" for="workflow-token" data-i18n="workflow.token">X-API-Key (token do backend)</label>
-        <input id="workflow-token" class="select-control" type="password" autocomplete="off" placeholder="X-API-Key" aria-describedby="workflow-meta">
-        <div class="pipeline-actions">
-          <button id="workflow-run" class="cmd-button" type="button" data-i18n="workflow.run">POST /run</button>
-          <button id="workflow-status" class="cmd-button" type="button" data-i18n="workflow.status">GET /status</button>
+        <div class="playground-grid">
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="workflow.resumoTitle">PROJUDI + IA // Triagem Determinística &amp; Resumo LLM</h3>
+            <div class="playground-fields">
+              <label class="field-group">
+                <span data-i18n="workflow.resumoProcessoLabel">Processo CNJ</span>
+                <input id="resumo-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+              </label>
+              <label class="field-group field-group--wide">
+                <span data-i18n="workflow.resumoTextoLabel">Texto / Movimentação para triagem</span>
+                <input id="resumo-texto" class="select-control" type="text" value="Deferida tutela de urgência; autos conclusos para sentença." autocomplete="off">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="projudi-resumo-button" class="cmd-button cmd-button--primary" type="button" data-i18n="workflow.resumoBtn">POST /api/v1/projudi/processos/{numero}/resumo</button>
+            </div>
+          </div>
+
+          <div class="playground-card">
+            <h3 class="playground-card-title" data-i18n="workflow.n8nTitle">n8n // Orquestração Autenticada (X-API-Key)</h3>
+            <div class="playground-fields">
+              <label class="field-group field-group--wide" for="workflow-token">
+                <span data-i18n="workflow.token">X-API-Key (token do backend)</span>
+                <input id="workflow-token" class="select-control" type="password" autocomplete="off" placeholder="X-API-Key" aria-describedby="workflow-meta">
+              </label>
+            </div>
+            <div class="playground-actions">
+              <button id="workflow-run" class="cmd-button" type="button" data-i18n="workflow.run">POST /run</button>
+              <button id="workflow-status" class="cmd-button" type="button" data-i18n="workflow.status">GET /status</button>
+            </div>
+          </div>
         </div>
-        <p id="workflow-meta" class="response-meta" data-i18n="workflow.needToken">// informe o X-API-Key para chamar o n8n</p>
-        <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// response will appear here</pre>
+        <p id="workflow-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+        <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
         <p class="muted" data-i18n="workflow.note">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
       </div>
     </section>

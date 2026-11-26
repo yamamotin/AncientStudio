@@ -1,0 +1,528 @@
+{
+  "Data_Ultima_Atualizacao_NCM": "2026-11-01",
+  "Ato": "Resolução Gecex/Camex nº 272/2021 (consolidada TEC/SH-2022)",
+  "Nomenclaturas": [
+    {
+      "Codigo": "02",
+      "Descricao": "Carnes e miudezas, comestíveis",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "02.01",
+      "Descricao": "Carnes de animais da espécie bovina, frescas ou refrigeradas",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "0201.30.00",
+      "Descricao": "Carnes desossadas de animais da espécie bovina, frescas ou refrigeradas",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "09",
+      "Descricao": "Café, chá, mate e especiarias",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "09.01",
+      "Descricao": "Café, mesmo torrado ou descafeinado; cascas e películas de café; sucedâneos do café",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "0901.11",
+      "Descricao": "Café não torrado, não descafeinado",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "0901.11.10",
+      "Descricao": "Café não torrado, não descafeinado, em grão",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "0901.21.00",
+      "Descricao": "Café torrado, não descafeinado",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "10",
+      "Descricao": "Cereais",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "10.05",
+      "Descricao": "Milho",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "1005.90.10",
+      "Descricao": "Milho em grão, exceto para semeadura",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "12",
+      "Descricao": "Sementes e frutos oleaginosos; grãos, sementes e frutos diversos",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "12.01",
+      "Descricao": "Soja, mesmo triturada",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "1201.90.00",
+      "Descricao": "Soja, mesmo triturada, exceto para semeadura",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "17",
+      "Descricao": "Açúcares e produtos de confeitaria",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "17.01",
+      "Descricao": "Açúcares de cana ou de beterraba e sacarose quimicamente pura, no estado sólido",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "1701.14.00",
+      "Descricao": "Outros açúcares de cana, em bruto, sem adição de aromatizantes ou de corantes",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "26",
+      "Descricao": "Minérios, escórias e cinzas",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "26.01",
+      "Descricao": "Minérios de ferro e seus concentrados, incluindo as pirites de ferro ustuladas",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "2601.11.00",
+      "Descricao": "Minérios de ferro e seus concentrados, não aglomerados",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "27",
+      "Descricao": "Combustíveis minerais, óleos minerais e produtos da sua destilação",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "27.09",
+      "Descricao": "Óleos brutos de petróleo ou de minerais betuminosos",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "2709.00.10",
+      "Descricao": "Óleos brutos de petróleo",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "30",
+      "Descricao": "Produtos farmacêuticos",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "30.04",
+      "Descricao": "Medicamentos constituídos por produtos misturados ou não misturados, preparados para fins terapêuticos ou profiláticos, em doses",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "3004.90.99",
+      "Descricao": "Outros medicamentos preparados para fins terapêuticos ou profiláticos, apresentados em doses",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "31",
+      "Descricao": "Adubos (fertilizantes)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "31.05",
+      "Descricao": "Adubos (fertilizantes) minerais ou químicos, contendo dois ou três dos elementos fertilizantes: nitrogênio, fósforo e potássio (NPK)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "3105.20.00",
+      "Descricao": "Adubos (fertilizantes) minerais ou químicos contendo os três elementos fertilizantes: nitrogênio, fósforo e potássio (NPK)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "61",
+      "Descricao": "Vestuário e seus acessórios, de malha",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "61.09",
+      "Descricao": "Camisetas (t-shirts) e camisolas interiores, de malha",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "6109.10.00",
+      "Descricao": "Camisetas (t-shirts) e camisolas interiores, de malha, de algodão",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "84",
+      "Descricao": "Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos, e suas partes",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "84.71",
+      "Descricao": "Máquinas automáticas para processamento de dados e suas unidades; leitores magnéticos ou ópticos",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.30",
+      "Descricao": "Máquinas automáticas para processamento de dados, portáteis, de peso não superior a 10 kg, contendo pelo menos uma unidade central de processamento, um teclado e uma tela",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.30.12",
+      "Descricao": "Computadores portáteis (notebooks, laptops e tablets com teclado), de peso inferior a 3,5 kg, com tela de área superior a 140 cm²",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.30.19",
+      "Descricao": "Outras máquinas automáticas para processamento de dados, portáteis (notebooks e ultrabooks)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.50",
+      "Descricao": "Unidades de processamento, exceto as das subposições 8471.41 ou 8471.49 (servidores e desktops)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.50.10",
+      "Descricao": "Unidades de processamento digital de pequena capacidade, baseadas em microprocessadores (computadores desktop e servidores de borda)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8471.70.40",
+      "Descricao": "Unidades de memória de estado sólido (SSD — Solid State Drive) para máquinas de processamento de dados",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "85",
+      "Descricao": "Máquinas, aparelhos e materiais elétricos, e suas partes; aparelhos de gravação ou de reprodução de som e imagens",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "85.04",
+      "Descricao": "Transformadores elétricos, conversores elétricos estáticos (por exemplo, retificadores e inversores solares) e bobinas de reatância",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8504.40.90",
+      "Descricao": "Outros conversores elétricos estáticos, incluindo inversores fotovoltaicos para energia solar",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "85.17",
+      "Descricao": "Aparelhos telefônicos, incluindo os telefones para redes celulares (smartphones); outros aparelhos para transmissão ou recepção de voz, imagens ou outros dados",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8517.13.00",
+      "Descricao": "Telefones inteligentes (smartphones) para redes celulares e para outras redes sem fio",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8517.12.31",
+      "Descricao": "Telefones portáteis de redes celulares (código histórico substituído pela SH-2022)",
+      "Data_Inicio": "01/01/2017",
+      "Data_Fim": "31/03/2022",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "125",
+      "Ano_Ato_Ini": "2016"
+    },
+    {
+      "Codigo": "8517.62.59",
+      "Descricao": "Outros aparelhos para transmissão ou recepção de voz, imagem ou outros dados em rede com fio ou sem fio (roteadores e switches)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "85.41",
+      "Descricao": "Dispositivos semicondutores (diodos, transistores, células e módulos fotovoltaicos / placas solares); LED",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8541.43.00",
+      "Descricao": "Células fotovoltaicas montadas em módulos ou em painéis (placas de energia solar)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "85.42",
+      "Descricao": "Circuitos integrados eletrônicos (processadores, GPUs, controladores e memórias)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8542.31.90",
+      "Descricao": "Outros circuitos integrados eletrônicos: processadores e controladores (CPUs, GPUs e microcontroladores)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "87",
+      "Descricao": "Veículos automóveis, tratores, ciclos e outros veículos terrestres, suas partes e acessórios",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "87.03",
+      "Descricao": "Automóveis de passageiros e outros veículos automóveis principalmente concebidos para transporte de pessoas",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8703.22.10",
+      "Descricao": "Automóveis de passageiros com motor de pistão alternativo de ignição por centelha, de cilindrada superior a 1.000 cm³ mas não superior a 1.500 cm³",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "8703.80.00",
+      "Descricao": "Outros veículos automóveis de passageiros, unicamente com motor elétrico para propulsão (veículos elétricos)",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "90",
+      "Descricao": "Instrumentos e aparelhos de óptica, de fotografia, de medida, de controle ou de precisão; instrumentos médico-cirúrgicos",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "90.18",
+      "Descricao": "Instrumentos e aparelhos para medicina, cirurgia, odontologia ou veterinária, incluindo os aparelhos de eletrodiagnóstico",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    },
+    {
+      "Codigo": "9018.19.80",
+      "Descricao": "Outros aparelhos de eletrodiagnóstico médico e monitorização multiparamétrica",
+      "Data_Inicio": "01/04/2022",
+      "Data_Fim": "31/12/9999",
+      "Tipo_Ato_Ini": "Res Camex",
+      "Numero_Ato_Ini": "272",
+      "Ano_Ato_Ini": "2021"
+    }
+  ]
+}

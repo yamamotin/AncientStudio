@@ -82,7 +82,16 @@ window.TP = window.TP || {};
   function renderResponse(data, result, metaId, outputId) {
     var meta = document.getElementById(metaId);
     var output = document.getElementById(outputId);
-    var label = t('api.status', { status: result.status, ms: result.ms, source: '/api/v1' });
+    var src = result.source || '/api/v1';
+    var label = result.method && result.route
+      ? t('api.routeStatus', {
+          method: result.method,
+          route: result.route,
+          status: result.status,
+          ms: result.ms,
+          source: src
+        })
+      : t('api.status', { status: result.status, ms: result.ms, source: src });
     if (meta) meta.textContent = '// ' + label;
     if (output) output.textContent = JSON.stringify(data, null, 2);
   }
@@ -90,18 +99,38 @@ window.TP = window.TP || {};
   function renderError(error, metaId, outputId) {
     var meta = document.getElementById(metaId);
     var output = document.getElementById(outputId);
+    if (error && error.cause && error.problem && error.status >= 400) {
+      renderResponse(error.problem, error.cause, metaId, outputId);
+      return;
+    }
     var detail = TP.apiClient ? TP.apiClient.describeError(error) : String(error);
     if (meta) meta.textContent = t('api.offline', { detail: detail });
-    if (output) output.textContent = JSON.stringify(error.problem || { error: String(error) }, null, 2);
+    if (output) output.textContent = JSON.stringify((error && error.problem) || { error: String(error) }, null, 2);
+  }
+
+  function isBackendOfflineError(error, backendOnline) {
+    if (!error) return false;
+    if (error.status === 0) return true;
+    if (!backendOnline && (error.status === 404 || error.status === 405) && !error.problem) return true;
+    if (!backendOnline && (error.status === 404 || error.status === 405) && error.problem && !error.problem.detail) return true;
+    return false;
   }
 
   function initApiButtons() {
+    var transparenciaBtn = document.getElementById('transparencia-button');
+    var projudiConsultaBtn = document.getElementById('projudi-consulta-button');
+    var projudiDetalheBtn = document.getElementById('projudi-detalhe-button');
+    var bcbIndicadoresBtn = document.getElementById('bcb-indicadores-button');
+    var bcbInstituicoesBtn = document.getElementById('bcb-instituicoes-button');
+    var siscomexNcmBtn = document.getElementById('siscomex-ncm-button');
+    var projudiResumoBtn = document.getElementById('projudi-resumo-button');
     var extract = document.getElementById('extract-button');
     var invoice = document.getElementById('invoice-button');
     var workflowRun = document.getElementById('workflow-run');
     var workflowStatus = document.getElementById('workflow-status');
     var token = document.getElementById('workflow-token');
     var client = TP.apiClient;
+    var backendOnline = false;
 
     var sampleInvoice = {
       invoice_key: 'NFE-2026-0001',
@@ -115,14 +144,132 @@ window.TP = window.TP || {};
       totals: { gross: 250.5, tax: 0.1, currency: 'BRL' }
     };
 
+    function bindConnectorAction(button, metaId, outputId, liveCall, staticCall) {
+      if (!button || !client) return;
+      button.addEventListener('click', async function () {
+        button.disabled = true;
+        try {
+          if (!backendOnline && window.location.protocol === 'file:' && staticCall) {
+            var fileSim = await staticCall();
+            renderResponse(fileSim.data, fileSim, metaId, outputId);
+            return;
+          }
+          var result = await liveCall();
+          renderResponse(result.data, result, metaId, outputId);
+        } catch (error) {
+          if (staticCall && isBackendOfflineError(error, backendOnline)) {
+            var sim = await staticCall();
+            renderResponse(sim.data, sim, metaId, outputId);
+          } else {
+            renderError(error, metaId, outputId);
+          }
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+
+    function valOf(id, fallback) {
+      var el = document.getElementById(id);
+      return el ? el.value.trim() : (fallback || '');
+    }
+
+    bindConnectorAction(
+      transparenciaBtn,
+      'extract-meta',
+      'extract-output',
+      function () { return client.transparenciaMunicipio(valOf('etl-cidade', 'Paranavaí'), valOf('etl-uf', 'PR')); },
+      function () { return TP.api.transparenciaMunicipio(valOf('etl-cidade', 'Paranavaí'), valOf('etl-uf', 'PR')); }
+    );
+
+    bindConnectorAction(
+      projudiConsultaBtn,
+      'extract-meta',
+      'extract-output',
+      function () {
+        return client.projudiConsulta({
+          cpf: valOf('projudi-cpf'),
+          tribunal: valOf('projudi-tribunal', 'TJPR')
+        });
+      },
+      function () {
+        return TP.api.projudiConsulta({
+          cpf: valOf('projudi-cpf'),
+          tribunal: valOf('projudi-tribunal', 'TJPR')
+        });
+      }
+    );
+
+    bindConnectorAction(
+      projudiDetalheBtn,
+      'extract-meta',
+      'extract-output',
+      function () { return client.projudiProcesso(valOf('projudi-numero')); },
+      function () { return TP.api.projudiProcesso(valOf('projudi-numero')); }
+    );
+
+    bindConnectorAction(
+      bcbIndicadoresBtn,
+      'invoice-meta',
+      'invoice-output',
+      function () { return client.bcbIndicadores(Number(valOf('bcb-ultimos', '5')) || 5); },
+      function () { return TP.api.bcbIndicadores(Number(valOf('bcb-ultimos', '5')) || 5); }
+    );
+
+    bindConnectorAction(
+      bcbInstituicoesBtn,
+      'invoice-meta',
+      'invoice-output',
+      function () { return client.bcbInstituicoes(valOf('bcb-busca', '')); },
+      function () { return TP.api.bcbInstituicoes(valOf('bcb-busca', '')); }
+    );
+
+    bindConnectorAction(
+      siscomexNcmBtn,
+      'invoice-meta',
+      'invoice-output',
+      function () { return client.siscomexNcm(valOf('siscomex-query', '')); },
+      function () { return TP.api.siscomexNcm(valOf('siscomex-query', '')); }
+    );
+
+    bindConnectorAction(
+      projudiResumoBtn,
+      'workflow-meta',
+      'workflow-output',
+      function () {
+        return client.projudiResumo(valOf('resumo-numero'), {
+          texto_processo: valOf('resumo-texto')
+        });
+      },
+      function () {
+        return TP.api.projudiResumo(valOf('resumo-numero'), {
+          texto_processo: valOf('resumo-texto')
+        });
+      }
+    );
+
     if (extract && client) {
       extract.addEventListener('click', async function () {
         extract.disabled = true;
         try {
-          var result = await client.datasetSummary('ledger');
+          var result;
+          try {
+            result = await client.datasetSummary('ledger');
+          } catch (firstErr) {
+            if (firstErr && firstErr.status === 404 && backendOnline) {
+              result = await client.extract();
+            } else {
+              throw firstErr;
+            }
+          }
           renderResponse(result.data, result, 'extract-meta', 'extract-output');
         } catch (error) {
-          renderError(error, 'extract-meta', 'extract-output');
+          if (isBackendOfflineError(error, backendOnline) && TP.api) {
+            var simExt = await TP.api.extract();
+            renderResponse(simExt.data, simExt, 'extract-meta', 'extract-output');
+          } else {
+            renderError(error, 'extract-meta', 'extract-output');
+          }
         } finally {
           extract.disabled = false;
         }
@@ -133,10 +280,32 @@ window.TP = window.TP || {};
       invoice.addEventListener('click', async function () {
         invoice.disabled = true;
         try {
-          var result = await client.submitInvoice(sampleInvoice);
+          var result;
+          try {
+            result = await client.submitInvoice(sampleInvoice);
+          } catch (firstErr) {
+            if (firstErr && firstErr.status === 404 && backendOnline) {
+              result = await client.parseLegacyInvoice({
+                invoice_key: sampleInvoice.invoice_key,
+                document_type: 'NF-e',
+                event_id: 'evt-ui-3522'
+              });
+            } else {
+              throw firstErr;
+            }
+          }
           renderResponse(result.data, result, 'invoice-meta', 'invoice-output');
         } catch (error) {
-          renderError(error, 'invoice-meta', 'invoice-output');
+          if (isBackendOfflineError(error, backendOnline) && TP.api) {
+            var simInv = await TP.api.parseInvoice({
+              invoice_key: sampleInvoice.invoice_key,
+              document_type: 'NF-e',
+              event_id: 'evt-ui-3522'
+            });
+            renderResponse(simInv.data, simInv, 'invoice-meta', 'invoice-output');
+          } else {
+            renderError(error, 'invoice-meta', 'invoice-output');
+          }
         } finally {
           invoice.disabled = false;
         }
@@ -200,26 +369,29 @@ window.TP = window.TP || {};
         .then(function (response) { return response.ok ? response.json() : { ok: false }; })
         .then(function (status) {
           if (!status.ok) {
+            backendOnline = false;
             var offline = document.getElementById('connection-status');
             if (offline) offline.textContent = t('console.statusSim');
             return null;
           }
+          backendOnline = true;
           return client.health().then(function (result) {
             var label = document.getElementById('connection-status');
             if (label) {
               label.textContent = t('console.statusApi');
-              label.title = result.data.service + '@' + result.data.version;
+              label.title = result.data.service + '@' + (result.data.version || '1.0');
             }
             var dot = document.querySelector('.status-dot');
             if (dot) dot.style.background = 'var(--green)';
-            return client.build();
+            return client.build().catch(function () { return null; });
           }).then(function (buildResult) {
-            if (!buildResult) return;
+            if (!buildResult || !buildResult.data) return;
             var label = document.getElementById('connection-status');
-            if (label) label.title += ' · ' + String(buildResult.data.sha || '').slice(0, 8);
+            if (label && buildResult.data.sha) label.title += ' · ' + String(buildResult.data.sha).slice(0, 8);
           });
         })
         .catch(function () {
+          backendOnline = false;
           var label = document.getElementById('connection-status');
           if (label) label.textContent = t('console.statusSim');
         });
@@ -498,11 +670,19 @@ window.TP = window.TP || {};
         start();
         return;
       }
-      var action = target.closest('#extract-button, #invoice-button, #workflow-run, #workflow-status');
-      if (action) {
+      var action = target.closest(
+        '#transparencia-button, #projudi-consulta-button, #projudi-detalhe-button, ' +
+        '#bcb-indicadores-button, #bcb-instituicoes-button, #siscomex-ncm-button, ' +
+        '#projudi-resumo-button, #extract-button, #invoice-button, #workflow-run, #workflow-status'
+      );
+      if (action && !started) {
         event.preventDefault();
         event.stopPropagation();
         queuedClicks.push(action.id);
+        start();
+        return;
+      }
+      if (target.closest('#playground') && !started) {
         start();
       }
     }, { capture: true, passive: false });

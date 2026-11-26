@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
+COPY api /app/api
 
 RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app

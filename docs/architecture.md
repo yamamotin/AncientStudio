@@ -84,8 +84,12 @@ AncientStudio/
 │
 ├── docker-compose.yml                 # Subida local de api + n8n com segredos obrigatórios via .env
 ├── .env.example                       # Variáveis documentadas e higienizadas (sem credenciais reais)
-├── Dockerfile                         # Host estático legado usado na Vercel atual (api/server.py)
-└── tests/                             # Suítes Node (contratos estáticos, UI, i18n, CI, VCR e engine) + 6 unittest
+├── api/                               # Host estático + Conectores Públicos stdlib (zero pip deps)
+│   ├── server.py                      # Servidor HTTP da raiz (Vercel) + rotas /api/v1/*
+│   ├── data/siscomex_ncm_seed.json    # Base local oficial NCM/SH-2022 (Portal Único Siscomex)
+│   └── connectors/                    # Serviços desacoplados (BCB, Siscomex, IBGE/TSE/CGU, PROJUDI + TTL Cache)
+├── Dockerfile                         # Container Python stdlib usado na Vercel (api/server.py + conectores)
+└── tests/                             # Suítes Node + unittest Python (test_api.py + test_public_connectors.py)
 ```
 
 ## 2. Responsabilidades por trilha
@@ -96,7 +100,14 @@ AncientStudio/
 - Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações no padrão `[ termo ]` (`[ github ]`, `[ linkedin ]`, `[ contato ]`/`[ contact ]`, `[ curriculo-pt-br ]`/`[ resume-pt-br ]` e `[ curriculo-en ]`/`[ resume-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
 - `[ ASCII REALMS // SCENE ]` expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D sobre o estúdio ASCII minimalista (`MascotStageBuilder`: fundo `#13222E` + piso `#1D2B36`) girando continuamente em `yaw`, isolado de eventos de mouse/toque.
 - `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend, e consolida em [`ascii-engine-module/README.md`](../ascii-engine-module/README.md) as regras obrigatórias para novas implementações (ECS enxuto, coerência estilística ASCII integral sem código residual, paletas sóbrias/controladas e ciclo de vida limpo).
-- `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, workflows n8n, simulador de pipelines e console RAG), sem respostas simuladas.
+- `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, BCB SGS/PIX, Siscomex NCM, transparência municipal IBGE/TSE, triagem pública PROJUDI, workflows n8n, simulador de pipelines e console RAG), sem respostas simuladas; quando aberto estaticamente no GitHub Pages sem servidor Python, `assets/js/api.js` + `assets/js/main.js` ativam automaticamente simulação realista validada no cliente.
+
+### Conectores Públicos, Fintech/Tax, ETL Municipal & PROJUDI (`api/connectors/` + `/api/v1/*`)
+
+- **`GET /api/v1/bcb/indicadores` & `GET /api/v1/bcb/instituicoes`:** Integração oficial sem token com o Banco Central do Brasil — séries SGS (`432` Selic Meta, `433` IPCA mensal, `1` PTAX USD/BRL) e diretório Olinda `ParticipantesPix` filtrável por nome sem acentos ou ISPB de 8 dígitos, com cache TTL em memória e fallback resiliente.
+- **`GET /api/v1/siscomex/ncm?q=...`:** Busca normalizada (sem acentos, por descrição ou código) sobre a tabela oficial de Nomenclatura Comum do Mercosul (Portal Único Siscomex Classif JSON + semente oficial `api/data/siscomex_ncm_seed.json`), retornando hierarquia completa (capítulo, posição, subposição) e vigência legal, sem violar CAPTCHA.
+- **`GET /api/v1/transparencia/municipio?cidade=...&uf=...`:** Integração entre IBGE Localidades v1, TSE Dados Abertos (`DivulgaCandContas` — Prefeito, Vice-Prefeito, Vereadores eleitos e distribuição partidária) e enriquecimento opcional via `TRANSPARENCIA_API_KEY` (Portal da Transparência CGU).
+- **`POST /api/v1/projudi/processos/consulta`, `GET /api/v1/projudi/processos/{numero_processo}` & `POST /api/v1/projudi/processos/{numero_processo}/resumo`:** Triagem pública processual respeitando limites legais/CAPTCHA (zero bypass), com validação mod-11 de CPF e numeração CNJ de 20 dígitos, mascaramento LGPD (`***.456.789-**`), parser HTML desacoplado (`ProjudiPublicHtmlParser`), modo sandbox/demonstração quando sem `captcha_token` ativo e sumarização determinística com contrato explícito `"status": "ready_for_llm"` para integração n8n/LLM.
 
 ### Backend FastAPI (Fases 1 a 5)
 
