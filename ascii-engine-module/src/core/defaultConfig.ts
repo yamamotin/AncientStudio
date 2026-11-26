@@ -16,11 +16,12 @@ export const DEFAULT_PALETTE: ThemePalette = {
 };
 
 /**
- * High-legibility calibrated ASCII luminance ramp for crisp glyph modulation across
- * 3D urban facades, illuminated passing vehicles, character volumes, and wet pavement.
+ * Expressive multi-symbol & alphanumeric ASCII luminance ramp inspired by classic & modern
+ * ASCII RPG aesthetics (`o`, `u`, `s`, `a`, `$`, `8`, `Q`, `=`, `-`, `~`, `^`, `*`), ordered
+ * from sparse punctuation to dense typographic highlights to avoid repetitive bar runs.
  */
 export const DEFAULT_ASCII_RAMP =
-  " .'`^,:;Il!i><~+_-?][1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+  " .',:;~-_^+=*!i1r?cvunxzjft<>saoeukpqdbwmh0OQCJLZUYX$8&#%B@";
 
 export const DEFAULT_SCENE_MODEL_URL = './assets/models/cena_completa.glb';
 export const DEFAULT_DRACO_DECODER_PATH = './assets/draco/';
@@ -30,7 +31,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   modelUrl: DEFAULT_SCENE_MODEL_URL,
   dracoDecoderPath: DEFAULT_DRACO_DECODER_PATH,
   atmosphere: 'night',
-  fov: 74,
+  fov: 66,
   enableKeyboard: true,
   autoOrbit: false,
   pauseOffscreen: true,
@@ -39,16 +40,16 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   autoResponsiveDensity: true,
   characterRamp: DEFAULT_ASCII_RAMP,
   structuralChars: '/\\|_[]',
-  edgeStrength: 0.96,
-  blockBlendWeight: 0.22,
+  edgeStrength: 0.94,
+  blockBlendWeight: 0.12,
   windStrength: 1.0,
-  bloomIntensity: 0.22,
-  bloomThreshold: 0.64,
-  dofFocusDistance: 0.35,
+  bloomIntensity: 0.28,
+  bloomThreshold: 0.56,
+  dofFocusDistance: 0.34,
   dofStrength: 0.18,
   parallaxIntensity: 0.35,
   parallaxSmoothing: 6.5,
-  cursorLightIntensity: 0.45,
+  cursorLightIntensity: 0.42,
   enableShadows: true,
   maxFps: 60,
   maxPixelRatio: 2,
