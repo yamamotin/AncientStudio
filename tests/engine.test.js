@@ -397,6 +397,33 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const helperBox = prepared.nodes.cidade.getObjectByName('Cidade_Object_331');
   assert.ok(helperBox && helperBox.visible === false, 'Invisible exporter bounding box hidden cleanly');
 
+  // Verify material legibility fixes: Player_Rig & Carro_Grupo diffuse restoration + alpha-card normal-pass exclusion
+  assert.ok(
+    prepared.materials.character.length >= 1 &&
+      prepared.materials.character.every((m) => m.metalness <= 0.25),
+    'Player_Rig unassigned glTF metalness=1 material replaced with sculpted readable albedo'
+  );
+  assert.ok(
+    prepared.materials.carBody.length >= 1 &&
+      prepared.materials.carBody.every((m) => m.metalness <= 0.35),
+    'Carro_Grupo baked metalness=1 palette materials tuned for crisp coupe silhouette'
+  );
+  let skipNormalCount = 0;
+  prepared.nodes.cidade.traverse((obj) => {
+    if (obj.userData && obj.userData.skipNormalPass === true) skipNormalCount += 1;
+  });
+  assert.ok(skipNormalCount >= 35, `Alpha-blended billboard decals excluded from normal pass (${skipNormalCount})`);
+
+  // Verify embedded + procedural normal maps cover roads, sidewalks, facades, Player_Rig, and Carro_Grupo
+  for (const groupName of ['roads', 'sidewalks', 'walls', 'character', 'carBody']) {
+    const mats = prepared.materials[groupName];
+    assert.ok(mats.length >= 1, `Material group "${groupName}" populated`);
+    assert.ok(
+      mats.every((m) => Boolean(m.normalMap && m.normalMap.isTexture)),
+      `Every "${groupName}" material carries an embedded or procedural normalMap`
+    );
+  }
+
   // Verify Hips horizontal root offset normalization across Idle, Walking, and Casting
   const walkHips = prepared.clips.Walking.tracks.find((t) => /hips\.position$/i.test(t.name));
   const castHips = prepared.clips.Casting.tracks.find((t) => /hips\.position$/i.test(t.name));
@@ -429,7 +456,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   assert.equal(mockListeners.pointermove.opts.passive, true);
 
   const keyboard = new pkg.KeyboardInput({ enabled: true, focusTarget: mockContainer });
-  const camera = new THREE.PerspectiveCamera(64, 16 / 9, 0.15, 160);
+  const camera = new THREE.PerspectiveCamera(58, 16 / 9, 0.15, 160);
 
   const runner = new pkg.SystemRunner()
     .addSystem(new pkg.InputSystem(pointer, keyboard, camera), 10)
@@ -615,6 +642,13 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   vfx.applyConfig(rainConfig);
   assert.equal(vfx.isRainActive(), true, 'Rain particles active in rain mode');
   assert.ok(prepared.materials.roads[0].roughness < 0.25, 'Mirror-wet reflective asphalt in rain mode');
+  const rainRoadNormalX = prepared.materials.roads[0].normalScale.x;
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, rainConfig, ecsWorld);
+  assert.AlmostEqual(
+    prepared.materials.roads[0].normalScale.x,
+    rainRoadNormalX,
+    1e-5
+  );
   assert.ok(stage.scene.fog.density > 0.02, 'Thicker storm mist in rain mode');
   assert.ok(carTraffic.baseSpotIntensity >= 22.0, 'Headlights intensified against wet storm asphalt');
 
@@ -641,17 +675,29 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     'utf8'
   );
 
-  // 1. Modern 3D-wrapping ASCII shader invariants (glyph variety + ground reflections + linearized depth + view-normal Sobel + soft knee, zero solid block blowout)
+  // 1. Modern 3D-wrapping ASCII shader invariants (glyph variety + dark breathing + silhouette moat + tonal underlayer + ground reflections)
   includesAll(asciiShaderSrc, [
     'tNormal',
     'tDepth',
     'linearizeDepth',
     'glyphVarietyHash',
     'sampleGroundReflection',
+    'silhouetteOuterMoat',
+    'silhouetteInnerRim',
+    'tonedUnderlayer',
     'uWetness',
     'uCameraNear',
     'uCameraFar',
     'uVolumeWrapStrength',
+    'uNormalReliefStrength',
+    'uKeyLightViewDir',
+    'uRimLightViewDir',
+    'uWorldUpViewDir',
+    'keyNdotL',
+    'keyAway',
+    'normalSpec',
+    'normalTilt',
+    'macroViewN',
     'sampleCellIntegrated',
     'uSubCellSpread',
     'uAtlasTileSize',
@@ -691,6 +737,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(pkg.DEFAULT_PALETTE.coolAmbient, '#6E7B87');
   assert.equal(pkg.DEFAULT_PALETTE.foliageAccent, '#2A3540');
   includesAll(pkg.DEFAULT_ASCII_RAMP, ['o', 'u', 's', 'a', '$', '8', 'Q', '=', '-', '~', '^', '*']);
+  assert.ok(pkg.DEFAULT_ASCII_RAMP.startsWith('    '), 'DEFAULT_ASCII_RAMP reserves leading empty spaces for dark breathing shadows');
 
   // 2. High-legibility 5:8 glyph atlas proportions
   const atlas = pkg.createGlyphAtlas(' .:-=+*#%@', '|/-\\', 'monospace', 64);
@@ -738,4 +785,61 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(handle.dispose(), 1);
   assert.equal(pkg.getObjectOutlineState(box), null);
   pkg.LifecycleManager.disposeObject3D(testScene);
+
+  // 5. Procedural normal maps, Pass 2 NormalPassMaterialCache (skipNormalPass) & view-space light extraction
+  const normalSet = pkg.createProceduralNormalMapSet(32);
+  for (const key of ['asphalt', 'pavement', 'facade', 'contourTrim']) {
+    const tex = normalSet[key];
+    assert.ok(tex && tex.isDataTexture, `procedural normal map "${key}" is a DataTexture`);
+    assert.equal(tex.colorSpace, pkg.THREE.NoColorSpace, `normal map "${key}" uses linear NoColorSpace`);
+    assert.equal(tex.image.data.length, 32 * 32 * 4);
+  }
+
+  const passScene = new pkg.THREE.Scene();
+  const mappedMat = new pkg.THREE.MeshStandardMaterial({
+    color: 0x667788,
+    normalMap: normalSet.facade,
+    normalScale: new pkg.THREE.Vector2(0.8, 0.8)
+  });
+  const mappedMesh = new pkg.THREE.Mesh(new pkg.THREE.BoxGeometry(1, 1, 1), mappedMat);
+  const decalMesh = new pkg.THREE.Mesh(
+    new pkg.THREE.PlaneGeometry(1, 1),
+    new pkg.THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5 })
+  );
+  decalMesh.userData.skipNormalPass = true;
+  passScene.add(mappedMesh, decalMesh);
+
+  const passCache = new pkg.NormalPassMaterialCache();
+  passCache.beginPass(passScene);
+  assert.equal(decalMesh.visible, false, 'skipNormalPass decal hidden during Pass 2');
+  assert.ok(
+    mappedMesh.material.isMeshNormalMaterial && mappedMesh.material.normalMap === normalSet.facade,
+    'Opaque mesh receives normal-mapped MeshNormalMaterial during Pass 2'
+  );
+  assert.ok(
+    mappedMesh.material.normalScale.x >= 0.14 && mappedMesh.material.normalScale.x <= 0.48,
+    'Pass 2 normalScale is macro-filtered to prevent ASCII static'
+  );
+  passCache.endPass();
+  assert.equal(decalMesh.visible, true, 'skipNormalPass decal restored immediately after Pass 2');
+  assert.equal(mappedMesh.material, mappedMat, 'Original PBR material restored immediately after Pass 2');
+
+  const dirKey = new pkg.THREE.DirectionalLight(0xffffff, 2.0);
+  dirKey.name = 'KeyDirectionalLight';
+  dirKey.position.set(16, 28, 18);
+  passScene.add(dirKey, dirKey.target);
+  const testCam = new pkg.THREE.PerspectiveCamera(58, 16 / 9, 0.1, 120);
+  testCam.position.set(10, 12, 10);
+  testCam.lookAt(0, 1, 0);
+  const outKey = new pkg.THREE.Vector3();
+  const outRim = new pkg.THREE.Vector3();
+  const outUp = new pkg.THREE.Vector3();
+  pkg.extractSceneDirectionalVectors(passScene, testCam, outKey, outRim, outUp);
+  assert.ok(Math.abs(outKey.length() - 1.0) < 1e-4, 'uKeyLightViewDir is unit length');
+  assert.ok(Math.abs(outRim.length() - 1.0) < 1e-4, 'uRimLightViewDir is unit length');
+  assert.ok(Math.abs(outUp.length() - 1.0) < 1e-4, 'uWorldUpViewDir is unit length');
+
+  passCache.dispose();
+  normalSet.dispose();
+  pkg.LifecycleManager.disposeObject3D(passScene);
 });

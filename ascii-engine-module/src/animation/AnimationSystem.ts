@@ -1,15 +1,8 @@
 import * as THREE from 'three';
+import type { EcsSystem, SystemContext } from '../ecs/SystemRunner';
 import type { CharacterAnimationComponent, CharacterClipName, World } from '../ecs/World';
 
-export interface SystemContext {
-  dt: number;
-  elapsed: number;
-}
-
-export interface EcsSystem {
-  readonly name: string;
-  update(world: World, context: SystemContext): void;
-}
+export type { EcsSystem, SystemContext };
 
 /**
  * Transitions a `CharacterAnimationComponent` smoothly to `nextClip` via `crossFadeTo`.

@@ -51,8 +51,8 @@ export function createGlyphAtlas(
   const tileHeight = Math.max(48, Math.min(128, Math.round(tileSize / 8) * 8));
   const tileWidth = Math.round(tileHeight * 0.625);
 
-  const rampFontPx = Math.round(tileHeight * 0.9);
-  const structFontPx = Math.round(tileHeight * 0.96);
+  const rampFontPx = Math.round(tileHeight * 0.84);
+  const structFontPx = Math.round(tileHeight * 0.92);
 
   const canvas = document.createElement('canvas');
   canvas.width = tileWidth * totalGlyphs;
@@ -77,7 +77,7 @@ export function createGlyphAtlas(
     if (ch === ' ') continue;
 
     const isStructural = i >= safeRamp.length;
-    ctx.font = `700 ${isStructural ? structFontPx : rampFontPx}px ${family}`;
+    ctx.font = `${isStructural ? 700 : 600} ${isStructural ? structFontPx : rampFontPx}px ${family}`;
 
     // Clip drawing strictly to this glyph's rectangular tile so wide strokes never bleed into adjacent tiles
     if (typeof ctx.save === 'function' && typeof ctx.beginPath === 'function' && typeof ctx.clip === 'function') {

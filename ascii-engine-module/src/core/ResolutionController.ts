@@ -97,24 +97,24 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
         cellCss = Math.max(6.5, baseCell * 0.85);
       }
     } else {
-      // Continuous container-proportional ramp within tier bounds so resizing feels organic
+      // Continuous container-proportional ramp calibrated so individual glyphs stay crisp & readable
+      // while preserving recognizable silhouettes on Player_Rig, Carro_Grupo, and facades.
       const widthNorm = Math.max(0, Math.min(1, (cssW - 360) / 1240));
-      const continuousScale = 1.16 - widthNorm * 0.40; // smoothly spans 1.16x -> 0.76x
+      const continuousScale = 1.22 - widthNorm * 0.32; // smoothly spans 1.22x -> 0.90x
       if (tier === 'mobile') {
-        cellCss = Math.max(10.5, Math.round(baseCell * Math.max(1.32, continuousScale)));
+        cellCss = Math.max(10.5, Math.round(baseCell * Math.max(1.34, continuousScale)));
       } else if (tier === 'compact') {
-        cellCss = Math.max(8.4, Number((baseCell * Math.max(1.02, continuousScale)).toFixed(2)));
+        cellCss = Math.max(8.8, Number((baseCell * Math.max(1.08, continuousScale)).toFixed(2)));
       } else if (tier === 'hd') {
-        cellCss = Math.max(6.6, Number((baseCell * Math.min(0.86, continuousScale)).toFixed(2)));
+        cellCss = Math.max(7.4, Number((baseCell * Math.min(0.95, continuousScale)).toFixed(2)));
       } else if (tier === 'uhd') {
-        cellCss = Math.max(6.2, Number((baseCell * Math.min(0.79, continuousScale)).toFixed(2)));
+        cellCss = Math.max(6.9, Number((baseCell * Math.min(0.88, continuousScale)).toFixed(2)));
       } else {
-        cellCss = Math.max(7.4, Number((baseCell * continuousScale).toFixed(2)));
+        cellCss = Math.max(8.0, Number((baseCell * continuousScale).toFixed(2)));
       }
 
       if (input.isFullscreen && tier !== 'mobile') {
-        // Slightly refine cell size in fullscreen so wide urban vistas reveal extra detail cleanly
-        cellCss = Math.max(6.0, Number((cellCss * 0.92).toFixed(2)));
+        cellCss = Math.max(6.5, Number((cellCss * 0.93).toFixed(2)));
       }
     }
   }
