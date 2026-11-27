@@ -9,9 +9,11 @@
    - every URL is validated before use: https only, no credentials, strict host allowlist;
      `javascript:`, `data:` (except a strict base64 image), `http:` and unknown hosts are
      simply dropped;
-   - the challenge image may be a strict `data:image/…;base64,` payload produced by the
-     backend, or an https URL on the official TJPR hosts (the only ones present in the
-     document CSP `img-src`); it is never loaded from an arbitrary origin;
+   - the challenge image comes from the backend contract: `captcha_image` /
+     `image_data_uri` / `image_data_url` / `image_base64` (+ `image_mime_type`), the
+     same-origin `image_endpoint` (`/api/v1/captcha/challenges/<id>/image`) or an https URL
+     on the official TJPR hosts. Each variant has its own strict validator and nothing is
+     ever loaded from an arbitrary origin;
    - all external text is bounded and rendered with createElement/textContent — the module
      never assigns innerHTML;
    - the dialog never embeds a remote frame (the CSP forbids frame-src) and never renders
@@ -44,7 +46,9 @@ window.TP = window.TP || {};
   var MAX_ANSWER_LEN = 4096; // long portal tokens and short image answers share the field
   var TOKEN_MIN_LEN = 3;
   var MAX_COOKIE_LEN = 1024;
-  var MAX_IMAGE_DATA_LEN = 400000;
+  // Mirrors api/connectors/captcha.py::MAX_CAPTCHA_IMAGE_BYTES (1 MiB) plus the base64
+  // overhead and the `data:` prefix, so a legitimately large bitmap is not dropped.
+  var MAX_IMAGE_DATA_LEN = 1450000;
   var TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
   var COOKIE_PATTERN = /^[A-Za-z0-9._~=%:;+/@!$&'()*,-]+$/;
   var SITE_KEY_PATTERN = /^[A-Za-z0-9_-]{10,100}$/;
@@ -52,6 +56,10 @@ window.TP = window.TP || {};
   var CALLBACK_PATTERN = /^[A-Za-z0-9_]{1,80}$/;
   // Strict mirror of the challenge bitmap: base64 of a real image type, nothing else.
   var IMAGE_DATA_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/]+={0,2}$/;
+  // Mirrored bitmaps can also be streamed by our own API (CSP `img-src 'self'`).
+  var IMAGE_ENDPOINT_PATTERN = /^\/api\/v1\/captcha\/challenges\/[A-Za-z0-9._:-]{1,64}\/image$/;
+  var IMAGE_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+  var IMAGE_MIME_ALLOWLIST = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/bmp'];
   // Inert 1x1 pixel shipped in the markup: the real bitmap replaces it while the dialog
   // is open, and it is restored on close so no challenge data survives in the DOM.
   var IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -129,6 +137,27 @@ window.TP = window.TP || {};
     return parsed.href;
   }
 
+  /* Same-origin streaming endpoint for a mirrored challenge bitmap. Only the exact
+     `/api/v1/captcha/challenges/<id>/image` shape is accepted, so the popup can never be
+     pointed at an arbitrary path, a protocol-relative URL or a traversal. */
+  function safeImageEndpoint(raw) {
+    var value = String(raw === null || raw === undefined ? '' : raw).trim();
+    if (!value || value.length > 160) return '';
+    if (value.indexOf('//') !== -1 || value.indexOf('\\') !== -1) return '';
+    return IMAGE_ENDPOINT_PATTERN.test(value) ? value : '';
+  }
+
+  /* `image_base64` + `image_mime_type`: the raw bitmap the backend mirrored from the
+     portal. The mime type must be an image we accept and the payload pure base64. */
+  function imageFromBase64(rawBase64, rawMime) {
+    var b64 = String(rawBase64 === null || rawBase64 === undefined ? '' : rawBase64).replace(/\s+/g, '');
+    if (!b64 || b64.length > MAX_IMAGE_DATA_LEN) return '';
+    var mime = String(rawMime === null || rawMime === undefined ? '' : rawMime).trim().toLowerCase();
+    if (IMAGE_MIME_ALLOWLIST.indexOf(mime) === -1) return '';
+    if (!IMAGE_BASE64_PATTERN.test(b64)) return '';
+    return safeImageSource('data:' + mime + ';base64,' + b64);
+  }
+
   function normalizeToken(raw) {
     var value = String(raw === null || raw === undefined ? '' : raw).trim();
     if (!value || value.length > MAX_TOKEN_LEN) return '';
@@ -195,12 +224,56 @@ window.TP = window.TP || {};
     return value;
   }
 
+  /* The backend echoes the challenge both at the top level and inside `popup`,
+     `challenge_data` and `extra` descriptors, so every lookup walks all of them. */
+  function sourcesOf(raw) {
+    var list = [raw];
+    ['popup', 'challenge_data', 'challengeData', 'extra'].forEach(function (key) {
+      var nested = raw[key];
+      if (nested && typeof nested === 'object') list.push(nested);
+    });
+    return list;
+  }
+
+  function firstOf(sources, keys) {
+    for (var i = 0; i < sources.length; i += 1) {
+      for (var k = 0; k < keys.length; k += 1) {
+        var value = sources[i][keys[k]];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }
+    }
+    return undefined;
+  }
+
+  /* Image resolution order matches the API contract (`api/connectors/captcha.py`):
+     mirrored data URI → mirrored base64 + mime → same-origin endpoint → https on TJPR. */
+  function imageOf(raw, sources) {
+    var candidates = [
+      firstOf(sources, ['image_data_uri', 'imageDataUri', 'captcha_image', 'captchaImage']),
+      firstOf(sources, ['image_data_url', 'imageDataUrl']),
+      raw.image
+    ];
+    for (var i = 0; i < candidates.length; i += 1) {
+      var safe = safeImageSource(candidates[i]);
+      if (safe) return safe;
+    }
+    var fromBase64 = imageFromBase64(
+      firstOf(sources, ['image_base64', 'imageBase64']),
+      firstOf(sources, ['image_mime_type', 'imageMimeType'])
+    );
+    if (fromBase64) return fromBase64;
+    var endpoint = safeImageEndpoint(firstOf(sources, ['image_endpoint', 'imageEndpoint']));
+    if (endpoint) return endpoint;
+    return safeImageSource(firstOf(sources, ['image_url', 'imageUrl']));
+  }
+
   /* Pure: accepts a raw problem body, an ApiClientError or a static fallback result. */
   function sanitizeChallenge(source) {
     var raw = source && typeof source === 'object' ? source : {};
     if (raw.problem && typeof raw.problem === 'object') raw = raw.problem;
     else if (raw.data && typeof raw.data === 'object') raw = raw.data;
 
+    var sources = sourcesOf(raw);
     var siteKey = text(field(raw, 'site_key', 'siteKey'), 100);
     if (!SITE_KEY_PATTERN.test(siteKey)) siteKey = '';
     var challengeId = text(field(raw, 'challenge_id', 'challengeId'), 64);
@@ -216,11 +289,14 @@ window.TP = window.TP || {};
       portalUrl: safeExternalUrl(field(raw, 'portal_url', 'portalUrl')),
       formUrl: safeExternalUrl(field(raw, 'form_url', 'formUrl')),
       challengeUrl: safeExternalUrl(field(raw, 'challenge_url', 'challengeUrl')),
-      // `raw.image` keeps sanitizeChallenge() idempotent, like `raw.text` below.
-      image: safeImageSource(field(raw, 'image_data_url', 'imageDataUrl')) ||
-        safeImageSource(field(raw, 'image_url', 'imageUrl')) ||
-        safeImageSource(raw.image),
-      text: text(field(raw, 'challenge_text', 'challengeText') || raw.text, MAX_PROMPT_LEN),
+      // `raw.image` / `raw.text` keep sanitizeChallenge() idempotent.
+      image: imageOf(raw, sources),
+      text: text(
+        field(raw, 'challenge_text', 'challengeText') ||
+          field(raw, 'prompt_label', 'promptLabel') ||
+          raw.text,
+        MAX_PROMPT_LEN
+      ),
       callback: callback,
       detail: text(raw.detail, MAX_DETAIL_LEN),
       instructions: instructionsOf(raw.instructions),
@@ -265,21 +341,42 @@ window.TP = window.TP || {};
     return minutes + ':' + (rest < 10 ? '0' : '') + rest;
   }
 
-  /* The single line of guidance under the challenge: backend prompt, then the backend
-     detail, then the translated default. */
+  /* True when the popup has a usable bitmap to show above the answer field. */
+  function hasImage(challenge) {
+    return !!(challenge && challenge.image && !state.imageBroken);
+  }
+
+  /* The single line of guidance under the challenge bitmap. The backend prompt wins;
+     with no image (missing payload, blocked or broken URL) the popup states that plainly
+     instead of pushing the user towards an external portal — `detail`/`instructions` are
+     never rendered, they describe the HTTP flow, not the challenge. */
   function promptOf(challenge) {
+    if (!hasImage(challenge)) return t('captcha.imageUnavailable');
     if (challenge.text) return challenge.text;
-    if (state.imageBroken) return t('captcha.imageUnavailable');
-    if (challenge.detail) return challenge.detail;
     return t('captcha.promptFallback');
+  }
+
+  /* Toggles the warning look without assuming classList (kept DOM-stub friendly). */
+  function toggleWarning(element, on) {
+    if (!element) return;
+    var name = 'captcha-prompt--warn';
+    if (element.classList && typeof element.classList.toggle === 'function') {
+      element.classList.toggle(name, Boolean(on));
+      return;
+    }
+    var current = String(element.getAttribute('class') || element.className || '').split(/\s+/);
+    var next = current.filter(function (item) { return item && item !== name; });
+    if (on) next.push(name);
+    element.setAttribute('class', next.join(' '));
   }
 
   function renderChallenge() {
     var challenge = state.challenge;
     if (!challenge || !els.dialog) return;
 
+    var showImage = hasImage(challenge);
     if (els.image) {
-      if (challenge.image && !state.imageBroken) {
+      if (showImage) {
         els.image.setAttribute('src', challenge.image);
         els.image.hidden = false;
       } else {
@@ -289,7 +386,12 @@ window.TP = window.TP || {};
       els.image.setAttribute('alt', t('captcha.imageAlt'));
     }
 
-    if (els.prompt) els.prompt.textContent = promptOf(challenge);
+    if (els.prompt) {
+      els.prompt.textContent = promptOf(challenge);
+      // The missing-bitmap case is a warning, not ordinary guidance.
+      toggleWarning(els.prompt, !showImage);
+      els.prompt.setAttribute('role', showImage ? 'note' : 'alert');
+    }
 
     updateExpiryLabel();
   }
@@ -454,14 +556,11 @@ window.TP = window.TP || {};
     if (els.cancel) els.cancel.addEventListener('click', function () { finish('cancel'); });
     if (els.close) els.close.addEventListener('click', function () { finish('cancel'); });
     if (els.image) {
-      // A blocked/broken image never blocks the flow: the prompt takes over.
+      // A blocked/broken image never blocks the flow: renderChallenge() swaps it for the
+      // inert pixel and switches the prompt to the translated "image unavailable" warning.
       els.image.addEventListener('error', function () {
         state.imageBroken = true;
-        if (els.image) {
-          els.image.setAttribute('src', IMAGE_PLACEHOLDER);
-          els.image.hidden = true;
-        }
-        if (els.prompt && state.challenge) els.prompt.textContent = promptOf(state.challenge);
+        if (state.challenge) renderChallenge();
       });
     }
     if (els.dialog) {
