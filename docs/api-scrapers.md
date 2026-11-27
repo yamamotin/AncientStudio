@@ -72,6 +72,10 @@ Sempre que uma fonte pública exige verificação humana (seja em resposta `200 
   "response_field": "g-recaptcha-response",
   "expected_param": "captcha_token",
   "accepted_params": ["captcha_token", "captcha_solution"],
+  "image": "data:image/png;base64,iVBORw0KGgo...",
+  "image_available": true,
+  "image_source": "portal_session_servlet",
+  "image_unavailable_reason": null,
   "captcha_image": "data:image/png;base64,iVBORw0KGgo...",
   "image_data_url": "data:image/png;base64,iVBORw0KGgo...",
   "image_data_uri": "data:image/png;base64,iVBORw0KGgo...",
@@ -92,6 +96,10 @@ Sempre que uma fonte pública exige verificação humana (seja em resposta `200 
     "session_param": "session_cookie",
     "response_field": "g-recaptcha-response",
     "session_initialized": true,
+    "image": "data:image/png;base64,iVBORw0KGgo...",
+    "image_available": true,
+    "image_source": "portal_session_servlet",
+    "image_unavailable_reason": null,
     "captcha_image": "data:image/png;base64,iVBORw0KGgo...",
     "image_data_url": "data:image/png;base64,iVBORw0KGgo...",
     "image_data_uri": "data:image/png;base64,iVBORw0KGgo...",
@@ -154,6 +162,33 @@ Sempre que uma fonte pública exige verificação humana (seja em resposta `200 
 > **Compatibilidade com CSP (`img-src 'self' data:`):** quando o portal de origem apresenta CAPTCHA de imagem vinculado à sessão HTTP, o `CaptchaChallengeStore` baixa a imagem usando o mesmo `Cookie` (`JSESSIONID` / WAF) no momento da emissão do desafio e entrega `challenge_data.image_data_uri` em Base64, permitindo renderização imediata no popup sem violar a Content Security Policy.
 >
 > **Proteção LGPD no `consulta_payload`:** parâmetros sensíveis (como `cpf`) permanecem armazenados apenas em memória no `CaptchaChallengeStore` do servidor (TTL de 300s) para retomada automática por `challenge_id`; no JSON devolvido ao navegador, o campo `cpf` bruto é omitido em favor de `cpf_mascarado`.
+
+### 2.1. Diagnóstico de `"image": false`, Extração Real de Bitmaps e Limitação Técnica do Google reCAPTCHA v2
+
+No card interativo do portfólio (`assets/js/main.js`), `resolveCaptchaAndResend` registra no painel `#projudi-output` o resumo `{ code, provider, challenge_id, image: Boolean(challenge.image), expires_at }`. Portanto, `"image": false` significa que `challenge.image` veio vazio porque nenhum bitmap real pôde ser exposto pela sessão upstream.
+
+#### Fontes Reais de Imagem Extraídas pelo Backend (`image_available: true`)
+
+O backend (`api/connectors/captcha.py`, `api/connectors/projudi.py` e `api/connectors/http_client.py`) extrai, normaliza e espelha toda imagem real disponível na sessão do portal de origem, preenchendo simultaneamente `image`, `captcha_image`, `image_data_url`, `image_data_uri`, `image_base64`, `image_mime_type` e `image_endpoint` (`/api/v1/captcha/challenges/{challenge_id}/image`):
+
+1. **`portal_inline_data_uri`:** tags `<img>`, `<input type="image">`, `<object>` ou CSS `background-image: url(...)` contendo `data:image/(png|jpeg|gif|webp|bmp);base64,...` diretamente no HTML de `consultaPublica.do`.
+2. **`portal_session_servlet`:** servlets e actions Struts/Java vinculados ao `JSESSIONID` (`captcha.svl`, `gerarCaptcha`, `imagemSeguranca`, `ChallengeImage`, `actionType=captcha|imagem`, atributos `data-src` / `data-captcha-src`, scripts inline ou `<img>` contextual dentro de `<form>` com input de CAPTCHA). O transporte `UrllibHttpTransport` utiliza `HTTPCookieProcessor` para preservar cookies `JSESSIONID` emitidos inclusive em redirecionamentos `302`, normaliza URLs `http://*.tjpr.jus.br` de proxy reverso para `https://` e negocia `Accept: image/png,image/jpeg,image/webp,image/gif,image/*`.
+3. **`recaptcha_html_fallback`:** quando o formulário utiliza Google reCAPTCHA (`div.g-recaptcha[data-sitekey]`) e o endpoint HTML sem JavaScript `https://www.google.com/recaptcha/api/fallback?k=<site_key>` entrega `<input name="c">` + `<img class="fbc-imageselect-payload" src="/recaptcha/api2/payload?...">`, o backend baixa o JPEG/PNG real da grade/texto, envia `data:image/...;base64,...` ao popup e troca a resposta humana pelo token `g-recaptcha-response` real no `POST /recaptcha/api/fallback`.
+4. **`headless_renderer` (hook opcional):** `CaptchaChallengeStore(challenge_renderer=...)` aceita um renderizador headless opcional (ex.: worker Playwright/Chromium isolado) capaz de capturar o desafio real sem alterar o contrato das rotas.
+
+#### Limitação Técnica do Google reCAPTCHA v2 Widget (`image_available: false`)
+
+Quando o portal `https://consulta.tjpr.jus.br/projudi_consulta/` apresenta exclusivamente o **widget JavaScript do Google reCAPTCHA v2** (`<div class="g-recaptcha" data-sitekey="...">` + `https://www.google.com/recaptcha/api.js`) e o Google desabilita o endpoint legado `/recaptcha/api/fallback` para aquela `site_key` (respondendo com a página de descontinuação `<noscript>` *"Please upgrade to a supported browser to get a reCAPTCHA challenge"*):
+
+- O protocolo ativo do reCAPTCHA v2 (`GET /recaptcha/api2/anchor` → `POST /recaptcha/api2/reload` → `GET /recaptcha/api2/payload`) **exige a execução da máquina virtual JavaScript ofuscada BotGuard (`recaptcha__pt_br.js`) em um navegador real cuja origem `window.location.origin` seja `https://consulta.tjpr.jus.br:443`**, gerando um token criptografado de atestação de navegador (`bg`) antes que o Google libere qualquer bitmap em `/recaptcha/api2/payload`.
+- Além disso, a Content Security Policy do portfólio bloqueia iframes externos (`frame-src 'none'`) e o navegador não permite forjar a origem `consulta.tjpr.jus.br` a partir de outro domínio.
+- Nessa condição técnica real, **não existe bitmap HTTP estático fornecido pelo TJPR nem pelo Google** sem um navegador headless executando BotGuard. Em conformidade estrita com a política **Zero Mocks / Zero Dados Fictícios**, o backend **jamais gera imagens falsas de CAPTCHA nem processos simulados**, retornando de forma transparente:
+  - `"image": null`
+  - `"image_available": false`
+  - `"image_source": null`
+  - `"image_unavailable_reason": "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"`
+  - `"dados_sinteticos_ou_mock": false`
+- Mesmo quando `image_available` é `false`, o `challenge_id`, o `expires_at`, o `session_cookie` (`JSESSIONID=...`), os campos ocultos Struts e o `consulta_payload` permanecem integralmente preservados no `CaptchaChallengeStore`, permitindo concluir a consulta real assim que um `captcha_token` (`g-recaptcha-response`) válido ou sessão autenticada seja submetido no popup/API.
 
 ---
 

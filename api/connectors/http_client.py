@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from http.cookiejar import CookieJar
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from api.connectors.errors import UpstreamConnectorError
 
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; AncientStudio-PublicConnectors/2.0; "
-    "+https://github.com/yamamotin/AncientStudio)"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 _CHARSET_RE = re.compile(r"charset\s*=\s*['\"]?([A-Za-z0-9._-]+)", re.IGNORECASE)
@@ -199,9 +200,11 @@ class UrllibHttpTransport:
         if headers:
             req_headers.update(headers)
 
+        cookie_jar = CookieJar()
+        opener = build_opener(HTTPCookieProcessor(cookie_jar))
         req = Request(full_url, data=data, headers=req_headers, method=method.upper())
         try:
-            with urlopen(req, timeout=timeout) as resp:
+            with opener.open(req, timeout=timeout) as resp:
                 chunks: list[bytes] = []
                 total = 0
                 while True:
@@ -216,11 +219,14 @@ class UrllibHttpTransport:
                     chunks.append(chunk)
 
                 resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+                cookie_lines: list[str] = [f"{c.name}={c.value}" for c in cookie_jar]
                 get_all = getattr(resp.headers, "get_all", None)
                 if callable(get_all):
                     all_cookies = get_all("Set-Cookie")
                     if all_cookies:
-                        resp_headers["set-cookie"] = "\n".join(all_cookies)
+                        cookie_lines.extend(all_cookies)
+                if cookie_lines:
+                    resp_headers["set-cookie"] = "\n".join(cookie_lines)
 
                 final_url = getattr(resp, "geturl", lambda: full_url)() or full_url
                 return HttpResponse(
@@ -233,13 +239,16 @@ class UrllibHttpTransport:
             err_body = b""
             err_headers: dict[str, str] = {}
             try:
+                cookie_lines = [f"{c.name}={c.value}" for c in cookie_jar]
                 if exc.headers is not None:
                     err_headers = {k.lower(): v for k, v in exc.headers.items()}
                     get_all = getattr(exc.headers, "get_all", None)
                     if callable(get_all):
                         all_cookies = get_all("Set-Cookie")
                         if all_cookies:
-                            err_headers["set-cookie"] = "\n".join(all_cookies)
+                            cookie_lines.extend(all_cookies)
+                if cookie_lines:
+                    err_headers["set-cookie"] = "\n".join(cookie_lines)
                 err_body = exc.read(131072) or b""
             except Exception:
                 err_body = b""

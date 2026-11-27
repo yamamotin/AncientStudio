@@ -120,6 +120,33 @@ class ConnectorCaptchaRequiredError(ConnectorError):
         if data_uri:
             normalized_challenge_data.setdefault("image_data_uri", data_uri)
             normalized_challenge_data.setdefault("image_data_url", data_uri)
+        raw_img_url = normalized_challenge_data.get("image_url")
+        resolved_image = data_uri or (
+            raw_img_url
+            if isinstance(raw_img_url, str) and raw_img_url.lower().startswith("https://")
+            else None
+        )
+        image_available = bool(resolved_image)
+        image_source = normalized_challenge_data.get("image_source") or (
+            "portal_inline_or_mirrored_data_uri"
+            if data_uri
+            else ("portal_https_url" if resolved_image else None)
+        )
+        image_unavailable_reason = (
+            None
+            if image_available
+            else (
+                normalized_challenge_data.get("image_unavailable_reason")
+                or (
+                    "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+                    if provider in {"recaptcha", "hcaptcha", "turnstile"}
+                    else "UPSTREAM_IMAGE_NOT_AVAILABLE"
+                )
+            )
+        )
+        normalized_challenge_data["image_available"] = image_available
+        normalized_challenge_data["image_source"] = image_source
+        normalized_challenge_data["image_unavailable_reason"] = image_unavailable_reason
         prompt_text = normalized_challenge_data.get("prompt_label") or (
             "Digite os caracteres exibidos na imagem do desafio."
             if data_uri or provider == "image"
@@ -146,12 +173,16 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "session_initialized": bool(
                 session_cookie or normalized_challenge_data.get("session_initialized")
             ),
+            "image": resolved_image,
+            "image_available": image_available,
+            "image_source": image_source,
+            "image_unavailable_reason": image_unavailable_reason,
             "captcha_image": data_uri,
             "image_data_url": data_uri,
             "image_data_uri": data_uri,
             "image_base64": normalized_challenge_data.get("image_base64"),
             "image_mime_type": normalized_challenge_data.get("image_mime_type"),
-            "image_url": normalized_challenge_data.get("image_url"),
+            "image_url": raw_img_url,
             "image_endpoint": image_endpoint,
             "site_key": site_key,
             "form_url": resolved_form_url,
@@ -177,12 +208,16 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "response_field": resolved_response_field,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
+            "image": resolved_image,
+            "image_available": image_available,
+            "image_source": image_source,
+            "image_unavailable_reason": image_unavailable_reason,
             "captcha_image": data_uri,
             "image_data_url": data_uri,
             "image_data_uri": data_uri,
             "image_base64": normalized_challenge_data.get("image_base64"),
             "image_mime_type": normalized_challenge_data.get("image_mime_type"),
-            "image_url": normalized_challenge_data.get("image_url"),
+            "image_url": raw_img_url,
             "image_endpoint": image_endpoint,
             "challenge_text": prompt_text,
             "popup": popup_descriptor,

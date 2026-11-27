@@ -9,6 +9,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import api.server as stdlib_server
 from api.connectors import (
     ConnectorCaptchaRequiredError,
     ConnectorNotFoundError,
@@ -32,7 +33,6 @@ from api.connectors import (
     validate_cpf_or_cnpj,
     validate_uf,
 )
-import api.server as stdlib_server
 
 
 class FakeRouteTransport:
@@ -1450,6 +1450,178 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
         self.assertEqual(res["total_processos"], 2)
         self.assertFalse(res["compliance"]["dados_sinteticos_ou_mock"])
         self.assertIn("JSESSIONID=STATELESS_SID_9", seen_cookies[-1])
+
+    def test_projudi_http_reverse_proxy_contextual_image_and_recaptcha_attestation_reason(
+        self,
+    ) -> None:
+        import base64
+
+        from api.connectors import create_public_connectors
+        from api.connectors.captcha import CaptchaChallengeStore
+
+        png_bytes = b"\x89PNG\r\n\x1a\nCONTEXTUAL_PROXY_PNG"
+        contextual_form_html = """
+        <html><body>
+          <form id="buscaProcessoForm" action="/projudi_consulta/processo/consultaPublica.do?actionType=pesquisar" method="post">
+            <img src="/projudi_consulta/imagens/logo_tjpr.png" alt="Logo" />
+            <img data-src="http://consulta.tjpr.jus.br/projudi_consulta/servlet/Verificador?id=7" />
+            <input type="text" name="codCaptcha" placeholder="Digite o código" />
+          </form>
+        </body></html>
+        """
+        img_headers_seen: list[dict[str, str]] = []
+
+        def proxy_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = params, data
+            if method == "GET" and "servlet/Verificador" in url:
+                img_headers_seen.append(dict(headers))
+                self.assertTrue(url.startswith("https://consulta.tjpr.jus.br/"))
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    body=png_bytes,
+                )
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={
+                    "content-type": "text/html; charset=ISO-8859-1",
+                    "set-cookie": "JSESSIONID=PROXY_SID_7; Path=/projudi_consulta",
+                },
+                body=contextual_form_html.encode("iso-8859-1"),
+            )
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": proxy_handler})
+        )
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx:
+            registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+
+        err = ctx.exception
+        self.assertTrue(err.extra["image"].startswith("data:image/png;base64,"))
+        self.assertTrue(err.extra["image_available"])
+        self.assertEqual(err.extra["image_source"], "portal_session_servlet")
+        self.assertIsNone(err.extra["image_unavailable_reason"])
+        self.assertTrue(err.extra["image_url"].startswith("https://consulta.tjpr.jus.br/"))
+        self.assertIn("image/png", img_headers_seen[-1].get("Accept", ""))
+        self.assertIn("JSESSIONID=PROXY_SID_7", img_headers_seen[-1].get("Cookie", ""))
+
+        # Now verify Google reCAPTCHA v2 widget when /recaptcha/api/fallback is retired:
+        # zero mocked images, explicit RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION reason,
+        # and session + real resumption preserved.
+        deprecated_noscript_html = (
+            "<html><body>Please upgrade to a supported browser "
+            "to get a reCAPTCHA challenge.</body></html>"
+        )
+
+        def widget_tjpr_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = params
+            if method == "POST" and "actionType=pesquisar" in url:
+                body_str = (data or b"").decode("ascii", errors="replace")
+                if (
+                    "JSESSIONID=WIDGET_SID_1" in headers.get("Cookie", "")
+                    and "g-recaptcha-response=03AFcWeA_REAL_TOKEN" in body_str
+                ):
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={
+                    "content-type": "text/html; charset=ISO-8859-1",
+                    "set-cookie": "JSESSIONID=WIDGET_SID_1; Path=/projudi_consulta",
+                },
+                body=REALISTIC_TJPR_FORM_HTML.encode("iso-8859-1"),
+            )
+
+        def google_deprecated_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = method, params, headers, data
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body=deprecated_noscript_html.encode("utf-8"),
+            )
+
+        widget_registry = create_public_connectors(
+            transport=FakeRouteTransport(
+                {
+                    "consulta.tjpr.jus.br": widget_tjpr_handler,
+                    "www.google.com": google_deprecated_handler,
+                }
+            )
+        )
+        with self.assertRaises(ConnectorCaptchaRequiredError) as w_ctx:
+            widget_registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+
+        w_err = w_ctx.exception
+        self.assertIsNone(w_err.extra["image"])
+        self.assertFalse(w_err.extra["image_available"])
+        self.assertIsNone(w_err.extra["image_source"])
+        self.assertEqual(
+            w_err.extra["image_unavailable_reason"],
+            "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION",
+        )
+        self.assertFalse(w_err.extra["dados_sinteticos_ou_mock"])
+        self.assertEqual(w_err.extra["session_cookie"], "JSESSIONID=WIDGET_SID_1")
+
+        # Real resumption still succeeds with preserved challenge_id + JSESSIONID
+        resumed = widget_registry.projudi.consulta_por_cpf(
+            challenge_id=w_err.extra["challenge_id"],
+            captcha_token="03AFcWeA_REAL_TOKEN",
+        )
+        self.assertTrue(resumed["captcha_resumed"])
+        self.assertEqual(resumed["total_processos"], 2)
+        self.assertFalse(resumed["compliance"]["dados_sinteticos_ou_mock"])
+
+        # Optional headless renderer hook delivers real bitmap when configured
+        rendered_b64 = base64.b64encode(png_bytes).decode("ascii")
+        custom_store = CaptchaChallengeStore(
+            challenge_renderer=lambda **_kw: {
+                "image_base64": rendered_b64,
+                "image_mime_type": "image/png",
+                "prompt_label": "Selecione os semáforos",
+            }
+        )
+        ch = custom_store.issue_challenge(
+            connector="projudi",
+            operation="consulta_por_cpf",
+            provider="recaptcha",
+            site_key="6LcCustomKey",
+            challenge_url="https://consulta.tjpr.jus.br/projudi_consulta/form.do",
+            resume_endpoint="/api/v1/projudi/processos/consulta",
+        )
+        pub = ch.to_public_payload()
+        self.assertTrue(pub["image_available"])
+        self.assertEqual(pub["image_source"], "headless_renderer")
+        self.assertIsNone(pub["image_unavailable_reason"])
+        self.assertTrue(pub["image"].startswith("data:image/png;base64,"))
 
 
 if __name__ == "__main__":
