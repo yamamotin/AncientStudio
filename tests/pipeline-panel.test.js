@@ -155,7 +155,7 @@ test('every collapsible section has a toggle wired to an existing body', () => {
   assert.match(html, /<section id="pipeline"[^>]*data-collapsed="true"/);
 
   // The 3D scene is the exception: always mounted and expanded, no collapse control.
-  const scene = html.slice(html.indexOf('<section id="scene"'), html.indexOf('<!-- 5. NEOFETCH STACK'));
+  const scene = html.slice(html.indexOf('<section id="scene"'), html.indexOf('<!-- 6. NEOFETCH STACK'));
   assert.doesNotMatch(scene, /data-collapsible|data-collapsed|collapse-toggle|aria-controls="scene-body"/);
   assert.doesNotMatch(scene, /class="[^"]*collapse-body/);
   assert.doesNotMatch(html, /id="scene-body"/);

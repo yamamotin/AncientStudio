@@ -1309,7 +1309,7 @@ test('3D scene section is always mounted and expanded: no collapse control, cont
   const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
 
   const start = htmlSrc.indexOf('<section id="scene"');
-  const end = htmlSrc.indexOf('<!-- 5. NEOFETCH STACK');
+  const end = htmlSrc.indexOf('<!-- 6. NEOFETCH STACK');
   assert.ok(start > 0 && end > start, '#scene section is delimited in the document');
   const scene = htmlSrc.slice(start, end);
 

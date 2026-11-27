@@ -23,7 +23,7 @@ const heroSection = html.slice(
 );
 const stackSection = html.slice(
   html.indexOf('<section id="stack"'),
-  html.indexOf('<!-- 6. INTERACTIVE CONSOLE -->')
+  html.indexOf('</main>')
 );
 
 test('scene controls include a bilingual fullscreen button', () => {
@@ -128,33 +128,52 @@ test('scene modes replace the old preset selector with day, night and rain', () 
   includesAll(main, ['data-scene-mode', 'scene.setPreset(activeMode)', 'aria-pressed']);
 });
 
-test('page brightness defaults to 130%, allows up to 150%, and updates live', () => {
-  assert.doesNotMatch(html, /contrast-control|contrast\.label|--page-contrast/i);
-  includesAll(html, [
+test('page brightness is a 50%-100% top-bar slider with an amplified curve', () => {
+  // The control replaced the old `ERON@PRODUCTION:~$` brand in the top bar.
+  const topbar = html.slice(html.indexOf('<header class="topbar"'), html.indexOf('</header>'));
+  includesAll(topbar, [
     'id="brightness-control"',
     'type="range"',
-    'min="100"',
-    'max="150"',
-    'step="5"',
-    'value="130"',
+    'min="50"',
+    'max="100"',
+    'step="1"',
+    'value="100"',
     'id="brightness-value"',
-    'data-i18n-attr="aria-label:brightness.label"'
+    'data-i18n="brightness.short"',
+    'data-i18n-attr="aria-label:brightness.label"',
+    'href="#pipeline"',
+    'href="#gateway"',
+    'href="#console"',
+    'href="#scene"',
+    'id="lang-toggle"'
   ]);
-  assert.match(html, /<output id="brightness-value" for="brightness-control">130%<\/output>/);
+  assert.doesNotMatch(html, /ERON@PRODUCTION/, 'the brand text is gone from the top bar');
+  assert.doesNotMatch(html, /class="brand"/);
+  assert.match(html, /<output id="brightness-value" for="brightness-control">100%<\/output>/);
+  // No second control is left behind in the footer.
+  assert.equal((html.match(/id="brightness-control"/g) || []).length, 1);
   assert.ok(pt['brightness.label'] && en['brightness.label'], 'brightness label is translated');
+  assert.ok(pt['brightness.short'] && en['brightness.short'], 'top-bar short label is translated');
+
   includesAll(css, [
     '--page-brightness: 1.3',
-    'brightness(var(--page-brightness))',
-    '.brightness-control input[type="range"]'
+    '--page-contrast: 1.05',
+    'brightness(var(--page-brightness)) contrast(var(--page-contrast))',
+    '.brightness-control input[type="range"]',
+    '.topbar-brightness'
   ]);
-  assert.doesNotMatch(css, /--page-contrast|contrast\(/i);
+  // The top bar is not filtered, so the control stays usable at the 50% end.
+  assert.doesNotMatch(css, /body > \.topbar,[\s\S]{0,80}filter:/);
   includesAll(main, [
     "getElementById('brightness-control')",
     "setProperty('--page-brightness'",
+    "setProperty('--page-contrast'",
     "addEventListener('input'",
     "localStorage.setItem(storageKey"
   ]);
-  assert.doesNotMatch(main, /page-contrast|contrast-control/i);
+  // The visual response is wider than the numeric range: 2.6x brightness + a
+  // contrast ramp, not a subtle linear 1.0-1.5 multiplier.
+  includesAll(main, ['BRIGHTNESS_CURVE', 'min: 0.5, max: 1.3', 'min: 0.78, max: 1.05']);
 });
 
 test('contact button uses email on mobile and WhatsApp on other devices', () => {

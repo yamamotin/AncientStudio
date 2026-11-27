@@ -11,8 +11,8 @@ window.TP = window.TP || {};
     "nav.sections": "Seções",
     "nav.pipeline": "01 pipeline",
     "nav.apis": "02 gateway",
-    "nav.scene": "03 cena",
-    "nav.console": "04 console",
+    "nav.scene": "04 cena",
+    "nav.console": "03 console",
     "lang.switchToEn": "[ en ]",
     "lang.switchToPt": "[ pt-br ]",
     "lang.label": "Idioma",
@@ -182,15 +182,24 @@ window.TP = window.TP || {};
     "captcha.cancelled": "// verificação cancelada: nenhuma consulta foi enviada",
     "captcha.rejected": "// o portal recusou o token; resolva o CAPTCHA novamente e reenvie",
     "captcha.staticMode": "// sem backend ativo o token não pode ser validado: a consulta real exige a API Python",
-    "captcha.unavailable": "// a janela de verificação não pôde ser aberta: recarregue a página e tente novamente"
+    "captcha.unavailable": "// a janela de verificação não pôde ser aberta: recarregue a página e tente novamente",
+    "api.close": "[ fechar ]",
+    "api.closeAria": "Fechar a resposta desta API",
+    "brightness.short": "brilho",
+    "penguinFont.tag": "// temp",
+    "penguinFont.label": "fonte do pinguim",
+    "penguinFont.groupAria": "Ajuste temporário da fonte do pinguim",
+    "penguinFont.aria": "Tamanho da fonte e da célula do pinguim em pixels",
+    "penguinFont.reset": "[ restaurar ]",
+    "penguinFont.resetAria": "Restaurar o tamanho padrão do pinguim"
   },
   "en": {
     "skip": "Skip to content",
     "nav.sections": "Sections",
     "nav.pipeline": "01 pipeline",
     "nav.apis": "02 gateway",
-    "nav.scene": "03 scene",
-    "nav.console": "04 console",
+    "nav.scene": "04 scene",
+    "nav.console": "03 console",
     "lang.switchToEn": "[ en ]",
     "lang.switchToPt": "[ pt-br ]",
     "lang.label": "Language",
@@ -360,7 +369,16 @@ window.TP = window.TP || {};
     "captcha.cancelled": "// verification cancelled: no query was sent",
     "captcha.rejected": "// the portal rejected the token; solve the CAPTCHA again and resend",
     "captcha.staticMode": "// without an active backend the token cannot be validated: the real query needs the Python API",
-    "captcha.unavailable": "// the verification dialog could not be opened: reload the page and try again"
+    "captcha.unavailable": "// the verification dialog could not be opened: reload the page and try again",
+    "api.close": "[ close ]",
+    "api.closeAria": "Close this API response",
+    "brightness.short": "brightness",
+    "penguinFont.tag": "// temp",
+    "penguinFont.label": "penguin font",
+    "penguinFont.groupAria": "Temporary penguin font control",
+    "penguinFont.aria": "Penguin font and cell size in pixels",
+    "penguinFont.reset": "[ reset ]",
+    "penguinFont.resetAria": "Restore the default penguin size"
   }
 };
 

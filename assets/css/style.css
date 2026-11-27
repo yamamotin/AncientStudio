@@ -37,8 +37,11 @@
   --radius: 2px;
   --transition: 180ms ease;
 
-  /* Page-wide brightness control. Default is the previous maximum (130%). */
+  /* Page-wide brightness/contrast. The slider is 50%-100%; main.js maps it onto a
+     wider curve (brightness 0.50 -> 1.30, contrast 0.78 -> 1.05). 100% reproduces
+     the historical 130% look. */
   --page-brightness: 1.3;
+  --page-contrast: 1.05;
 
   /* ASCII art keeps a legible computed size and is scaled to fit small screens. */
   --banner-font: 12px;
@@ -115,10 +118,11 @@ a { color: inherit; }
 /* Applied to visible page content. `main` itself is never filtered so the
    fullscreen scene keeps a viewport-anchored containing block; the scene
    section drops the filter while fullscreen is active. */
-body > .topbar,
+/* The top bar keeps its own brightness so the control that raises the level stays
+   readable at 50%. Everything else follows the amplified curve. */
 body > main > section:not(#scene),
 body > main > #scene:not(:fullscreen):not(.is-scene-fullscreen),
-body > footer { filter: brightness(var(--page-brightness)); }
+body > footer { filter: brightness(var(--page-brightness)) contrast(var(--page-contrast)); }
 
 /* Very subtle CRT scanlines; decorative only. */
 .crt-overlay {
@@ -164,12 +168,24 @@ body > footer { filter: brightness(var(--page-brightness)); }
   padding-block: var(--space-2);
 }
 
-.brand {
-  color: var(--green);
-  font-size: var(--fs-small);
-  font-weight: 700;
-  text-decoration: none;
+/* Page brightness lives where the old `ERON@PRODUCTION:~$` brand was. */
+.topbar-brightness {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--cyan);
 }
+
+.topbar-brightness label {
+  color: var(--cyan);
+  font-size: var(--fs-tiny);
+  font-weight: 700;
+  letter-spacing: var(--tracking);
+  white-space: nowrap;
+}
+
+.topbar-brightness input[type="range"] { width: clamp(4.5rem, 16vw, 7rem); }
+
+.topbar-brightness output { min-width: 4ch; }
 
 .topnav {
   display: flex;
@@ -617,7 +633,31 @@ input[data-sensitive]:not(:focus) {
   gap: var(--space-2);
 }
 
-.response-meta { margin-top: var(--space-4); color: var(--cyan); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.response-meta { margin: 0; color: var(--cyan); font-size: var(--fs-small); overflow-wrap: anywhere; }
+
+/* One response window per API card; at most one is visible at a time (main.js). */
+.api-response {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--terminal-bg);
+}
+
+.api-response[hidden] { display: none; }
+
+.api-response-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.api-response .code-block { margin: 0; max-height: 22rem; }
 
 .code-block,
 .ascii-diagram {
@@ -820,6 +860,44 @@ body.scene-fullscreen-active { overflow: hidden; }
 }
 
 .engine-stage[data-mode="engine"] .penguin-fallback { display: none; }
+
+/* TEMPORARY (assets/js/penguin-font.js): the dashed bar and this override are the
+   only CSS the visual-test control needs. Delete both blocks to remove it. */
+.penguin-font-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: var(--fs-tiny);
+}
+
+.penguin-font-bar label { color: var(--cyan); white-space: nowrap; }
+
+.penguin-font-bar input[type="range"] {
+  width: clamp(6rem, 22vw, 10rem);
+  min-height: 1.5rem;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.penguin-font-bar output {
+  min-width: 5ch;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+.penguin-font-tag { color: var(--red); }
+
+#penguin-stage[data-font-override="true"] .penguin-fallback {
+  font-size: var(--penguin-font-px, 10px) !important;
+  line-height: 1.06;
+}
 .engine-hint { margin-top: var(--space-2); font-size: var(--fs-tiny); }
 
 .specs { display: grid; gap: var(--space-2); align-content: center; }

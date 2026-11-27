@@ -525,6 +525,31 @@ window.TP = window.TP || {};
       return state.mountCellSize;
     }
 
+    /* Additive, mascot-only density hook for the temporary penguin font bar
+       (`assets/js/penguin-font.js`). The main scene keeps its untouched
+       setCellSize()/resetCellSize() contract; only the mascot responds here. */
+    function setMascotCellSize(px) {
+      if (!isMascot) return null;
+      var value = Number(px);
+      if (!isFinite(value)) return state.currentCellSize;
+      var clamped = Math.max(MIN_CELL_PX, Math.min(24, Number(value.toFixed(2))));
+      state.currentCellSize = clamped;
+      state.customCellActive = Math.abs(clamped - state.mountCellSize) >= 0.005;
+      applyConfig({ cellSize: clamped, autoResponsiveDensity: false });
+      return clamped;
+    }
+
+    function resetMascotCellSize() {
+      if (!isMascot) return null;
+      state.currentCellSize = state.mountCellSize;
+      state.customCellActive = false;
+      applyConfig({
+        cellSize: state.initialConfigCellSize,
+        autoResponsiveDensity: state.initialAutoResponsive
+      });
+      return state.mountCellSize;
+    }
+
     function getCellSizeRange() {
       return {
         min: MIN_CELL_PX,
@@ -541,6 +566,8 @@ window.TP = window.TP || {};
       setAutoOrbit: setAutoOrbit,
       setCellSize: setCellSize,
       resetCellSize: resetCellSize,
+      setMascotCellSize: setMascotCellSize,
+      resetMascotCellSize: resetMascotCellSize,
       getCellSize: function () { return state.currentCellSize; },
       getMaxCellSize: function () { return state.mountCellSize; },
       getCellSizeRange: getCellSizeRange,
@@ -660,6 +687,26 @@ window.TP = window.TP || {};
     setPaused: function (paused) { controllers.forEach(function (c) { c.setPaused(paused); }); },
     setPreset: function (name) { controllers.forEach(function (c) { c.setPreset(name); }); },
     setAutoOrbit: function (enabled) { controllers.forEach(function (c) { c.setAutoOrbit(enabled); }); },
+    // Mascot-only helpers used by the temporary penguin font bar; the main scene
+    // ignores them, so its font/shader toolbar contract is unchanged.
+    setMascotCellSize: function (px) {
+      var applied = null;
+      controllers.forEach(function (c) {
+        if (typeof c.setMascotCellSize !== 'function') return;
+        var result = c.setMascotCellSize(px);
+        if (result !== null && result !== undefined) applied = result;
+      });
+      return applied;
+    },
+    resetMascotCellSize: function () {
+      var applied = null;
+      controllers.forEach(function (c) {
+        if (typeof c.resetMascotCellSize !== 'function') return;
+        var result = c.resetMascotCellSize();
+        if (result !== null && result !== undefined) applied = result;
+      });
+      return applied;
+    },
     getScene: function () { return controllers.length ? controllers[0].getScene() : null; },
     loadSceneGlb: loadSceneGlb,
     getGlbMetrics: function () { return lastGlbMetrics; },

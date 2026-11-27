@@ -30,6 +30,7 @@
   <script src="assets/js/console.js" defer></script>
   <script src="assets/js/neofetch.js" defer></script>
   <script src="assets/js/captcha.js" defer></script>
+  <script src="assets/js/penguin-font.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
@@ -38,12 +39,16 @@
 
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="#top">ERON@PRODUCTION:~$</a>
+      <div class="brightness-control topbar-brightness" role="group" aria-label="Brilho da página" data-i18n-attr="aria-label:brightness.label">
+        <label for="brightness-control" data-i18n="brightness.short">brilho</label>
+        <input id="brightness-control" type="range" min="50" max="100" step="1" value="100" aria-label="Brilho da página" data-i18n-attr="aria-label:brightness.label">
+        <output id="brightness-value" for="brightness-control">100%</output>
+      </div>
       <nav class="topnav" aria-label="Seções" data-i18n-attr="aria-label:nav.sections">
         <a href="#pipeline" data-i18n="nav.pipeline">01 pipeline</a>
         <a href="#gateway" data-i18n="nav.apis">02 gateway</a>
-        <a href="#scene" data-i18n="nav.scene">03 cena</a>
-        <a href="#console" data-i18n="nav.console">04 console</a>
+        <a href="#console" data-i18n="nav.console">03 console</a>
+        <a href="#scene" data-i18n="nav.scene">04 cena</a>
         <button id="lang-toggle" class="cmd-button cmd-button--small" type="button" aria-label="Idioma" data-i18n-attr="aria-label:lang.label" data-i18n="lang.switchToEn">[ en ]</button>
       </nav>
     </div>
@@ -193,6 +198,15 @@
               <button id="transparencia-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.municipioButton">GET /api/v1/transparencia/municipio</button>
               <button id="extract-button" class="cmd-button" type="button" data-i18n="etl.button">GET /api/v1/etl/datasets/ledger/summary</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="municipio" hidden>
+              <div class="api-response-head">
+                <p id="extract-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="extract-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
 
           <div class="gateway-card">
@@ -222,10 +236,17 @@
               <button id="projudi-consulta-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.projudiConsultaBtn">POST /api/v1/projudi/processos/consulta</button>
               <button id="projudi-detalhe-button" class="cmd-button" type="button" data-i18n="etl.projudiDetalheBtn">GET /api/v1/projudi/processos/{numero}</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="projudi" hidden>
+              <div class="api-response-head">
+                <p id="projudi-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="projudi-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
         </div>
-        <p id="extract-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
-        <pre id="extract-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
       </div>
 
       <div id="panel-fintech" class="tabpanel" role="tabpanel" aria-labelledby="tab-fintech" tabindex="0" hidden>
@@ -247,6 +268,15 @@
               <button id="bcb-indicadores-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.bcbIndicadoresBtn">GET /api/v1/bcb/indicadores</button>
               <button id="bcb-instituicoes-button" class="cmd-button" type="button" data-i18n="fintech.bcbInstituicoesBtn">GET /api/v1/bcb/instituicoes</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="bcb" hidden>
+              <div class="api-response-head">
+                <p id="bcb-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="bcb-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
 
           <div class="gateway-card">
@@ -261,10 +291,17 @@
               <button id="siscomex-ncm-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.siscomexBtn">GET /api/v1/siscomex/ncm</button>
               <button id="invoice-button" class="cmd-button" type="button" data-i18n="gateway.button">POST /api/v1/gateway/invoices/submit</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="siscomex" hidden>
+              <div class="api-response-head">
+                <p id="invoice-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="invoice-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
         </div>
-        <p id="invoice-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
-        <pre id="invoice-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
       </div>
 
       <div id="panel-workflow" class="tabpanel" role="tabpanel" aria-labelledby="tab-workflow" tabindex="0" hidden>
@@ -291,6 +328,15 @@
             <div class="gateway-actions">
               <button id="projudi-resumo-button" class="cmd-button cmd-button--primary" type="button" data-i18n="workflow.resumoBtn">POST /api/v1/projudi/processos/{numero}/resumo</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="resumo" hidden>
+              <div class="api-response-head">
+                <p id="resumo-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="resumo-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
 
           <div class="gateway-card">
@@ -305,17 +351,44 @@
               <button id="workflow-run" class="cmd-button" type="button" data-i18n="workflow.run">POST /run</button>
               <button id="workflow-status" class="cmd-button" type="button" data-i18n="workflow.status">GET /status</button>
             </div>
+
+            <!-- Resposta desta API: no máximo uma ativa por vez (activateResponse() em main.js). -->
+            <div class="api-response" data-api-response="n8n" hidden>
+              <div class="api-response-head">
+                <p id="workflow-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
+                <button class="cmd-button cmd-button--small api-response-close" type="button" data-response-close aria-label="Fechar a resposta desta API" data-i18n="api.close" data-i18n-attr="aria-label:api.closeAria">[ fechar ]</button>
+              </div>
+              <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
+            </div>
           </div>
         </div>
-        <p id="workflow-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
-        <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
         <p class="muted" data-i18n="workflow.note">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
         <p class="muted" data-i18n="workflow.tokenHygiene">// a chave fica apenas na memória desta aba e é apagada ao sair</p>
       </div>
       </div>
     </section>
 
-    <!-- 4. INTERACTIVE SCENE 3D (engine adapter + static fallback) -->
+    <!-- 4. INTERACTIVE CONSOLE -->
+    <section id="console" class="section" aria-labelledby="console-title">
+      <div class="panel-head">
+        <h2 id="console-title" data-i18n="console.title">[ INTERACTIVE CONSOLE ]</h2>
+        <div class="console-meta">
+          <span id="connection-status" class="badge" data-i18n="console.statusSim">API OFFLINE</span>
+          <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false" data-i18n="console.audioOff">[ audio: off ]</button>
+        </div>
+      </div>
+      <p id="console-hint" class="muted" data-i18n="console.hint">Comandos: help, skills, experience, projects, contact, cv, clear.</p>
+      <div id="console-output" class="terminal-log console-output" role="log" aria-live="polite" aria-relevant="additions">
+        <p><span class="accent">ERON/OS</span> <span data-i18n="console.ready">terminal ready. Digite help para começar.</span></p>
+      </div>
+      <form id="console-form" class="console-form" autocomplete="off">
+        <label class="prompt-label" for="console-input" data-i18n="console.prompt">eron@production:~$</label>
+        <input id="console-input" name="command" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="help" aria-describedby="console-hint" data-i18n-attr="placeholder:console.hint">
+        <button class="cmd-button" type="submit" data-i18n="console.enter">[ enter ]</button>
+      </form>
+    </section>
+
+    <!-- 5. INTERACTIVE SCENE 3D (engine adapter + static fallback) -->
     <!-- The 3D scene is always mounted and expanded: no collapse control here, the
          stage must never be clamped or inert. Other tall sections keep theirs. -->
     <section id="scene" class="section" aria-labelledby="scene-title">
@@ -353,7 +426,7 @@
       </div>
     </section>
 
-    <!-- 5. NEOFETCH STACK -->
+    <!-- 6. NEOFETCH STACK -->
     <section id="stack" class="section collapsible" data-collapsible data-collapsed="false" aria-labelledby="stack-title">
       <div class="panel-head">
         <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
@@ -362,6 +435,17 @@
         </div>
       </div>
       <div id="stack-body" class="collapse-body">
+      <!-- TEMPORÁRIO (teste visual de tipografia): controle de fonte/célula do pinguim.
+           Para remover: apague este bloco, a tag de script de penguin-font.js no <head>,
+           o CSS .penguin-font-bar e as chaves penguinFont.* dos dicionários. -->
+      <div id="penguin-font-bar" class="penguin-font-bar" data-temporary="true" role="group" aria-label="Ajuste temporário da fonte do pinguim" data-i18n-attr="aria-label:penguinFont.groupAria">
+        <span class="penguin-font-tag" data-i18n="penguinFont.tag">// temp</span>
+        <label for="penguin-font-size" data-i18n="penguinFont.label">fonte do pinguim</label>
+        <input id="penguin-font-size" type="range" min="4" max="20" step="0.5" value="10" aria-label="Tamanho da fonte e da célula do pinguim em pixels" data-i18n-attr="aria-label:penguinFont.aria">
+        <output id="penguin-font-value" for="penguin-font-size">10px</output>
+        <button id="penguin-font-reset" class="cmd-button cmd-button--small" type="button" aria-label="Restaurar o tamanho padrão do pinguim" data-i18n="penguinFont.reset" data-i18n-attr="aria-label:penguinFont.resetAria">[ restaurar ]</button>
+      </div>
+
       <div class="neofetch">
         <div>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback" aria-hidden="true">
@@ -393,25 +477,6 @@
       </div>
     </section>
 
-    <!-- 6. INTERACTIVE CONSOLE -->
-    <section id="console" class="section" aria-labelledby="console-title">
-      <div class="panel-head">
-        <h2 id="console-title" data-i18n="console.title">[ INTERACTIVE CONSOLE ]</h2>
-        <div class="console-meta">
-          <span id="connection-status" class="badge" data-i18n="console.statusSim">API OFFLINE</span>
-          <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false" data-i18n="console.audioOff">[ audio: off ]</button>
-        </div>
-      </div>
-      <p id="console-hint" class="muted" data-i18n="console.hint">Comandos: help, skills, experience, projects, contact, cv, clear.</p>
-      <div id="console-output" class="terminal-log console-output" role="log" aria-live="polite" aria-relevant="additions">
-        <p><span class="accent">ERON/OS</span> <span data-i18n="console.ready">terminal ready. Digite help para começar.</span></p>
-      </div>
-      <form id="console-form" class="console-form" autocomplete="off">
-        <label class="prompt-label" for="console-input" data-i18n="console.prompt">eron@production:~$</label>
-        <input id="console-input" name="command" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="help" aria-describedby="console-hint" data-i18n-attr="placeholder:console.hint">
-        <button class="cmd-button" type="submit" data-i18n="console.enter">[ enter ]</button>
-      </form>
-    </section>
   </main>
 
   <!-- CAPTCHA challenge dialog: opened only when the API answers 422 CAPTCHA_REQUIRED.
@@ -459,11 +524,6 @@
   <footer class="footer wrap">
     <span>© <span id="year">2026</span> Eron Yamamoto D. Justina</span>
     <span data-i18n="footer.note">// no trackers · no analytics · self-hosted fonts</span>
-    <div class="brightness-control" role="group" aria-label="Brilho da página" data-i18n-attr="aria-label:brightness.label">
-      <label for="brightness-control" data-i18n="brightness.label">Brilho da página</label>
-      <input id="brightness-control" type="range" min="100" max="150" step="5" value="130" data-i18n-attr="aria-label:brightness.label">
-      <output id="brightness-value" for="brightness-control">130%</output>
-    </div>
   </footer>
 </body>
 </html>

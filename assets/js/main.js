@@ -85,7 +85,65 @@ window.TP = window.TP || {};
     return String(text).replace(/(captcha_token|session_cookie)=[^&\s]*/gi, '$1=***');
   }
 
+  /* Each API card owns its own response window (`[data-api-response]` + meta/output
+     ids). Only one may be open at a time: activating one hides, clears and resets
+     every other window before the new content is written. */
+  function resetResponse(container) {
+    if (!container) return;
+    Array.prototype.forEach.call(container.querySelectorAll('[data-i18n="api.waiting"], [data-i18n="api.placeholder"]'), function (node) {
+      node.textContent = t(node.getAttribute('data-i18n'));
+    });
+  }
+
+  function closeResponse(container) {
+    if (!container) return;
+    resetResponse(container);
+    container.setAttribute('hidden', '');
+    container.setAttribute('data-response-state', 'idle');
+  }
+
+  function responseContainerFor(metaId, outputId) {
+    var meta = metaId ? document.getElementById(metaId) : null;
+    if (meta && meta.closest) return meta.closest('[data-api-response]');
+    var output = outputId ? document.getElementById(outputId) : null;
+    return output && output.closest ? output.closest('[data-api-response]') : null;
+  }
+
+  /* Closes (and clears) every response window except the owner of this card. Called
+     when a query is dispatched, so the previous API's answer never lingers. */
+  function closeOtherResponses(container) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-api-response]'), function (other) {
+      if (other !== container) closeResponse(other);
+    });
+    return container;
+  }
+
+  function prepareResponse(metaId, outputId) {
+    return closeOtherResponses(responseContainerFor(metaId, outputId));
+  }
+
+  function activateResponse(metaId, outputId) {
+    var container = prepareResponse(metaId, outputId);
+    if (!container) return null;
+    container.removeAttribute('hidden');
+    container.setAttribute('data-response-state', 'active');
+    return container;
+  }
+
+  function initApiResponses() {
+    document.addEventListener('click', function (event) {
+      var button = event.target && event.target.closest ? event.target.closest('[data-response-close]') : null;
+      if (!button) return;
+      closeResponse(button.closest ? button.closest('[data-api-response]') : null);
+    });
+    // No response is open before the first query.
+    Array.prototype.forEach.call(document.querySelectorAll('[data-api-response]'), function (container) {
+      closeResponse(container);
+    });
+  }
+
   function renderResponse(data, result, metaId, outputId) {
+    activateResponse(metaId, outputId);
     var meta = document.getElementById(metaId);
     var output = document.getElementById(outputId);
     var src = result.source || '/api/v1';
@@ -109,6 +167,7 @@ window.TP = window.TP || {};
       renderResponse(error.problem, error.cause, metaId, outputId);
       return;
     }
+    activateResponse(metaId, outputId);
     var detail = TP.apiClient ? TP.apiClient.describeError(error) : String(error);
     if (meta) meta.textContent = t('api.offline', { detail: detail });
     if (output) output.textContent = JSON.stringify((error && error.problem) || { error: String(error) }, null, 2);
@@ -154,6 +213,7 @@ window.TP = window.TP || {};
     // loop: one manual resolution per click, then a single resend of the *same* call with the
     // captcha_token/session_cookie appended by TP.captcha.buildResolution().
     function captchaNote(key, metaId, outputId, payload) {
+      activateResponse(metaId, outputId);
       var meta = document.getElementById(metaId);
       var output = document.getElementById(outputId);
       if (meta) meta.textContent = t(key);
@@ -201,6 +261,8 @@ window.TP = window.TP || {};
       if (!button || !client) return;
       button.addEventListener('click', async function () {
         button.disabled = true;
+        // The previous answer is retired the moment a new query starts.
+        prepareResponse(metaId, outputId);
         try {
           if (!backendOnline && window.location.protocol === 'file:' && staticCall) {
             var fileSim = await staticCall();
@@ -241,8 +303,8 @@ window.TP = window.TP || {};
 
     bindConnectorAction(
       projudiConsultaBtn,
-      'extract-meta',
-      'extract-output',
+      'projudi-meta',
+      'projudi-output',
       function (resolution) {
         var req = {
           cpf: valOf('projudi-cpf'),
@@ -267,8 +329,8 @@ window.TP = window.TP || {};
 
     bindConnectorAction(
       projudiDetalheBtn,
-      'extract-meta',
-      'extract-output',
+      'projudi-meta',
+      'projudi-output',
       function (resolution) {
         var cap = valOf('projudi-captcha', '');
         var params = {};
@@ -282,16 +344,16 @@ window.TP = window.TP || {};
 
     bindConnectorAction(
       bcbIndicadoresBtn,
-      'invoice-meta',
-      'invoice-output',
+      'bcb-meta',
+      'bcb-output',
       function () { return client.bcbIndicadores(Number(valOf('bcb-ultimos', '5')) || 5); },
       function () { return TP.api.bcbIndicadores(Number(valOf('bcb-ultimos', '5')) || 5); }
     );
 
     bindConnectorAction(
       bcbInstituicoesBtn,
-      'invoice-meta',
-      'invoice-output',
+      'bcb-meta',
+      'bcb-output',
       function () { return client.bcbInstituicoes(valOf('bcb-busca', '')); },
       function () { return TP.api.bcbInstituicoes(valOf('bcb-busca', '')); }
     );
@@ -306,8 +368,8 @@ window.TP = window.TP || {};
 
     bindConnectorAction(
       projudiResumoBtn,
-      'workflow-meta',
-      'workflow-output',
+      'resumo-meta',
+      'resumo-output',
       function (resolution) {
         return client.projudiResumo(
           valOf('resumo-numero'),
@@ -324,6 +386,7 @@ window.TP = window.TP || {};
     if (extract && client) {
       extract.addEventListener('click', async function () {
         extract.disabled = true;
+        prepareResponse('extract-meta', 'extract-output');
         try {
           var result;
           try {
@@ -360,6 +423,7 @@ window.TP = window.TP || {};
     if (invoice && client) {
       invoice.addEventListener('click', async function () {
         invoice.disabled = true;
+        prepareResponse('invoice-meta', 'invoice-output');
         try {
           var result;
           try {
@@ -410,6 +474,7 @@ window.TP = window.TP || {};
           return;
         }
         workflowRun.disabled = true;
+        prepareResponse('workflow-meta', 'workflow-output');
         try {
           var result = await client.runWorkflow(
             'invoice-enrichment',
@@ -456,6 +521,7 @@ window.TP = window.TP || {};
           return;
         }
         workflowStatus.disabled = true;
+        prepareResponse('workflow-meta', 'workflow-output');
         try {
           var result = await client.workflowStatus(executionId, apiKey());
           renderResponse(result.data, result, 'workflow-meta', 'workflow-output');
@@ -699,20 +765,41 @@ window.TP = window.TP || {};
     if (penguin) penguin.mount();
   }
 
+  /* The slider exposes 50%-100%, but the visual response is deliberately wider than
+     the old 1:1 mapping: brightness runs 0.50 -> 1.30 (2.6x) and contrast 0.78 -> 1.05,
+     so the low end reads as a dim, flattened CRT and the high end as a punchy panel.
+     100% keeps the historical look of the previous 130% setting. */
+  var BRIGHTNESS_CURVE = {
+    brightness: { min: 0.5, max: 1.3 },
+    contrast: { min: 0.78, max: 1.05 }
+  };
+
+  function brightnessProfile(amount, min, max) {
+    var span = max - min || 1;
+    var t = Math.min(1, Math.max(0, (amount - min) / span));
+    function lerp(range) { return Number((range.min + (range.max - range.min) * t).toFixed(3)); }
+    return { brightness: lerp(BRIGHTNESS_CURVE.brightness), contrast: lerp(BRIGHTNESS_CURVE.contrast) };
+  }
+
   function initBrightness() {
     var input = document.getElementById('brightness-control');
     var output = document.getElementById('brightness-value');
     if (!input) return;
 
     var storageKey = 'tp-page-brightness';
-    var min = Number(input.min) || 100;
-    var max = Number(input.max) || 150;
-    var fallback = Number(input.value) || 130;
+    var min = Number(input.min) || 50;
+    var max = Number(input.max) || 100;
+    var fallback = Number(input.value) || 100;
 
     function apply(value, persist) {
-      var amount = Math.min(max, Math.max(min, Number(value) || fallback));
-      document.documentElement.style.setProperty('--page-brightness', String(amount / 100));
+      var amount = Math.round(Math.min(max, Math.max(min, Number(value) || fallback)));
+      var profile = brightnessProfile(amount, min, max);
+      var root = document.documentElement;
+      root.style.setProperty('--page-brightness', String(profile.brightness));
+      root.style.setProperty('--page-contrast', String(profile.contrast));
+      root.setAttribute('data-page-brightness', String(amount));
       input.value = String(amount);
+      input.setAttribute('aria-valuetext', amount + '%');
       if (output) output.textContent = amount + '%';
       if (persist) {
         try { localStorage.setItem(storageKey, String(amount)); } catch (error) { /* storage disabled */ }
@@ -721,8 +808,10 @@ window.TP = window.TP || {};
 
     var saved = null;
     try { saved = localStorage.getItem(storageKey); } catch (error) { saved = null; }
+    // Legacy values (100-150) are clamped by apply(): nothing is persisted until a move.
     apply(saved === null ? fallback : saved, false);
     input.addEventListener('input', function () { apply(input.value, true); });
+    input.addEventListener('change', function () { apply(input.value, true); });
   }
 
   // The contact control stays a real <a>, so keyboard activation and its translated
@@ -929,11 +1018,14 @@ window.TP = window.TP || {};
     TP.pipeline.init();
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
+    // TEMPORARY (assets/js/penguin-font.js): remove this line with the module.
+    if (TP.penguinFont) TP.penguinFont.init();
     initBrightness();
     initContactButton();
     initSensitiveInputs();
     initTypewriter();
     initTabs();
+    initApiResponses();
     initScene();
     initSceneFullscreen();
     initAudio();
