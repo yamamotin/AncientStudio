@@ -29,6 +29,7 @@
   <script src="assets/js/pipeline.js" defer></script>
   <script src="assets/js/console.js" defer></script>
   <script src="assets/js/neofetch.js" defer></script>
+  <script src="assets/js/captcha.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
@@ -412,6 +413,48 @@
       </form>
     </section>
   </main>
+
+  <!-- CAPTCHA challenge dialog: opened only when the API answers 422 CAPTCHA_REQUIRED.
+       No remote frame is embedded (CSP frame-src 'none'); the portal opens in a new tab. -->
+  <dialog id="captcha-dialog" class="captcha-dialog" aria-labelledby="captcha-title" aria-describedby="captcha-hint">
+    <form id="captcha-form" class="captcha-form" novalidate>
+      <div class="panel-head">
+        <h2 id="captcha-title" data-i18n="captcha.title">[ VERIFICAÇÃO HUMANA ]</h2>
+        <button id="captcha-close" class="cmd-button cmd-button--small" type="button" aria-label="Fechar a verificação humana" data-i18n-attr="aria-label:captcha.closeAria" data-i18n="captcha.close">[ fechar ]</button>
+      </div>
+      <p id="captcha-hint" class="muted" data-i18n="captcha.hint">Este portal público exige um CAPTCHA resolvido por uma pessoa. Conclua o desafio no portal oficial e cole o token abaixo para o backend concluir a consulta real.</p>
+      <p id="captcha-detail" class="muted captcha-detail" hidden></p>
+      <dl class="captcha-meta">
+        <div>
+          <dt data-i18n="captcha.providerLabel">Provedor</dt>
+          <dd id="captcha-provider">—</dd>
+        </div>
+        <div>
+          <dt data-i18n="captcha.siteKeyLabel">Chave do site</dt>
+          <dd id="captcha-site-key">—</dd>
+        </div>
+        <div>
+          <dt data-i18n="captcha.expiresLabel">Expira em</dt>
+          <dd id="captcha-expires">—</dd>
+        </div>
+      </dl>
+      <p class="captcha-portal"><a id="captcha-portal-link" hidden data-i18n="captcha.openPortal">[ abrir portal oficial ]</a></p>
+      <div class="captcha-steps-block">
+        <p class="captcha-label" data-i18n="captcha.instructionsLabel">Como resolver</p>
+        <ol id="captcha-instructions" class="captcha-steps"></ol>
+      </div>
+      <label class="captcha-label" for="captcha-token" data-i18n="captcha.tokenLabel">Token do CAPTCHA (g-recaptcha-response)</label>
+      <input id="captcha-token" class="select-control" type="text" autocomplete="off" spellcheck="false" maxlength="4096" data-sensitive="true" placeholder="cole aqui o token gerado pelo portal" data-i18n-attr="placeholder:captcha.tokenPlaceholder">
+      <label class="captcha-label" for="captcha-session" data-i18n="captcha.sessionLabel">Cookie de sessão (opcional)</label>
+      <input id="captcha-session" class="select-control" type="password" autocomplete="new-password" spellcheck="false" maxlength="1024" data-sensitive="true" placeholder="JSESSIONID=..." data-i18n-attr="placeholder:captcha.sessionPlaceholder">
+      <p id="captcha-error" class="captcha-error" role="alert" hidden></p>
+      <div class="captcha-actions">
+        <button id="captcha-submit" class="cmd-button cmd-button--primary" type="submit" data-i18n="captcha.submit">[ enviar token ]</button>
+        <button id="captcha-cancel" class="cmd-button" type="button" data-i18n="captcha.cancel">[ cancelar ]</button>
+      </div>
+      <p class="muted captcha-privacy" data-i18n="captcha.privacy">// o token é usado apenas nesta consulta e é apagado ao fechar</p>
+    </form>
+  </dialog>
 
   <footer class="footer wrap">
     <span>© <span id="year">2026</span> Eron Yamamoto D. Justina</span>

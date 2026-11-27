@@ -947,3 +947,100 @@ body.scene-fullscreen-active { overflow: hidden; }
   .typewriter::after { animation: none; }
 }
 
+
+/* CAPTCHA challenge dialog (assets/js/captcha.js).
+   Native <dialog> + showModal() gives the focus trap and the inert background for
+   free; the styles only own the terminal look. Nothing remote is ever embedded. */
+.captcha-dialog {
+  width: min(34rem, calc(100vw - 2 * var(--space-4)));
+  max-height: min(90vh, 44rem);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.12), 0 1.5rem 4rem rgba(0, 0, 0, 0.65);
+}
+
+.captcha-dialog::backdrop { background: rgba(2, 6, 10, 0.78); }
+
+.captcha-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.captcha-form .panel-head h2 { color: var(--green); letter-spacing: var(--tracking); }
+
+.captcha-form .muted { font-size: var(--fs-small); }
+
+.captcha-detail {
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--cyan);
+  background: var(--terminal-bg);
+  overflow-wrap: anywhere;
+}
+
+.captcha-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: var(--fs-tiny);
+}
+
+.captcha-meta dt { color: var(--muted); }
+.captcha-meta dd { margin: 0.1rem 0 0; color: var(--cyan); overflow-wrap: anywhere; }
+
+.captcha-portal { margin: 0; font-size: var(--fs-small); }
+.captcha-portal a { color: var(--green); text-decoration: underline dotted; }
+.captcha-portal a:hover { color: var(--cyan); }
+.captcha-portal a[hidden] { display: none; }
+
+.captcha-steps-block { display: grid; gap: var(--space-1); }
+.captcha-steps-block[hidden] { display: none; }
+
+.captcha-label { color: var(--muted); font-size: var(--fs-tiny); }
+
+.captcha-steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--fs-small);
+}
+
+.captcha-steps li { overflow-wrap: anywhere; }
+
+.captcha-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red);
+  color: var(--red);
+  font-size: var(--fs-small);
+}
+
+.captcha-error[hidden] { display: none; }
+
+.captcha-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.captcha-privacy { margin: 0; font-size: var(--fs-tiny); }
+
+/* "expiring" turns the countdown red without reflowing the meta row. */
+#captcha-expires[data-expiring="true"] { color: var(--red); }
+
+.captcha-dialog.is-submitting .captcha-actions { opacity: 0.6; }
+.captcha-dialog.is-submitting #captcha-submit { pointer-events: none; }
+
+@media (max-width: 30rem) {
+  .captcha-form { padding: var(--space-4); }
+  .captcha-meta { grid-template-columns: 1fr; }
+  .captcha-actions .cmd-button { flex: 1 1 100%; }
+}

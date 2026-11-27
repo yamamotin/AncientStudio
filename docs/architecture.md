@@ -16,6 +16,7 @@ AncientStudio/
 │   │   ├── core.js                    # Helpers, prefers-reduced-motion
 │   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
 │   │   ├── api-client.js              # Chamadas reais a /api/v1 (ETL, Gateway, n8n, Pipelines, RAG)
+│   │   ├── captcha.js                 # Popup de resolução CAPTCHA_REQUIRED (422) + allowlist de URLs
 │   │   ├── main.js                    # Composição da UI, fullscreen e controle de brilho (130%)
 │   │   ├── neofetch.js                # Palco Tux 3D + placeholder ASCII estático
 │   │   ├── pipeline.js                # Painel real do GitHub Actions (cache, allowlist, CSP-safe)

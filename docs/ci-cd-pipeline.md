@@ -167,6 +167,13 @@ Detalhes de implementação relevantes:
   viaja no corpo da própria requisição para `/api/v1/projudi/*`, nunca é ecoado no painel
   de resposta nem no console. A máscara definitiva de exibição LGPD
   (`***.456.789-**`) é aplicada no servidor.
+- O popup de CAPTCHA (`assets/js/captcha.js`) só aceita `https:` de hosts da allowlist
+  (`consulta.tjpr.jus.br`, `www.tjpr.jus.br`, `www.google.com`, `www.recaptcha.net`...):
+  `javascript:`, `data:`, `http:` e credenciais embutidas são descartados antes de qualquer
+  `href`. Nenhum frame remoto é embutido (`frame-src 'none'`), todo texto entra por
+  `textContent` (zero `innerHTML`), e o token/cookie de sessão são apagados do DOM ao fechar
+  o diálogo, ao expirar o desafio e em `pagehide`. O token resolvido também é mascarado
+  (`captcha_token=***`) no rótulo de rota do painel de resposta.
 - O runner fictício saiu do cliente: `TP.api.runPipeline` foi removido e o painel nunca
   dispara builds. O endpoint `POST /api/v1/pipeline/run` continua existindo apenas no
   backend legado, com seus próprios testes, sem uso pela interface.

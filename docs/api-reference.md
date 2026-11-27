@@ -52,6 +52,13 @@ Consulta processos públicos cíveis/fazendários por CPF (11 dígitos) ou CNPJ 
 }
 ```
 
+**Fluxo do popup no cliente (`assets/js/captcha.js`):**
+1. Qualquer chamada de conector que responda `422` + `code: "CAPTCHA_REQUIRED"` abre o `<dialog id="captcha-dialog">` com `provider`, `site_key`, `portal_url`/`form_url`, `instructions` e a contagem do TTL (`expires_at`, 5 min quando ausente).
+2. O portal oficial é aberto em nova aba (`rel="noopener noreferrer"`); nenhum frame remoto é embutido (`frame-src 'none'`).
+3. Ao enviar, o popup devolve `{ captcha_token, session_cookie?, challenge_id? }` e o mesmo endpoint é rechamado com o corpo/query originais + essa resolução (`main.js` → `resolveCaptchaAndResend`). Um único reenvio por clique: se o portal recusar o token, a mensagem `captcha.rejected` aparece no painel em vez de reabrir o diálogo em loop.
+4. Cancelar/fechar (`Esc`, botão, backdrop) e expirar o desafio produzem mensagens traduzidas (`captcha.cancelled`, `captcha.expired`); token e cookie de sessão são apagados do DOM no fechamento e em `pagehide`.
+5. Só URLs `https:` de hosts da allowlist (`consulta.tjpr.jus.br`, `www.tjpr.jus.br`, `tjpr.jus.br`, `www.google.com`, `recaptcha.google.com`, `www.recaptcha.net`) são aceitas; `javascript:`, `data:`, `http:`, credenciais embutidas e hosts desconhecidos são descartados.
+
 **Resposta `200` com `captcha_token` válido:**
 Extrai diretamente `table.resultTable` (`Processo | Partes | Distribuição | Classe Processual (Assunto Principal)`) e `#navigator`, retornando `processos[]` com `numero_processo`, `classe_processual`, `assunto_principal`, `data_distribuicao`, `partes_por_polo` e `partes` (`polo: "ATIVO" | "PASSIVO" | "TERCEIRO"`).
 

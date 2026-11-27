@@ -660,9 +660,11 @@ window.TP = window.TP || {};
       code: 'CAPTCHA_REQUIRED',
       title: 'Desafio CAPTCHA Obrigatório no PROJUDI',
       detail: 'A Consulta Pública do PROJUDI TJPR exige validação humana reCAPTCHA (g-recaptcha-response) e backend Python ativo para sessão HTTP real. Nenhum dado processual sintético ou mock é retornado.',
+      provider: 'recaptcha',
       portal_url: 'https://consulta.tjpr.jus.br/projudi_consulta/',
       form_url: 'https://consulta.tjpr.jus.br/projudi_consulta/processo/consultaPublica.do?actionType=iniciar',
       recaptcha_callback: 'executaRecaptchaPBC_actre_consulta_publica',
+      expires_at: new Date(Date.now() + 300000).toISOString(),
       dados_sinteticos_ou_mock: false,
       instructions: [
         '1. Suba o backend Python (/api/v1) para habilitar a sessão HTTP real com consulta.tjpr.jus.br.',

@@ -79,6 +79,12 @@ window.TP = window.TP || {};
     });
   }
 
+  // A resolved CAPTCHA token travels in the query string of GET calls: it is a
+  // one-shot credential and must never be echoed back into the visible UI.
+  function redactSecrets(text) {
+    return String(text).replace(/(captcha_token|session_cookie)=[^&\s]*/gi, '$1=***');
+  }
+
   function renderResponse(data, result, metaId, outputId) {
     var meta = document.getElementById(metaId);
     var output = document.getElementById(outputId);
@@ -92,7 +98,7 @@ window.TP = window.TP || {};
           source: src
         })
       : t('api.status', { status: result.status, ms: result.ms, source: src });
-    if (meta) meta.textContent = '// ' + label;
+    if (meta) meta.textContent = '// ' + redactSecrets(label);
     if (output) output.textContent = JSON.stringify(data, null, 2);
   }
 
@@ -144,6 +150,53 @@ window.TP = window.TP || {};
       totals: { gross: 250.5, tax: 0.1, currency: 'BRL' }
     };
 
+    // Any connector call may answer 422 CAPTCHA_REQUIRED. The challenge is never retried in a
+    // loop: one manual resolution per click, then a single resend of the *same* call with the
+    // captcha_token/session_cookie appended by TP.captcha.buildResolution().
+    function captchaNote(key, metaId, outputId, payload) {
+      var meta = document.getElementById(metaId);
+      var output = document.getElementById(outputId);
+      if (meta) meta.textContent = t(key);
+      if (output && payload) output.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function resolveCaptchaAndResend(error, liveCall, metaId, outputId) {
+      if (!TP.captcha || !TP.captcha.isRequired(error) || error.status === 0) {
+        renderError(error, metaId, outputId);
+        return;
+      }
+      var challenge = TP.captcha.fromError(error);
+      // Show what we received before the dialog takes focus (the body stays on screen).
+      captchaNote('captcha.title', metaId, outputId, {
+        code: challenge.code,
+        provider: challenge.provider,
+        site_key: challenge.siteKey || null,
+        portal_url: challenge.portalUrl || null,
+        expires_at: new Date(challenge.expiresAt).toISOString()
+      });
+
+      var resolution;
+      try {
+        resolution = await TP.captcha.request(challenge);
+      } catch (captchaError) {
+        var code = captchaError && captchaError.code;
+        if (code === 'CAPTCHA_EXPIRED') captchaNote('captcha.expired', metaId);
+        else if (code === 'CAPTCHA_UNAVAILABLE') captchaNote('captcha.unavailable', metaId);
+        else if (code === 'CAPTCHA_CANCELLED') captchaNote('captcha.cancelled', metaId);
+        else renderError(captchaError, metaId, outputId);
+        return;
+      }
+
+      try {
+        // Same endpoint and same payload as the failed call, plus the CAPTCHA resolution.
+        var retried = await liveCall(resolution);
+        renderResponse(retried.data, retried, metaId, outputId);
+      } catch (retryError) {
+        if (TP.captcha.isRequired(retryError)) captchaNote('captcha.rejected', metaId);
+        else renderError(retryError, metaId, outputId);
+      }
+    }
+
     function bindConnectorAction(button, metaId, outputId, liveCall, staticCall) {
       if (!button || !client) return;
       button.addEventListener('click', async function () {
@@ -152,6 +205,7 @@ window.TP = window.TP || {};
           if (!backendOnline && window.location.protocol === 'file:' && staticCall) {
             var fileSim = await staticCall();
             renderResponse(fileSim.data, fileSim, metaId, outputId);
+            if (TP.captcha && TP.captcha.isRequired(fileSim.data || fileSim)) captchaNote('captcha.staticMode', metaId);
             return;
           }
           var result = await liveCall();
@@ -160,6 +214,9 @@ window.TP = window.TP || {};
           if (staticCall && isBackendOfflineError(error, backendOnline)) {
             var sim = await staticCall();
             renderResponse(sim.data, sim, metaId, outputId);
+            if (TP.captcha && TP.captcha.isRequired(sim.data || sim)) captchaNote('captcha.staticMode', metaId);
+          } else if (TP.captcha && TP.captcha.isRequired(error)) {
+            await resolveCaptchaAndResend(error, liveCall, metaId, outputId);
           } else {
             renderError(error, metaId, outputId);
           }
@@ -186,13 +243,15 @@ window.TP = window.TP || {};
       projudiConsultaBtn,
       'extract-meta',
       'extract-output',
-      function () {
+      function (resolution) {
         var req = {
           cpf: valOf('projudi-cpf'),
           tribunal: valOf('projudi-tribunal', 'TJPR')
         };
         var cap = valOf('projudi-captcha', '');
         if (cap) req.captcha_token = cap;
+        // The freshly solved token always wins over a stale typed value.
+        if (resolution) Object.assign(req, resolution);
         return client.projudiConsulta(req);
       },
       function () {
@@ -210,9 +269,13 @@ window.TP = window.TP || {};
       projudiDetalheBtn,
       'extract-meta',
       'extract-output',
-      function () {
+      function (resolution) {
         var cap = valOf('projudi-captcha', '');
-        return client.projudiProcesso(valOf('projudi-numero'), cap ? { captcha_token: cap } : undefined);
+        var params = {};
+        if (cap) params.captcha_token = cap;
+        if (resolution) Object.assign(params, resolution);
+        var hasCaptcha = Boolean(params.captcha_token || params.session_cookie);
+        return client.projudiProcesso(valOf('projudi-numero'), hasCaptcha ? params : undefined);
       },
       function () { return TP.api.projudiProcesso(valOf('projudi-numero')); }
     );
@@ -245,10 +308,11 @@ window.TP = window.TP || {};
       projudiResumoBtn,
       'workflow-meta',
       'workflow-output',
-      function () {
-        return client.projudiResumo(valOf('resumo-numero'), {
-          texto_processo: valOf('resumo-texto')
-        });
+      function (resolution) {
+        return client.projudiResumo(
+          valOf('resumo-numero'),
+          Object.assign({ texto_processo: valOf('resumo-texto') }, resolution || {})
+        );
       },
       function () {
         return TP.api.projudiResumo(valOf('resumo-numero'), {
