@@ -28,6 +28,7 @@ from api.connectors.cache import ConnectorTTLCache
 from api.connectors.captcha import (
     CaptchaChallengeStore,
     ResolvedCaptchaInput,
+    _normalize_portal_image_url,
     detect_captcha_in_html,
 )
 from api.connectors.errors import (
@@ -359,6 +360,7 @@ class ProjudiBootstrapHtmlParser(HTMLParser):
         self._script_chunks: list[str] = []
         self.site_key: str | None = None
         self.recaptcha_callback: str | None = None
+        self.captcha_image_src: str | None = None
         self.requires_captcha = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -406,12 +408,51 @@ class ProjudiBootstrapHtmlParser(HTMLParser):
                     self.form_action = action.strip()
                 if attr.get("method"):
                     self.form_method = attr["method"].strip().upper()
+        elif tag_l == "img":
+            src = (
+                attr.get("src")
+                or attr.get("data-captcha-src")
+                or attr.get("data-src")
+                or ""
+            ).strip()
+            img_hint = " ".join(
+                [
+                    attr.get("id", ""),
+                    attr.get("class", ""),
+                    attr.get("alt", ""),
+                    attr.get("title", ""),
+                    src[:160],
+                ]
+            ).lower()
+            if src and any(
+                token in img_hint
+                for token in (
+                    "captcha",
+                    "kaptcha",
+                    "jcaptcha",
+                    "stickyimg",
+                    "imagemseguranca",
+                    "codseguranca",
+                    "codigoseguranca",
+                    "desafio",
+                    "actiontype=captcha",
+                    "actiontype=imagem",
+                )
+            ):
+                self.captcha_image_src = src
+                self.requires_captcha = True
         elif tag_l == "input" and self._in_target_form:
             name = attr.get("name", "").strip()
+            input_type = attr.get("type", "text").strip().lower()
+            if input_type == "image":
+                src = (attr.get("src") or attr.get("data-src") or "").strip()
+                if src and ("captcha" in f"{name} {src}".lower()):
+                    self.captcha_image_src = src
+                    self.requires_captcha = True
+                return
             if not name:
                 return
-            input_type = attr.get("type", "text").strip().lower()
-            if input_type in {"submit", "button", "reset", "image", "file"}:
+            if input_type in {"submit", "button", "reset", "file"}:
                 return
             if input_type in {"radio", "checkbox"} and "checked" not in attr:
                 return
@@ -1150,6 +1191,11 @@ class ProjudiConnectorService:
         merged_fields = dict(detected_cap.form_fields)
         merged_fields.update(boot.form_fields)
         merged_fields.pop(response_field, None)
+        resolved_image_url = detected_cap.image_url or (
+            _normalize_portal_image_url(urljoin(form_url, boot.captcha_image_src), form_url)
+            if boot.captcha_image_src and not boot.captcha_image_src.lower().startswith("data:")
+            else None
+        )
 
         return {
             "portal_url": self._root_url,
@@ -1162,7 +1208,7 @@ class ProjudiConnectorService:
             "response_field": response_field,
             "site_key": site_key,
             "recaptcha_callback": callback_name,
-            "image_url": detected_cap.image_url,
+            "image_url": resolved_image_url,
             "image_base64": detected_cap.image_base64,
             "image_mime_type": detected_cap.image_mime_type,
             "image_data_uri": detected_cap.image_data_uri,
@@ -1212,6 +1258,24 @@ class ProjudiConnectorService:
         override_html: str | None = None,
         override_url: str | None = None,
     ) -> None:
+        """Issue a session-bound HTTP 422 ``CAPTCHA_REQUIRED`` challenge for PROJUDI TJPR.
+
+        Image extraction & Google reCAPTCHA v2 limitation:
+        - Whenever PROJUDI exposes a session-bound bitmap (inline ``data:image/...``,
+          Struts/Servlet ``<img>`` such as ``captcha.svl`` / ``gerarCaptcha``, or a
+          Google ``/recaptcha/api/fallback?k=<site_key>`` HTML payload), ``issue_challenge``
+          downloads the real raster bytes using the active ``JSESSIONID`` cookie jar and
+          embeds ``image`` / ``captcha_image`` / ``image_data_url`` / ``image_data_uri`` /
+          ``image_base64`` + ``/api/v1/captcha/challenges/{challenge_id}/image``.
+        - When ``consulta.tjpr.jus.br`` serves a pure Google reCAPTCHA v2 JS widget
+          (``div.g-recaptcha[data-sitekey]``) and Google's ``/recaptcha/api/fallback``
+          endpoint declines to serve a static ``<noscript>`` bitmap, Google's active v2
+          protocol (``/recaptcha/api2/anchor`` -> ``/recaptcha/api2/reload``) requires
+          browser-side BotGuard JS VM attestation bound to ``https://consulta.tjpr.jus.br``.
+          In that case ``image`` is ``None``, ``image_available`` is ``False``, and
+          ``image_unavailable_reason`` is ``"RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"``
+          — never emitting synthetic/mocked CAPTCHA bitmaps or mocked process data.
+        """
         provider = str(session.get("provider") or "recaptcha")
         site_key = session.get("site_key")
         callback_name = session.get("recaptcha_callback")

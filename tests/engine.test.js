@@ -405,7 +405,13 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const gltfJson = JSON.parse(rawGlb.subarray(20, 20 + rawGlb.readUInt32LE(12)).toString('utf8'));
   const girlNode = gltfJson.nodes.find(n => n.name === 'FuturisticGirl');
   const girlPrimitive = gltfJson.meshes[girlNode.mesh].primitives[0];
-  assert.equal(girlPrimitive.material, undefined, 'Character primitive in the source GLB has no material or assigned texture');
+  assert.equal(girlPrimitive.material, 72, 'Character primitive references FuturisticGirl_Mat in the source GLB');
+  assert.equal(gltfJson.materials[girlPrimitive.material].name, 'FuturisticGirl_Mat', 'Character material named FuturisticGirl_Mat');
+  assert.ok(
+    gltfJson.materials[girlPrimitive.material].pbrMetallicRoughness.baseColorTexture !== undefined,
+    'Character primitive has an assigned base-color texture'
+  );
+  assert.ok(gltfJson.materials[girlPrimitive.material].normalTexture !== undefined, 'Character primitive has an assigned normal texture');
   assert.ok(girlPrimitive.attributes.TEXCOORD_0 !== undefined, 'Character UV coordinates exist');
   const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
 
@@ -540,7 +546,6 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const fgOccluders = ecsWorld.getComponent(stage.cidadeEntityId, 'ForegroundOccluders');
 
   assert.equal(charAnim.activeClip, 'Idle', 'Player_Rig starts in looped Idle animation');
-  assert.AlmostEqual = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
   assert.AlmostEqual(camera.position.x, playerTransform.x + camFollow.offsetX);
   assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
   assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
@@ -1581,9 +1586,12 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   }
   const girl = prepared.nodes.playerRig.getObjectByName('FuturisticGirl');
   assert.ok(girl.isSkinnedMesh && girl.geometry.getAttribute('uv'));
-  assert.equal(girl.material.name, 'PlayerProtagonistMaterial');
-  assert.equal(girl.material.map, null, 'GLB has UVs but no assigned character base-color map');
-  assert.ok(prepared.materials.character.every(m => m.color.r < 0.5 && m.roughness >= 0.7));
+  assert.equal(girl.material.name, 'FuturisticGirl_Mat');
+  assert.ok(girl.material.map, 'GLB assigns the FuturisticGirl_Mat base-color map to the character');
+  assert.ok(
+    prepared.materials.character.some((m) => m.name === 'FuturisticGirl_Mat'),
+    'FuturisticGirl_Mat preserved as a character material after material legibility fixes'
+  );
 
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(
     stage,

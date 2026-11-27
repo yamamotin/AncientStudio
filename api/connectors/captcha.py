@@ -18,11 +18,12 @@ from __future__ import annotations
 import base64
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 from api.connectors.cache import ConnectorTTLCache
 from api.connectors.errors import (
@@ -84,15 +85,32 @@ _CONTEXTUAL_CAPTCHA_INPUT_NAMES = frozenset(
 _CAPTCHA_IMG_HINT_RE = re.compile(
     r"(captcha|kaptcha|jcaptcha|gerarcaptcha|gerarimagem|imagemcaptcha|"
     r"imagemseguranca|imagem_seguranca|codigoseguranca|codseguranca|"
-    r"simplecaptcha|stickyimg|desafio)",
+    r"simplecaptcha|stickyimg|desafio|challengeimage|captchaservlet|"
+    r"captchaimage|geradorcodigo|codigoimagem|actiontype=(?:captcha|imagem|gerarcaptcha))",
     re.IGNORECASE,
 )
 _SCRIPT_CAPTCHA_IMG_RE = re.compile(
     r"['\"]([^'\"\s<>]{3,240}(?:captcha\.svl|gerarCaptcha|gerarImagem|"
-    r"imagemCaptcha|imagemSeguranca|jcaptcha|kaptcha|stickyImg|simpleCaptcha)"
+    r"imagemCaptcha|imagemSeguranca|jcaptcha|kaptcha|stickyImg|simpleCaptcha|"
+    r"ChallengeImage|CaptchaServlet|captchaImage|actionType=(?:captcha|imagem|gerarCaptcha))"
     r"[^'\"\s<>]{0,160})['\"]",
     re.IGNORECASE,
 )
+_CSS_BG_URL_RE = re.compile(
+    r"url\(\s*['\"]?([^'\")\s]{4,320})['\"]?\s*\)",
+    re.IGNORECASE,
+)
+_DECORATIVE_IMG_RE = re.compile(
+    r"(?:^|/|\b)(?:logo|brasao|icone|icon|spacer|blank|pixel|seta|arrow|"
+    r"btn|botao|loading|aguarde|spinner|calendario|calendar|ajuda|help)(?:\b|_|-|\.)",
+    re.IGNORECASE,
+)
+_RECAPTCHA_NOSCRIPT_DEPRECATED_RE = re.compile(
+    r"(?:upgrade\s+to\s+a\s+supported\s+browser|navegador\s+compat[ií]vel|"
+    r"enable\s+javascript\s+to\s+get\s+a\s+recaptcha)",
+    re.IGNORECASE,
+)
+_IMAGE_ACCEPT_HEADER = "image/png,image/jpeg,image/webp,image/gif,image/*;q=0.9,*/*;q=0.5"
 _UNSAFE_SVG_RE = re.compile(
     rb"(<\s*script\b|javascript\s*:|on[a-z]+\s*=|<\s*foreignobject\b)",
     re.IGNORECASE,
@@ -141,6 +159,23 @@ def _is_safe_http_url(url: str | None) -> bool:
         and parsed.username is None
         and parsed.password is None
     )
+
+
+def _normalize_portal_image_url(image_url: str | None, challenge_url: str | None) -> str | None:
+    """Normalize portal image URLs, upgrading reverse-proxy ``http://`` to ``https://``."""
+    if not image_url or not _is_safe_http_url(image_url):
+        return None
+    parsed = urlparse(image_url)
+    host = (parsed.hostname or "").lower()
+    base_parsed = urlparse(challenge_url or "")
+    base_host = (base_parsed.hostname or "").lower()
+    if parsed.scheme.lower() == "http" and (
+        (base_parsed.scheme.lower() == "https" and host == base_host)
+        or host == "tjpr.jus.br"
+        or host.endswith(".tjpr.jus.br")
+    ):
+        return urlunparse(parsed._replace(scheme="https"))
+    return image_url
 
 
 def _is_safe_image_payload(raw_bytes: bytes, mime_type: str) -> bool:
@@ -219,9 +254,12 @@ class _CaptchaDomParser(HTMLParser):
 
         self._in_form = False
         self._form_has_captcha = False
+        self._form_has_captcha_input = False
         self._current_form_action: str | None = None
         self._current_form_method: str = "POST"
         self._current_form_fields: dict[str, str] = {}
+        self._current_form_candidate_img: str | None = None
+        self._form_candidate_img: str | None = None
         self._in_script = False
         self._script_chunks: list[str] = []
         self._text_chunks: list[str] = []
@@ -258,9 +296,18 @@ class _CaptchaDomParser(HTMLParser):
         if attr.get("data-callback"):
             self.callback = attr["data-callback"].strip()
 
+        style_val = attr.get("style", "")
+        if style_val and not self.image_src and _CAPTCHA_IMG_HINT_RE.search(joined):
+            bg_match = _CSS_BG_URL_RE.search(style_val)
+            if bg_match:
+                self.image_src = bg_match.group(1).strip()
+                self._mark_provider("image")
+
         if tag_l == "form":
             self._in_form = True
             self._form_has_captcha = False
+            self._form_has_captcha_input = False
+            self._current_form_candidate_img = None
             self._current_form_action = attr.get("action", "").strip() or None
             self._current_form_method = (attr.get("method") or "POST").strip().upper()
             self._current_form_fields = {}
@@ -268,8 +315,14 @@ class _CaptchaDomParser(HTMLParser):
                 self.form_action = self._current_form_action
                 self.form_method = self._current_form_method
 
-        elif tag_l == "img":
-            src = attr.get("src", "").strip()
+        elif tag_l in {"img", "object", "embed"}:
+            src = (
+                attr.get("src")
+                or attr.get("data-captcha-src")
+                or attr.get("data-src")
+                or attr.get("data")
+                or ""
+            ).strip()
             img_hint = " ".join(
                 [
                     attr.get("id", ""),
@@ -282,12 +335,20 @@ class _CaptchaDomParser(HTMLParser):
             if src and _CAPTCHA_IMG_HINT_RE.search(img_hint):
                 self.image_src = src
                 self._mark_provider("image")
+            elif (
+                tag_l == "img"
+                and self._in_form
+                and src
+                and not self._current_form_candidate_img
+                and not _DECORATIVE_IMG_RE.search(img_hint)
+            ):
+                self._current_form_candidate_img = src
 
         elif tag_l in {"input", "textarea"}:
             name = attr.get("name", "").strip()
             input_type = attr.get("type", "text").strip().lower()
             if input_type == "image":
-                src = attr.get("src", "").strip()
+                src = (attr.get("src") or attr.get("data-src") or "").strip()
                 img_hint = f"{name} {attr.get('id', '')} {attr.get('alt', '')} {src[:160]}"
                 if src and _CAPTCHA_IMG_HINT_RE.search(img_hint):
                     self.image_src = src
@@ -313,7 +374,7 @@ class _CaptchaDomParser(HTMLParser):
                 )
             )
             is_contextual_captcha_input = bool(
-                (self.image_src or self._form_has_captcha)
+                (self.image_src or self._form_has_captcha or self._current_form_candidate_img)
                 and name.lower() in _CONTEXTUAL_CAPTCHA_INPUT_NAMES
             )
             if (
@@ -321,6 +382,8 @@ class _CaptchaDomParser(HTMLParser):
                 and input_type in {"text", "tel", "search", "number"}
                 and (is_explicit_captcha_input or is_contextual_captcha_input)
             ):
+                if self._in_form:
+                    self._form_has_captcha_input = True
                 if self.provider is None:
                     self._mark_provider("image")
                 if self.response_field is None:
@@ -373,8 +436,16 @@ class _CaptchaDomParser(HTMLParser):
                     self.form_action = self._current_form_action
                 self.form_method = self._current_form_method
                 self.form_fields = dict(self._current_form_fields)
+            if (
+                self._form_has_captcha_input
+                and self._current_form_candidate_img
+                and not self._form_candidate_img
+            ):
+                self._form_candidate_img = self._current_form_candidate_img
             self._in_form = False
             self._form_has_captcha = False
+            self._form_has_captcha_input = False
+            self._current_form_candidate_img = None
         elif tag_l == "script" and self._in_script:
             self._in_script = False
 
@@ -410,6 +481,12 @@ class _CaptchaDomParser(HTMLParser):
             js_img_match = _SCRIPT_CAPTCHA_IMG_RE.search(script_blob)
             if js_img_match:
                 self.image_src = js_img_match.group(1).strip()
+                if self.provider is None:
+                    self._mark_provider("image")
+
+        if not self.image_src and (self._form_candidate_img or self._current_form_candidate_img):
+            if self._form_candidate_img or self._form_has_captcha_input:
+                self.image_src = self._form_candidate_img or self._current_form_candidate_img
                 if self.provider is None:
                     self._mark_provider("image")
 
@@ -461,8 +538,9 @@ class _CaptchaDomParser(HTMLParser):
                     image_data_uri = f"data:{image_mime};base64,{image_b64}"
             else:
                 candidate_url = urljoin(base_url, self.image_src)
-                if _is_safe_http_url(candidate_url):
-                    image_url = candidate_url
+                normalized_url = _normalize_portal_image_url(candidate_url, base_url)
+                if normalized_url:
+                    image_url = normalized_url
 
         fallback_url: str | None = None
         if self.fallback_src:
@@ -559,8 +637,14 @@ class _RecaptchaFallbackParser(HTMLParser):
                 if attr.get("value") is not None:
                     self.checkbox_values.append(attr["value"].strip())
         elif tag_l == "img":
-            src = attr.get("src", "").strip()
-            if src and ("fbc-imageselect-payload" in classes or "api2/payload" in src):
+            src = (attr.get("src") or attr.get("data-src") or "").strip()
+            if src and (
+                "fbc-imageselect-payload" in classes
+                or "rc-image-tile-target" in classes
+                or "api2/payload" in src
+                or "enterprise/payload" in src
+                or src.lower().startswith("data:image/")
+            ):
                 self.payload_img_src = src
         elif tag_l == "textarea":
             if "fbc-verification-token" in classes or "readonly" in attr:
@@ -601,6 +685,116 @@ class _RecaptchaFallbackParser(HTMLParser):
                     self.prompt_label = joined
 
 
+def probe_recaptcha_fallback_challenge(
+    site_key: str,
+    *,
+    referer_url: str,
+    fallback_url: str | None = None,
+    transport: HttpTransport,
+    timeout_seconds: float = 2.5,
+) -> tuple[dict[str, Any] | None, str]:
+    """Attempt to retrieve a visual challenge bitmap from Google's HTML fallback endpoint.
+
+    Technical limitation of Google reCAPTCHA v2:
+    - Modern Google reCAPTCHA v2 widgets (``div.g-recaptcha`` on ``consulta.tjpr.jus.br``)
+      require executing Google's obfuscated BotGuard JavaScript VM inside a real browser
+      bound to ``https://consulta.tjpr.jus.br:443`` to produce an encrypted ``bg``
+      attestation token for ``/recaptcha/api2/anchor`` -> ``/recaptcha/api2/reload`` before
+      ``/recaptcha/api2/payload`` releases any challenge grid image.
+    - When Google's legacy ``<noscript>`` endpoint (``/recaptcha/api/fallback?k=<site_key>``)
+      still serves a visual challenge for ``site_key``, this helper downloads the real JPEG/PNG
+      payload and returns ``(metadata_dict, "ok")``.
+    - When Google disables ``api/fallback`` for ``site_key`` (returning the ``upgrade to a
+      supported browser`` deprecation page) or blocks non-browser requests, this helper
+      never fabricates a synthetic bitmap and instead returns ``(None, reason_code)``.
+    """
+    key_clean = str(site_key or "").strip()
+    if not key_clean:
+        return None, "MISSING_SITE_KEY"
+    target_url = fallback_url or f"{DEFAULT_RECAPTCHA_FALLBACK_BASE}?k={key_clean}"
+    if not _is_safe_http_url(target_url):
+        return None, "UNSAFE_FALLBACK_URL"
+    try:
+        fb_resp = transport.request(
+            target_url,
+            method="GET",
+            headers={
+                "Referer": referer_url,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            timeout_seconds=timeout_seconds,
+        )
+    except UpstreamConnectorError:
+        return None, "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+    if fb_resp.status_code != 200 or not fb_resp.body:
+        return None, "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+
+    fb_html = fb_resp.text()
+    parser = _RecaptchaFallbackParser()
+    parser.feed(fb_html)
+    if not parser.fallback_c or not parser.payload_img_src:
+        if _RECAPTCHA_NOSCRIPT_DEPRECATED_RE.search(fb_html):
+            return None, "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+        return None, "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+
+    data_match = _DATA_URI_RE.match(parser.payload_img_src)
+    if data_match:
+        raw_mime = data_match.group("mime").lower()
+        if raw_mime == "image/jpg":
+            raw_mime = "image/jpeg"
+        cleaned_b64 = re.sub(r"\s+", "", data_match.group("b64"))
+        try:
+            img_bytes = base64.b64decode(cleaned_b64, validate=False)
+        except Exception:
+            img_bytes = b""
+        sniffed_mime = _sniff_image_mime(img_bytes, raw_mime)
+        img_url = target_url
+    else:
+        img_url = urljoin(target_url, parser.payload_img_src)
+        if not _is_safe_http_url(img_url):
+            return None, "UNSAFE_OR_UNSUPPORTED_IMAGE_FORMAT"
+        try:
+            img_resp = transport.request(
+                img_url,
+                method="GET",
+                headers={
+                    "Referer": target_url,
+                    "Accept": _IMAGE_ACCEPT_HEADER,
+                },
+                timeout_seconds=timeout_seconds,
+            )
+        except UpstreamConnectorError:
+            return None, "UPSTREAM_IMAGE_FETCH_FAILED"
+        if img_resp.status_code != 200 or not img_resp.body:
+            return None, "UPSTREAM_IMAGE_FETCH_FAILED"
+        img_bytes = img_resp.body
+        sniffed_mime = _sniff_image_mime(img_bytes, img_resp.headers.get("content-type"))
+
+    if not _is_safe_image_payload(img_bytes, sniffed_mime):
+        return None, "UNSAFE_OR_UNSUPPORTED_IMAGE_FORMAT"
+
+    img_b64 = base64.b64encode(img_bytes).decode("ascii")
+    img_data_uri = f"data:{sniffed_mime};base64,{img_b64}"
+    prompt = parser.prompt_label or "Resolva o desafio exibido na imagem acima."
+    if parser.mode == "tiles" and "quadro" not in prompt.lower() and "índice" not in prompt.lower():
+        prompt = f"{prompt} (informe os números dos quadros, ex.: 1,4,7)"
+
+    return (
+        {
+            "recaptcha_fallback_url": target_url,
+            "recaptcha_fallback_c": parser.fallback_c,
+            "recaptcha_fallback_mode": parser.mode,
+            "upstream_image_url": img_url,
+            "image_mime_type": sniffed_mime,
+            "image_base64": img_b64,
+            "image_data_uri": img_data_uri,
+            "image_source": "recaptcha_html_fallback",
+            "prompt_label": prompt,
+        },
+        "ok",
+    )
+
+
 def fetch_recaptcha_fallback_challenge(
     site_key: str,
     *,
@@ -610,65 +804,14 @@ def fetch_recaptcha_fallback_challenge(
     timeout_seconds: float = 2.5,
 ) -> dict[str, Any] | None:
     """Fetch a visual challenge image + ``c`` token from Google's HTML fallback when available."""
-    key_clean = str(site_key or "").strip()
-    if not key_clean:
-        return None
-    target_url = fallback_url or f"{DEFAULT_RECAPTCHA_FALLBACK_BASE}?k={key_clean}"
-    if not _is_safe_http_url(target_url):
-        return None
-    try:
-        fb_resp = transport.request(
-            target_url,
-            method="GET",
-            headers={"Referer": referer_url},
-            timeout_seconds=timeout_seconds,
-        )
-    except UpstreamConnectorError:
-        return None
-    if fb_resp.status_code != 200 or not fb_resp.body:
-        return None
-
-    parser = _RecaptchaFallbackParser()
-    parser.feed(fb_resp.text())
-    if not parser.fallback_c or not parser.payload_img_src:
-        return None
-
-    img_url = urljoin(target_url, parser.payload_img_src)
-    if not _is_safe_http_url(img_url):
-        return None
-
-    try:
-        img_resp = transport.request(
-            img_url,
-            method="GET",
-            headers={"Referer": target_url},
-            timeout_seconds=timeout_seconds,
-        )
-    except UpstreamConnectorError:
-        return None
-    if img_resp.status_code != 200 or not img_resp.body:
-        return None
-
-    sniffed_mime = _sniff_image_mime(img_resp.body, img_resp.headers.get("content-type"))
-    if not _is_safe_image_payload(img_resp.body, sniffed_mime):
-        return None
-
-    img_b64 = base64.b64encode(img_resp.body).decode("ascii")
-    img_data_uri = f"data:{sniffed_mime};base64,{img_b64}"
-    prompt = parser.prompt_label or "Resolva o desafio exibido na imagem acima."
-    if parser.mode == "tiles" and "quadro" not in prompt.lower() and "índice" not in prompt.lower():
-        prompt = f"{prompt} (informe os números dos quadros, ex.: 1,4,7)"
-
-    return {
-        "recaptcha_fallback_url": target_url,
-        "recaptcha_fallback_c": parser.fallback_c,
-        "recaptcha_fallback_mode": parser.mode,
-        "upstream_image_url": img_url,
-        "image_mime_type": sniffed_mime,
-        "image_base64": img_b64,
-        "image_data_uri": img_data_uri,
-        "prompt_label": prompt,
-    }
+    result, _reason = probe_recaptcha_fallback_challenge(
+        site_key,
+        referer_url=referer_url,
+        fallback_url=fallback_url,
+        transport=transport,
+        timeout_seconds=timeout_seconds,
+    )
+    return result
 
 
 def _build_fallback_response_pairs(solution: str, mode: str) -> list[tuple[str, str]]:
@@ -821,6 +964,30 @@ class CaptchaChallenge:
         data_uri = self.challenge_data.get("image_data_uri") or self.challenge_data.get(
             "image_data_url"
         )
+        raw_img_url = self.challenge_data.get("image_url")
+        resolved_image = data_uri or (
+            raw_img_url
+            if isinstance(raw_img_url, str) and raw_img_url.lower().startswith("https://")
+            else None
+        )
+        image_available = bool(resolved_image)
+        image_source = self.challenge_data.get("image_source") or (
+            "portal_inline_or_mirrored_data_uri"
+            if data_uri
+            else ("portal_https_url" if resolved_image else None)
+        )
+        image_unavailable_reason = (
+            None
+            if image_available
+            else (
+                self.challenge_data.get("image_unavailable_reason")
+                or (
+                    "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+                    if self.provider in {"recaptcha", "hcaptcha", "turnstile"}
+                    else "UPSTREAM_IMAGE_NOT_AVAILABLE"
+                )
+            )
+        )
         prompt_text = self.challenge_data.get("prompt_label") or (
             "Digite os caracteres exibidos na imagem de segurança."
             if data_uri or self.provider == "image"
@@ -843,12 +1010,16 @@ class CaptchaChallenge:
             "session_param": "session_cookie",
             "response_field": self.response_field,
             "session_initialized": session_init,
+            "image": resolved_image,
+            "image_available": image_available,
+            "image_source": image_source,
+            "image_unavailable_reason": image_unavailable_reason,
             "captcha_image": data_uri,
             "image_data_url": data_uri,
             "image_data_uri": data_uri,
             "image_base64": self.challenge_data.get("image_base64"),
             "image_mime_type": self.challenge_data.get("image_mime_type"),
-            "image_url": self.challenge_data.get("image_url"),
+            "image_url": raw_img_url,
             "image_endpoint": image_endpoint,
             "site_key": self.site_key,
             "form_url": self.challenge_url,
@@ -866,6 +1037,9 @@ class CaptchaChallenge:
                 "upstream_image_url",
             }
         }
+        public_challenge_data["image_available"] = image_available
+        public_challenge_data["image_source"] = image_source
+        public_challenge_data["image_unavailable_reason"] = image_unavailable_reason
         payload: dict[str, Any] = {
             "challenge_id": self.challenge_id,
             "connector": self.connector,
@@ -883,12 +1057,16 @@ class CaptchaChallenge:
             "response_field": self.response_field,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
+            "image": resolved_image,
+            "image_available": image_available,
+            "image_source": image_source,
+            "image_unavailable_reason": image_unavailable_reason,
             "captcha_image": data_uri,
             "image_data_url": data_uri,
             "image_data_uri": data_uri,
             "image_base64": self.challenge_data.get("image_base64"),
             "image_mime_type": self.challenge_data.get("image_mime_type"),
-            "image_url": self.challenge_data.get("image_url"),
+            "image_url": raw_img_url,
             "image_endpoint": image_endpoint,
             "challenge_text": prompt_text,
             "popup": popup_descriptor,
@@ -982,12 +1160,14 @@ class CaptchaChallengeStore:
         *,
         cache: ConnectorTTLCache | None = None,
         default_ttl_seconds: int = DEFAULT_CHALLENGE_TTL_SECONDS,
+        challenge_renderer: Callable[..., dict[str, Any] | None] | None = None,
     ) -> None:
         self._ttl_seconds = max(30, int(default_ttl_seconds))
         self._cache = cache or ConnectorTTLCache(
             default_ttl_seconds=float(self._ttl_seconds),
             max_entries=512,
         )
+        self._challenge_renderer = challenge_renderer
 
     @staticmethod
     def _cache_key(challenge_id: str) -> str:
@@ -1087,8 +1267,9 @@ class CaptchaChallengeStore:
             if _sanitize_cookie_str(k) and _sanitize_cookie_str(v) is not None
         }
         jar.update(parse_cookie_string(_sanitize_cookie_str(raw_session_cookie)))
-        if image_url and not _is_safe_http_url(image_url):
-            image_url = None
+        image_url = _normalize_portal_image_url(image_url, challenge_url)
+        image_source: str | None = "portal_inline_data_uri" if image_base64 else None
+        image_unavailable_reason: str | None = None
 
         # When any CAPTCHA image URL is present on the origin portal, fetch its bytes
         # using the exact same session cookie so the frontend popup renders a data: URI.
@@ -1098,7 +1279,10 @@ class CaptchaChallengeStore:
             and transport is not None
             and _is_safe_http_url(image_url)
         ):
-            img_headers: dict[str, str] = {"Referer": challenge_url}
+            img_headers: dict[str, str] = {
+                "Referer": challenge_url,
+                "Accept": _IMAGE_ACCEPT_HEADER,
+            }
             cookie_hdr = merge_cookie_header(jar)
             if cookie_hdr:
                 img_headers["Cookie"] = cookie_hdr
@@ -1118,8 +1302,13 @@ class CaptchaChallengeStore:
                         image_mime_type = sniffed_mime
                         image_base64 = base64.b64encode(img_resp.body).decode("ascii")
                         image_data_uri = f"data:{image_mime_type};base64,{image_base64}"
+                        image_source = "portal_session_servlet"
+                    else:
+                        image_unavailable_reason = "UNSAFE_OR_UNSUPPORTED_IMAGE_FORMAT"
+                else:
+                    image_unavailable_reason = "UPSTREAM_IMAGE_FETCH_FAILED"
             except UpstreamConnectorError:
-                pass
+                image_unavailable_reason = "UPSTREAM_IMAGE_FETCH_FAILED"
 
         fallback_meta: dict[str, Any] = dict(extra_challenge_data or {})
         if (
@@ -1129,7 +1318,7 @@ class CaptchaChallengeStore:
             and transport is not None
             and "recaptcha_fallback_c" not in fallback_meta
         ):
-            mirrored = fetch_recaptcha_fallback_challenge(
+            mirrored, fb_reason = probe_recaptcha_fallback_challenge(
                 site_key,
                 referer_url=challenge_url,
                 fallback_url=fallback_url,
@@ -1140,14 +1329,66 @@ class CaptchaChallengeStore:
                 image_mime_type = mirrored.get("image_mime_type")
                 image_base64 = mirrored.get("image_base64")
                 image_data_uri = mirrored.get("image_data_uri")
+                image_source = "recaptcha_html_fallback"
+                image_unavailable_reason = None
                 if mirrored.get("prompt_label"):
                     prompt_label = str(mirrored["prompt_label"])
                 fallback_meta.update(mirrored)
+            elif not image_unavailable_reason:
+                image_unavailable_reason = fb_reason
+
+        if not image_base64 and self._challenge_renderer is not None:
+            try:
+                rendered = self._challenge_renderer(
+                    connector=connector,
+                    operation=operation,
+                    provider=provider,
+                    site_key=site_key,
+                    challenge_url=challenge_url,
+                    cookie_jar=dict(jar),
+                )
+            except Exception:
+                rendered = None
+            if isinstance(rendered, dict) and rendered.get("image_base64"):
+                raw_b64 = re.sub(r"\s+", "", str(rendered["image_base64"]))
+                try:
+                    raw_bytes = base64.b64decode(raw_b64, validate=False)
+                except Exception:
+                    raw_bytes = b""
+                sniffed = _sniff_image_mime(raw_bytes, rendered.get("image_mime_type"))
+                if raw_bytes and _is_safe_image_payload(raw_bytes, sniffed):
+                    image_mime_type = sniffed
+                    image_base64 = raw_b64
+                    image_data_uri = f"data:{sniffed};base64,{raw_b64}"
+                    image_source = "headless_renderer"
+                    image_unavailable_reason = None
+                    if rendered.get("prompt_label"):
+                        prompt_label = str(rendered["prompt_label"])
+                    if rendered.get("cookie_jar") and isinstance(rendered["cookie_jar"], dict):
+                        jar.update(rendered["cookie_jar"])
 
         if image_base64 and not image_data_uri:
             mime = image_mime_type or "image/png"
             image_mime_type = mime
             image_data_uri = f"data:{mime};base64,{image_base64}"
+            image_source = image_source or "portal_inline_data_uri"
+            image_unavailable_reason = None
+
+        resolved_image = image_data_uri or (
+            image_url
+            if isinstance(image_url, str) and image_url.lower().startswith("https://")
+            else None
+        )
+        image_available = bool(resolved_image)
+        if image_available:
+            image_source = image_source or "portal_https_url"
+            image_unavailable_reason = None
+        elif not image_unavailable_reason:
+            image_unavailable_reason = (
+                "RECAPTCHA_WIDGET_REQUIRES_BROWSER_ATTESTATION"
+                if provider in {"recaptcha", "hcaptcha", "turnstile"}
+                else "UPSTREAM_IMAGE_NOT_AVAILABLE"
+            )
 
         default_field_map = {
             "recaptcha": "g-recaptcha-response",
@@ -1185,6 +1426,10 @@ class CaptchaChallengeStore:
             "callback": callback,
             "challenge_url": challenge_url,
             "http_method": http_method.upper(),
+            "image": resolved_image,
+            "image_available": image_available,
+            "image_source": image_source,
+            "image_unavailable_reason": image_unavailable_reason,
             "image_url": image_url,
             "image_base64": image_base64,
             "image_mime_type": image_mime_type,

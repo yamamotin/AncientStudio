@@ -471,6 +471,10 @@ def test_fastapi_projudi_image_captcha_popup_and_resumo_real_completion() -> Non
     assert err["resume_endpoint"] == "/api/v1/projudi/processos"
     assert err["resume_method"] == "GET"
     assert err["image_data_uri"].startswith("data:image/png;base64,")
+    assert err["image"] == err["image_data_uri"]
+    assert err["image_available"] is True
+    assert err["image_source"] == "portal_session_servlet"
+    assert err["image_unavailable_reason"] is None
     assert err["image_data_url"] == err["image_data_uri"]
     assert err["captcha_image"] == err["image_data_uri"]
     assert isinstance(err["image_base64"], str) and len(err["image_base64"]) > 8
