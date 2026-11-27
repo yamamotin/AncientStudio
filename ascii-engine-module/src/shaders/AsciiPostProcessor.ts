@@ -77,8 +77,8 @@ export class AsciiPostProcessor {
     });
 
     this.normalTarget = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
       type: THREE.HalfFloatType,
       depthBuffer: true,
@@ -131,15 +131,19 @@ export class AsciiPostProcessor {
         tBloom: { value: this.bloomTarget.texture },
         tGlyphAtlas: { value: this.atlas.texture },
         uResolution: { value: new THREE.Vector2(w, h) },
+        uSceneTexelSize: { value: new THREE.Vector2(1 / w, 1 / h) },
         uCellPixelSize: { value: new THREE.Vector2(6, 10) },
         uAtlasTileSize: {
           value: new THREE.Vector2(this.atlas.tileWidth, this.atlas.tileHeight),
         },
-        uSubCellSpread: { value: 0.22 },
+        uSubCellSpread: { value: 0.25 },
         uRampCount: { value: this.atlas.rampCount },
         uStructCount: { value: this.atlas.structuralCount },
         uBlockCount: { value: this.atlas.blockCount },
         uTotalGlyphs: { value: this.atlas.totalGlyphs },
+        uHighlightGlyphs: {
+          value: AsciiPostProcessor.resolveHighlightGlyphIndices(config.characterRamp),
+        },
         uEdgeStrength: { value: config.edgeStrength },
         uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
@@ -186,6 +190,18 @@ export class AsciiPostProcessor {
     return 1.0;
   }
 
+  private static resolveHighlightGlyphIndices(ramp: string): THREE.Vector3 {
+    const starIdx = ramp.indexOf('*');
+    const orbIdx = ramp.indexOf('o');
+    const plusIdx = ramp.indexOf('+');
+    const fallbackMid = Math.max(0, Math.floor(ramp.length * 0.34));
+    return new THREE.Vector3(
+      starIdx >= 0 ? starIdx : fallbackMid,
+      orbIdx >= 0 ? orbIdx : fallbackMid + 1,
+      plusIdx >= 0 ? plusIdx : Math.max(0, fallbackMid - 2)
+    );
+  }
+
   private computeAtlasSignature(config: EngineConfig, tileSize: number): string {
     return `${config.characterRamp}::${config.structuralChars}::${config.fontFamily}::${tileSize}`;
   }
@@ -212,6 +228,9 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uStructCount!.value = this.atlas.structuralCount;
     this.compositeMaterial.uniforms.uBlockCount!.value = this.atlas.blockCount;
     this.compositeMaterial.uniforms.uTotalGlyphs!.value = this.atlas.totalGlyphs;
+    this.compositeMaterial.uniforms.uHighlightGlyphs!.value.copy(
+      AsciiPostProcessor.resolveHighlightGlyphIndices(config.characterRamp)
+    );
     oldAtlas.texture.dispose();
   }
 
@@ -220,19 +239,23 @@ export class AsciiPostProcessor {
     config: EngineConfig,
     immediate = false
   ): void {
-    const w = Math.max(2, profile.physicalWidth);
-    const h = Math.max(2, profile.physicalHeight);
+    const canvasW = Math.max(2, profile.physicalWidth);
+    const canvasH = Math.max(2, profile.physicalHeight);
+    const rtW = Math.max(2, profile.renderTargetWidth || canvasW);
+    const rtH = Math.max(2, profile.renderTargetHeight || canvasH);
 
     this.currentBloomDownsample = profile.bloomDownsample;
-    const bw = Math.max(2, Math.floor(w / this.currentBloomDownsample));
-    const bh = Math.max(2, Math.floor(h / this.currentBloomDownsample));
+    const bw = Math.max(2, Math.floor(canvasW / this.currentBloomDownsample));
+    const bh = Math.max(2, Math.floor(canvasH / this.currentBloomDownsample));
 
-    this.sceneTarget.setSize(w, h);
-    this.normalTarget.setSize(w, h);
+    // Supersample 3D offscreen targets (sceneTarget + depthTexture + normalTarget at ~1.5x–2.0x)
+    this.sceneTarget.setSize(rtW, rtH);
+    this.normalTarget.setSize(rtW, rtH);
     this.bloomTarget.setSize(bw, bh);
 
-    this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / w, 1 / h);
-    this.compositeMaterial.uniforms.uResolution!.value.set(w, h);
+    this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / rtW, 1 / rtH);
+    this.compositeMaterial.uniforms.uSceneTexelSize!.value.set(1 / rtW, 1 / rtH);
+    this.compositeMaterial.uniforms.uResolution!.value.set(canvasW, canvasH);
 
     this.transitionController.setTarget(profile, immediate);
     const stepped = this.transitionController.step(0);
@@ -321,6 +344,25 @@ export class AsciiPostProcessor {
       this.compositeMaterial.uniforms.uRimLightViewDir!.value as THREE.Vector3,
       this.compositeMaterial.uniforms.uWorldUpViewDir!.value as THREE.Vector3
     );
+
+    // Clamp supersampled 3D render targets if the active WebGL GPU reports a lower maxTextureSize
+    const maxGpuTex = renderer.capabilities?.maxTextureSize;
+    if (
+      typeof maxGpuTex === 'number' &&
+      maxGpuTex >= 512 &&
+      (this.sceneTarget.width > maxGpuTex || this.sceneTarget.height > maxGpuTex)
+    ) {
+      const capScale = Math.min(
+        maxGpuTex / this.sceneTarget.width,
+        maxGpuTex / this.sceneTarget.height
+      );
+      const safeW = Math.max(2, Math.floor(this.sceneTarget.width * capScale));
+      const safeH = Math.max(2, Math.floor(this.sceneTarget.height * capScale));
+      this.sceneTarget.setSize(safeW, safeH);
+      this.normalTarget.setSize(safeW, safeH);
+      this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / safeW, 1 / safeH);
+      this.compositeMaterial.uniforms.uSceneTexelSize!.value.set(1 / safeW, 1 / safeH);
+    }
 
     // Pass 1: Lit 3D Scene + Hardware DepthTexture
     renderer.setRenderTarget(this.sceneTarget);

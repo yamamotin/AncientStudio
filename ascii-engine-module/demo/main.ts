@@ -2,7 +2,9 @@ import {
   AsciiSceneEngine,
   type AtmosphereMode,
   DEFAULT_PALETTE,
+  MIN_MICRO_CELL_SIZE,
   type PartialEngineConfig,
+  snapToMicroCellStop,
   type ThemePalette,
 } from '../src/index';
 
@@ -58,6 +60,7 @@ const hudClickCountEl = document.getElementById('hud-click-count') as HTMLElemen
 const btnToggleResize = document.getElementById('btn-toggle-resize') as HTMLButtonElement;
 
 const inputCell = document.getElementById('input-cell') as HTMLInputElement;
+const btnCellReset = document.getElementById('btn-cell-reset') as HTMLButtonElement | null;
 const inputBloom = document.getElementById('input-bloom') as HTMLInputElement;
 const inputEdge = document.getElementById('input-edge') as HTMLInputElement;
 const inputDof = document.getElementById('input-dof') as HTMLInputElement;
@@ -70,6 +73,9 @@ const valDof = document.getElementById('val-dof') as HTMLElement;
 let engine: AsciiSceneEngine | null = null;
 let hudClicks = 0;
 let activePresetKey: AtmosphereMode = 'night';
+let mountedCellMax = 8;
+let initialConfigCell = 8;
+let initialAutoDensity = true;
 
 function appendLog(message: string): void {
   const li = document.createElement('li');
@@ -151,7 +157,15 @@ function createAndMountEngine(): void {
   });
 
   engine.mount();
+  const initialCfg = engine.getConfig();
   const initialStats = engine.getStats();
+  initialConfigCell = initialCfg.cellSize;
+  initialAutoDensity = initialCfg.autoResponsiveDensity;
+  mountedCellMax = Math.max(MIN_MICRO_CELL_SIZE, initialStats.activeCellSize || initialCfg.cellSize);
+  inputCell.min = String(MIN_MICRO_CELL_SIZE);
+  inputCell.max = String(mountedCellMax);
+  inputCell.value = String(mountedCellMax);
+  valCell.textContent = `${Number(mountedCellMax.toFixed(2))}px`;
   statCell.textContent = String(initialStats.activeCellSize);
   statGrid.textContent = `${initialStats.gridColumns}x${initialStats.gridRows}`;
 }
@@ -193,9 +207,26 @@ btnToggleResize.addEventListener('click', () => {
 
 // Wire Real-Time Config Sliders
 inputCell.addEventListener('input', () => {
-  const v = Number(inputCell.value);
-  valCell.textContent = `${v}px`;
-  engine?.updateConfig({ cellSize: v });
+  const raw = Number(inputCell.value);
+  const v = snapToMicroCellStop(raw, mountedCellMax, MIN_MICRO_CELL_SIZE);
+  inputCell.value = String(v);
+  valCell.textContent = `${Number(v.toFixed(2))}px`;
+  if (Math.abs(v - mountedCellMax) < 0.005) {
+    engine?.updateConfig({ cellSize: initialConfigCell, autoResponsiveDensity: initialAutoDensity });
+  } else {
+    engine?.updateConfig({ cellSize: v, autoResponsiveDensity: false });
+  }
+  if (engine) {
+    const s = engine.getStats();
+    statCell.textContent = String(s.activeCellSize);
+    statGrid.textContent = `${s.gridColumns}x${s.gridRows}`;
+  }
+});
+
+btnCellReset?.addEventListener('click', () => {
+  inputCell.value = String(mountedCellMax);
+  valCell.textContent = `${Number(mountedCellMax.toFixed(2))}px`;
+  engine?.updateConfig({ cellSize: initialConfigCell, autoResponsiveDensity: initialAutoDensity });
   if (engine) {
     const s = engine.getStats();
     statCell.textContent = String(s.activeCellSize);

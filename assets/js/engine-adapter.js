@@ -15,6 +15,57 @@ window.TP = window.TP || {};
   // The UI exposes one Cyber-Noir + Entropism scene with three modes: day, night and rain.
   var DEFAULT_MODE = 'night';
   var SCENE_MODES = ['day', 'night', 'rain'];
+  var MIN_CELL_PX = 2.0;
+  var FINE_CELL_THRESHOLD_PX = 6.0;
+  var FINE_CELL_STEP_PX = 0.25;
+  var COARSE_CELL_STEP_PX = 0.5;
+
+  function buildCellSizeStops(maxPx, minPx) {
+    var resolved = resolveEngine();
+    if (resolved && resolved.source && typeof resolved.source.buildMicroCellStops === 'function') {
+      return resolved.source.buildMicroCellStops(maxPx, minPx);
+    }
+    var safeMin = Math.max(1.5, Number((minPx || MIN_CELL_PX).toFixed(2)));
+    var safeMax = Math.max(safeMin, Number((maxPx || 8).toFixed(2)));
+    var stops = [];
+    var fineCeil = Math.min(safeMax, FINE_CELL_THRESHOLD_PX);
+    var fineCount = Math.floor((fineCeil - safeMin + 1e-6) / FINE_CELL_STEP_PX);
+    for (var i = 0; i <= fineCount; i += 1) {
+      var v = Number((safeMin + i * FINE_CELL_STEP_PX).toFixed(2));
+      if (v <= safeMax + 1e-6) stops.push(Math.min(v, safeMax));
+    }
+    if (safeMax > FINE_CELL_THRESHOLD_PX + 1e-6) {
+      var cur = FINE_CELL_THRESHOLD_PX + COARSE_CELL_STEP_PX;
+      while (cur < safeMax - 1e-6) {
+        stops.push(Number(cur.toFixed(2)));
+        cur += COARSE_CELL_STEP_PX;
+      }
+    }
+    var last = stops[stops.length - 1];
+    if (last === undefined || Math.abs(last - safeMax) > 0.005) stops.push(safeMax);
+    return stops;
+  }
+
+  function snapCellSize(value, maxPx, minPx) {
+    var resolved = resolveEngine();
+    if (resolved && resolved.source && typeof resolved.source.snapToMicroCellStop === 'function') {
+      return resolved.source.snapToMicroCellStop(value, maxPx, minPx);
+    }
+    var stops = buildCellSizeStops(maxPx, minPx);
+    var num = Number(value);
+    if (!Number.isFinite(num)) return stops[stops.length - 1];
+    var clamped = Math.max(stops[0], Math.min(stops[stops.length - 1], num));
+    var best = stops[0];
+    var bestDist = Math.abs(clamped - best);
+    for (var i = 1; i < stops.length; i += 1) {
+      var dist = Math.abs(clamped - stops[i]);
+      if (dist < bestDist - 1e-6) {
+        best = stops[i];
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
   var PRESETS = {
     night: {
       palette: {
@@ -148,7 +199,12 @@ window.TP = window.TP || {};
       observer: null,
       resizeRaf: null,
       fullscreenListener: null,
-      pointerListener: null
+      pointerListener: null,
+      initialConfigCellSize: Number(options && options.config && options.config.cellSize) || 8,
+      initialAutoResponsive: !(options && options.config && options.config.autoResponsiveDensity === false),
+      mountCellSize: Number(options && options.config && options.config.cellSize) || 8,
+      currentCellSize: Number(options && options.config && options.config.cellSize) || 8,
+      customCellActive: false
     };
 
     function emit(mode) {
@@ -362,6 +418,19 @@ window.TP = window.TP || {};
         var lifecycle = typeof state.instance.getState === 'function' ? state.instance.getState() : '';
         if (lifecycle === 'idle' && typeof state.instance.mount === 'function') state.instance.mount();
 
+        // Capture ceiling (`max`) directly from the mounted scene/config (never expanding above it)
+        var instCfg = typeof state.instance.getConfig === 'function' ? state.instance.getConfig() : mergedConfig;
+        var instStats = typeof state.instance.getStats === 'function' ? state.instance.getStats() : null;
+        var cfgCell = Number(instCfg && instCfg.cellSize) || Number(mergedConfig.cellSize) || 8;
+        state.initialConfigCellSize = cfgCell;
+        state.initialAutoResponsive = instCfg ? instCfg.autoResponsiveDensity !== false : mergedConfig.autoResponsiveDensity !== false;
+        var activeAtMount = instStats && Number(instStats.activeCellSize) > 0
+          ? Number(instStats.activeCellSize)
+          : cfgCell;
+        state.mountCellSize = Math.max(MIN_CELL_PX, Math.min(cfgCell, Number(activeAtMount.toFixed(2))));
+        state.currentCellSize = state.mountCellSize;
+        state.customCellActive = false;
+
         emit('engine');
         if (isMascot) startMascotSpin();
         observe();
@@ -399,6 +468,7 @@ window.TP = window.TP || {};
         container.removeEventListener('pointermove', state.pointerListener);
         container.removeEventListener('touchstart', state.pointerListener);
         container.removeEventListener('touchmove', state.pointerListener);
+        container.removeEventListener('wheel', state.pointerListener);
         state.pointerListener = null;
       }
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
@@ -419,15 +489,62 @@ window.TP = window.TP || {};
       container.addEventListener('pointermove', state.pointerListener, { passive: true });
       container.addEventListener('touchstart', state.pointerListener, { passive: true });
       container.addEventListener('touchmove', state.pointerListener, { passive: true });
+      container.addEventListener('wheel', state.pointerListener, { passive: true });
     }
 
     window.addEventListener('pagehide', destroy);
+
+    function setCellSize(px) {
+      if (isMascot) return state.mountCellSize;
+      var snapped = snapCellSize(px, state.mountCellSize, MIN_CELL_PX);
+      state.currentCellSize = snapped;
+      if (Math.abs(snapped - state.mountCellSize) < 0.005) {
+        state.customCellActive = false;
+        applyConfig({
+          cellSize: state.initialConfigCellSize,
+          autoResponsiveDensity: state.initialAutoResponsive
+        });
+      } else {
+        state.customCellActive = true;
+        applyConfig({
+          cellSize: snapped,
+          autoResponsiveDensity: false
+        });
+      }
+      return snapped;
+    }
+
+    function resetCellSize() {
+      if (isMascot) return state.mountCellSize;
+      state.customCellActive = false;
+      state.currentCellSize = state.mountCellSize;
+      applyConfig({
+        cellSize: state.initialConfigCellSize,
+        autoResponsiveDensity: state.initialAutoResponsive
+      });
+      return state.mountCellSize;
+    }
+
+    function getCellSizeRange() {
+      return {
+        min: MIN_CELL_PX,
+        max: state.mountCellSize,
+        current: state.currentCellSize,
+        stops: buildCellSizeStops(state.mountCellSize, MIN_CELL_PX)
+      };
+    }
 
     return {
       mount: mount,
       setPaused: setPaused,
       setPreset: setPreset,
       setAutoOrbit: setAutoOrbit,
+      setCellSize: setCellSize,
+      resetCellSize: resetCellSize,
+      getCellSize: function () { return state.currentCellSize; },
+      getMaxCellSize: function () { return state.mountCellSize; },
+      getCellSizeRange: getCellSizeRange,
+      getScene: getThreeScene,
       setPlayableKeyboard: function (enabled) {
         if (state.instance && typeof state.instance.setPlayableKeyboardEnabled === 'function') {
           state.instance.setPlayableKeyboardEnabled(Boolean(enabled));
@@ -542,6 +659,8 @@ window.TP = window.TP || {};
     },
     setPaused: function (paused) { controllers.forEach(function (c) { c.setPaused(paused); }); },
     setPreset: function (name) { controllers.forEach(function (c) { c.setPreset(name); }); },
+    setAutoOrbit: function (enabled) { controllers.forEach(function (c) { c.setAutoOrbit(enabled); }); },
+    getScene: function () { return controllers.length ? controllers[0].getScene() : null; },
     loadSceneGlb: loadSceneGlb,
     getGlbMetrics: function () { return lastGlbMetrics; },
     disposeGlbLoader: disposeGlbLoader,

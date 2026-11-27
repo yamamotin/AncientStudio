@@ -644,6 +644,56 @@ input[data-sensitive]:not(:focus) {
 .ascii-diagram { color: var(--green); }
 
 /* ASCII 3D scene stage */
+.scene-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.scene-font-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-tiny);
+}
+
+.scene-font-control label {
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
+.scene-font-control input[type="range"] {
+  width: clamp(8.5rem, 26vw, 15rem);
+  min-height: 1.5rem;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.scene-font-control input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.scene-font-control output {
+  min-width: 5.5ch;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.scene-font-control .cmd-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .scene-stage {
   position: relative;
   display: grid;
@@ -711,8 +761,8 @@ body.scene-fullscreen-active { overflow: hidden; }
 
 #scene.is-scene-fullscreen .scene-stage,
 #scene:fullscreen .scene-stage {
-  min-height: calc(100vh - 11rem);
-  min-height: calc(100dvh - 11rem);
+  min-height: calc(100vh - 14rem);
+  min-height: calc(100dvh - 14rem);
 }
 
 #scene.is-scene-fullscreen .panel-head,

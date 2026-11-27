@@ -62,6 +62,10 @@ export const URBAN_CAMERA_FOLLOW_DEFAULTS = {
   lookAtOffsetY: 1.05,
   lookAtOffsetZ: -1.25,
   followSharpness: 6.5,
+  minDistance: 8.2,
+  maxDistance: 31.5,
+  zoomSmoothing: 10.5,
+  zoomSpeed: 2.15,
 } as const;
 
 /**
@@ -114,6 +118,359 @@ export interface BuiltUrbanGlbStage {
  * 30s `TrafficCycle` headlight rig, and `day`/`night`/`rain` presets.
  */
 export class UrbanGlbSceneBuilder {
+  private static createHeadlightFlareTexture(size = 32): THREE.DataTexture {
+    const data = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      const ny = (y + 0.5) / size * 2 - 1;
+      for (let x = 0; x < size; x++) {
+        const nx = (x + 0.5) / size * 2 - 1;
+        // Elliptical core + subtle horizontal optical glare streak
+        const r = Math.hypot(nx * 0.92, ny * 1.18);
+        const core = Math.exp(-r * r * 5.2);
+        const streak = Math.exp(-ny * ny * 18.0) * Math.exp(-nx * nx * 2.1) * 0.42;
+        const edgeFade = Math.max(0, 1 - Math.hypot(nx, ny));
+        const alpha = Math.min(1, (core + streak) * Math.min(1, edgeFade * 2.2));
+        const idx = (y * size + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = Math.round(238 + 17 * core);
+        data[idx + 2] = Math.round(188 + 62 * core);
+        data[idx + 3] = Math.round(alpha * 255);
+      }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  private static createBeamFalloffTexture(width = 16, height = 48): THREE.DataTexture {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      // ConeGeometry v=1 sits at apex (headlight lens) and v=0 sits at far base
+      const v = y / Math.max(1, height - 1);
+      const axial = Math.pow(v, 1.85) * Math.min(1, (1 - v) * 8.5 + 0.18);
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = 232;
+        data[idx + 2] = 178;
+        data[idx + 3] = Math.round(Math.min(1, axial) * 255);
+      }
+    }
+    const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  private static createRoadPoolTexture(width = 32, height = 64): THREE.DataTexture {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      // PlaneGeometry rotated -PI/2 around X: v=1 is near bumper (+Z start), v=0 is far down-road (+Z end)
+      const tForward = 1 - y / Math.max(1, height - 1); // 0 at bumper -> 1 far ahead
+      const nearRamp = THREE.MathUtils.smoothstep(tForward, 0.0, 0.16);
+      const farFade = Math.pow(Math.max(0, 1 - tForward), 1.45);
+      // Cone widens laterally as beam travels forward across asphalt
+      const coneHalfWidth = 0.26 + tForward * 0.68;
+      for (let x = 0; x < width; x++) {
+        const nx = ((x + 0.5) / width * 2 - 1) / coneHalfWidth;
+        const lateral = Math.exp(-nx * nx * 2.6) * Math.max(0, 1 - Math.abs(nx));
+        const alpha = Math.min(1, nearRamp * farFade * lateral);
+        const idx = (y * width + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = Math.round(218 + 32 * (1 - tForward));
+        data[idx + 2] = Math.round(154 + 68 * (1 - tForward));
+        data[idx + 3] = Math.round(alpha * 255);
+      }
+    }
+    const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  private static attachVehicleHeadlightRig(
+    carroGrupo: THREE.Object3D,
+    carHeadlightCovers: THREE.MeshStandardMaterial[]
+  ): {
+    headlightLeft: THREE.SpotLight;
+    headlightRight: THREE.SpotLight;
+    streetThrowLight: THREE.PointLight;
+    taillightGlow: THREE.PointLight;
+    emitterGroup: THREE.Group;
+    lensMaterial: THREE.MeshStandardMaterial;
+    haloMaterial: THREE.MeshBasicMaterial;
+    coneMaterial: THREE.MeshBasicMaterial;
+    roadPoolMaterial: THREE.MeshBasicMaterial;
+  } {
+    const scaleX = Math.max(0.0001, Math.abs(carroGrupo.scale.x || 1));
+    const scaleY = Math.max(0.0001, Math.abs(carroGrupo.scale.y || scaleX));
+    const scaleZ = Math.max(0.0001, Math.abs(carroGrupo.scale.z || scaleX));
+    const invX = 1 / scaleX;
+    const invY = 1 / scaleY;
+    const invZ = 1 / scaleZ;
+
+    // Inspect Carro_Grupo's actual front headlight housing (`Cube.031_headlightCovers_0`) in world meters
+    // relative to Carro_Grupo origin when oriented along +Z (headingYaw = 0).
+    const savedPos = carroGrupo.position.clone();
+    const savedQuat = carroGrupo.quaternion.clone();
+    carroGrupo.position.set(0, 0, 0);
+    carroGrupo.rotation.set(0, URBAN_TRAFFIC_DEFAULTS.headingYaw, 0);
+    carroGrupo.updateMatrixWorld(true);
+
+    let centerX_m = -0.051;
+    let leftX_m = -1.128;
+    let rightX_m = 1.026;
+    let lensY_m = 1.168;
+    let frontNoseZ_m = 0.19;
+
+    const coverBox = new THREE.Box3();
+    let foundCover = false;
+    carroGrupo.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh && /headlight/i.test(mesh.name)) {
+        coverBox.expandByObject(mesh);
+        foundCover = true;
+      }
+    });
+
+    if (foundCover && !coverBox.isEmpty()) {
+      const spanX = coverBox.max.x - coverBox.min.x;
+      const spanY = coverBox.max.y - coverBox.min.y;
+      if (spanX > 0.4 && spanY > 0.1) {
+        centerX_m = (coverBox.min.x + coverBox.max.x) * 0.5;
+        const halfSpanX = spanX * 0.5;
+        leftX_m = centerX_m - halfSpanX * 0.78;
+        rightX_m = centerX_m + halfSpanX * 0.78;
+        lensY_m = coverBox.min.y + spanY * 0.44;
+        // Sit 3.5cm proud of the front bumper glass so emitters are unobstructed from every camera angle
+        frontNoseZ_m = coverBox.max.z + 0.035;
+      }
+    }
+
+    carroGrupo.position.copy(savedPos);
+    carroGrupo.quaternion.copy(savedQuat);
+    carroGrupo.updateMatrixWorld(true);
+
+    // Asphalt surface (`Cidade_Object_67` `real_road`) sits at worldY = -0.286m while laneY = -0.092m
+    const roadSurfaceRelY_m = -0.286 - URBAN_TRAFFIC_DEFAULTS.laneY; // -0.194m
+
+    const beamColor = new THREE.Color('#FFF0C2');
+    const streetPoolColor = new THREE.Color('#F5C878');
+
+    // 1. Visual Headlight Emitter Group (2 high-intensity projector lenses + 2 halos + 2 cones + 2 road pools)
+    const emitterGroup = new THREE.Group();
+    emitterGroup.name = 'CarroHeadlightEmitterRig';
+    emitterGroup.userData.skipNormalPass = true;
+    emitterGroup.userData.skipObjectOutline = true;
+
+    const lensGeo = new THREE.SphereGeometry(1, 14, 10);
+    const lensMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color('#FFFDF5'),
+      emissive: new THREE.Color('#FFE8AD'),
+      emissiveIntensity: 4.0,
+      roughness: 0.1,
+      metalness: 0.05,
+    });
+
+    const lensLeft = new THREE.Mesh(lensGeo, lensMaterial);
+    lensLeft.name = 'HeadlightLensLeft';
+    lensLeft.position.set(leftX_m * invX, lensY_m * invY, frontNoseZ_m * invZ);
+    lensLeft.scale.set(0.28 * invX, 0.165 * invY, 0.125 * invZ);
+    lensLeft.userData.skipNormalPass = true;
+    lensLeft.userData.skipObjectOutline = true;
+    lensLeft.renderOrder = 2;
+    emitterGroup.add(lensLeft);
+
+    const lensRight = new THREE.Mesh(lensGeo, lensMaterial);
+    lensRight.name = 'HeadlightLensRight';
+    lensRight.position.set(rightX_m * invX, lensY_m * invY, frontNoseZ_m * invZ);
+    lensRight.scale.set(0.28 * invX, 0.165 * invY, 0.125 * invZ);
+    lensRight.userData.skipNormalPass = true;
+    lensRight.userData.skipObjectOutline = true;
+    lensRight.renderOrder = 2;
+    emitterGroup.add(lensRight);
+
+    // Optical halo/flare quads around left & right lenses (feeds bloomTarget + crisp ASCII core)
+    const flareTex = UrbanGlbSceneBuilder.createHeadlightFlareTexture(32);
+    const haloGeo = new THREE.PlaneGeometry(1, 1);
+    const haloMaterial = new THREE.MeshBasicMaterial({
+      map: flareTex,
+      color: new THREE.Color('#FFE49E'),
+      transparent: true,
+      opacity: 0.64,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const haloZ_m = frontNoseZ_m + 0.04;
+    const haloLeft = new THREE.Mesh(haloGeo, haloMaterial);
+    haloLeft.name = 'HeadlightHaloLeft';
+    haloLeft.position.set(leftX_m * invX, lensY_m * invY, haloZ_m * invZ);
+    haloLeft.rotation.x = -0.24;
+    haloLeft.scale.set(0.96 * invX, 0.64 * invY, 1);
+    haloLeft.userData.skipNormalPass = true;
+    haloLeft.userData.skipObjectOutline = true;
+    haloLeft.renderOrder = 3;
+    emitterGroup.add(haloLeft);
+
+    const haloRight = new THREE.Mesh(haloGeo, haloMaterial);
+    haloRight.name = 'HeadlightHaloRight';
+    haloRight.position.set(rightX_m * invX, lensY_m * invY, haloZ_m * invZ);
+    haloRight.rotation.x = -0.24;
+    haloRight.scale.set(0.96 * invX, 0.64 * invY, 1);
+    haloRight.userData.skipNormalPass = true;
+    haloRight.userData.skipObjectOutline = true;
+    haloRight.renderOrder = 3;
+    emitterGroup.add(haloRight);
+
+    // Subtle volumetric forward beam cones aimed from each lens down onto the asphalt ahead (+Z)
+    const beamTex = UrbanGlbSceneBuilder.createBeamFalloffTexture(16, 48);
+    const coneLength_m = 6.2;
+    const coneRadius_m = 0.88;
+    const coneGeo = new THREE.ConeGeometry(coneRadius_m, coneLength_m, 14, 1, true);
+    // Shift apex to local origin (0,0,0) and orient cone axis from -Y onto +Z forward vector
+    coneGeo.translate(0, -coneLength_m * 0.5, 0);
+    coneGeo.rotateX(-Math.PI * 0.5);
+
+    const coneMaterial = new THREE.MeshBasicMaterial({
+      map: beamTex,
+      color: new THREE.Color('#FFE6A8'),
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const beamPitchDown = Math.atan2(lensY_m - roadSurfaceRelY_m, 9.5);
+    const coneLeft = new THREE.Mesh(coneGeo, coneMaterial);
+    coneLeft.name = 'HeadlightBeamConeLeft';
+    coneLeft.position.set(leftX_m * invX, lensY_m * invY, frontNoseZ_m * invZ);
+    coneLeft.rotation.set(beamPitchDown, 0.02, 0);
+    coneLeft.scale.set(invX, invY, invZ);
+    coneLeft.userData.skipNormalPass = true;
+    coneLeft.userData.skipObjectOutline = true;
+    coneLeft.renderOrder = 2;
+    emitterGroup.add(coneLeft);
+
+    const coneRight = new THREE.Mesh(coneGeo, coneMaterial);
+    coneRight.name = 'HeadlightBeamConeRight';
+    coneRight.position.set(rightX_m * invX, lensY_m * invY, frontNoseZ_m * invZ);
+    coneRight.rotation.set(beamPitchDown, 0.06, 0);
+    coneRight.scale.set(invX, invY, invZ);
+    coneRight.userData.skipNormalPass = true;
+    coneRight.userData.skipObjectOutline = true;
+    coneRight.renderOrder = 2;
+    emitterGroup.add(coneRight);
+
+    // Forward asphalt light-cone & wet specular reflection pools hovering 2.4cm above `real_road`
+    const poolTex = UrbanGlbSceneBuilder.createRoadPoolTexture(32, 64);
+    const poolGeo = new THREE.PlaneGeometry(1, 1);
+    poolGeo.rotateX(-Math.PI * 0.5);
+    const roadPoolMaterial = new THREE.MeshBasicMaterial({
+      map: poolTex,
+      color: new THREE.Color('#F7CF84'),
+      transparent: true,
+      opacity: 0.36,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const poolRelY_m = roadSurfaceRelY_m + 0.024;
+    const poolLen_m = 10.6;
+    const poolCenterZ_m = frontNoseZ_m + 0.55 + poolLen_m * 0.5;
+
+    const roadPoolLeft = new THREE.Mesh(poolGeo, roadPoolMaterial);
+    roadPoolLeft.name = 'HeadlightRoadPoolLeft';
+    roadPoolLeft.position.set((leftX_m + 0.12) * invX, poolRelY_m * invY, poolCenterZ_m * invZ);
+    roadPoolLeft.scale.set(2.45 * invX, 1, poolLen_m * invZ);
+    roadPoolLeft.userData.skipNormalPass = true;
+    roadPoolLeft.userData.skipObjectOutline = true;
+    roadPoolLeft.renderOrder = 1;
+    emitterGroup.add(roadPoolLeft);
+
+    const roadPoolRight = new THREE.Mesh(poolGeo, roadPoolMaterial);
+    roadPoolRight.name = 'HeadlightRoadPoolRight';
+    roadPoolRight.position.set((rightX_m + 0.42) * invX, poolRelY_m * invY, poolCenterZ_m * invZ);
+    roadPoolRight.rotation.y = 0.05;
+    roadPoolRight.scale.set(2.65 * invX, 1, (poolLen_m + 0.8) * invZ);
+    roadPoolRight.userData.skipNormalPass = true;
+    roadPoolRight.userData.skipObjectOutline = true;
+    roadPoolRight.renderOrder = 1;
+    emitterGroup.add(roadPoolRight);
+
+    carroGrupo.add(emitterGroup);
+
+    // 2. Two Front SpotLights + Targets properly parented to `Carro_Grupo`, aimed forward (+Z) onto asphalt
+    const spotOriginZ_m = frontNoseZ_m + 0.06;
+    const headlightLeft = new THREE.SpotLight(beamColor, 54.0, 42.0, Math.PI * 0.27, 0.56, 1.08);
+    headlightLeft.name = 'CarroHeadlightSpotLeft';
+    headlightLeft.position.set(leftX_m * invX, lensY_m * invY, spotOriginZ_m * invZ);
+    headlightLeft.target.name = 'CarroHeadlightTargetLeft';
+    headlightLeft.target.position.set(
+      (leftX_m + 0.22) * invX,
+      roadSurfaceRelY_m * invY,
+      13.2 * invZ
+    );
+    carroGrupo.add(headlightLeft);
+    carroGrupo.add(headlightLeft.target);
+
+    const headlightRight = new THREE.SpotLight(beamColor, 54.0, 44.0, Math.PI * 0.29, 0.56, 1.08);
+    headlightRight.name = 'CarroHeadlightSpotRight';
+    headlightRight.position.set(rightX_m * invX, lensY_m * invY, spotOriginZ_m * invZ);
+    headlightRight.target.name = 'CarroHeadlightTargetRight';
+    // Sweeps forward asphalt, curbside, and adjacent building base as Carro_Grupo drives along +Z
+    headlightRight.target.position.set(
+      (rightX_m + 1.45) * invX,
+      roadSurfaceRelY_m * invY,
+      14.4 * invZ
+    );
+    carroGrupo.add(headlightRight);
+    carroGrupo.add(headlightRight.target);
+
+    // Forward asphalt specular throw light gliding 7.0m ahead of the front bumper
+    const streetThrowLight = new THREE.PointLight(streetPoolColor, 24.0, 29.0, 1.24);
+    streetThrowLight.name = 'CarroStreetThrowLight';
+    streetThrowLight.position.set((centerX_m + 0.35) * invX, 1.08 * invY, 7.0 * invZ);
+    carroGrupo.add(streetThrowLight);
+
+    const taillightGlow = new THREE.PointLight(new THREE.Color('#C83E3E'), 3.4, 10.5, 1.55);
+    taillightGlow.name = 'CarroTaillightGlow';
+    taillightGlow.position.set(centerX_m * invX, 1.02 * invY, -9.55 * invZ);
+    carroGrupo.add(taillightGlow);
+
+    for (const mat of carHeadlightCovers) {
+      mat.emissive = new THREE.Color('#FFE4A0');
+      mat.emissiveIntensity = 1.65;
+      if (mat.transparent) {
+        mat.opacity = Math.max(mat.opacity, 0.74);
+      }
+    }
+
+    return {
+      headlightLeft,
+      headlightRight,
+      streetThrowLight,
+      taillightGlow,
+      emitterGroup,
+      lensMaterial,
+      haloMaterial,
+      coneMaterial,
+      roadPoolMaterial,
+    };
+  }
+
   private static createArchitecturalLightRig(scene: THREE.Scene): UrbanArchitecturalLightRig {
     const group = new THREE.Group();
     group.name = 'UrbanArchitecturalLightRig';
@@ -571,36 +928,21 @@ export class UrbanGlbSceneBuilder {
       });
 
     // 3. Moving Light-Source Vehicle Entity (`Carro_Grupo` on Left Lateral Avenue)
-    const carScale = Math.max(0.0001, Math.abs(carroGrupo.scale.x));
-    const invScale = 1 / carScale;
-    const beamColor = new THREE.Color('#F6DFAA');
-    const streetPoolColor = new THREE.Color('#EEBE72');
-
-    const headlightLeft = new THREE.SpotLight(beamColor, 21.5, 36.0, Math.PI * 0.29, 0.54, 1.28);
-    headlightLeft.position.set(-1.12 * invScale, 1.18 * invScale, 0.24 * invScale);
-    headlightLeft.target.position.set(-0.4 * invScale, -0.25 * invScale, 18.0 * invScale);
-    carroGrupo.add(headlightLeft);
-    carroGrupo.add(headlightLeft.target);
-
-    const headlightRight = new THREE.SpotLight(beamColor, 21.5, 38.0, Math.PI * 0.31, 0.54, 1.28);
-    headlightRight.position.set(1.12 * invScale, 1.18 * invScale, 0.24 * invScale);
-    // Angled inward sweep illuminates curb, lamppost, and adjacent building facades as car passes
-    headlightRight.target.position.set(4.8 * invScale, 0.45 * invScale, 17.0 * invScale);
-    carroGrupo.add(headlightRight);
-    carroGrupo.add(headlightRight.target);
-
-    const streetThrowLight = new THREE.PointLight(streetPoolColor, 12.2, 27.0, 1.38);
-    streetThrowLight.position.set(0.85 * invScale, 1.35 * invScale, 4.4 * invScale);
-    carroGrupo.add(streetThrowLight);
-
-    const taillightGlow = new THREE.PointLight(new THREE.Color('#BE3E3E'), 3.0, 10.0, 1.6);
-    taillightGlow.position.set(0, 1.05 * invScale, -9.5 * invScale);
-    carroGrupo.add(taillightGlow);
-
-    for (const mat of assets.materials.carHeadlightCovers) {
-      mat.emissive = beamColor.clone();
-      mat.emissiveIntensity = 1.12;
-    }
+    const carHeadlights = UrbanGlbSceneBuilder.attachVehicleHeadlightRig(
+      carroGrupo,
+      assets.materials.carHeadlightCovers
+    );
+    const {
+      headlightLeft,
+      headlightRight,
+      streetThrowLight,
+      taillightGlow,
+      emitterGroup: headlightEmitterGroup,
+      lensMaterial: headlightLensMaterial,
+      haloMaterial: headlightHaloMaterial,
+      coneMaterial: headlightConeMaterial,
+      roadPoolMaterial: headlightRoadPoolMaterial,
+    } = carHeadlights;
 
     const carroId = ecsWorld.createEntity();
     ecsWorld
@@ -637,9 +979,18 @@ export class UrbanGlbSceneBuilder {
         headlightRight,
         streetThrowLight,
         taillightGlow,
-        baseSpotIntensity: 21.5,
-        basePointIntensity: 12.2,
-        baseTailIntensity: 3.0,
+        headlightEmitterGroup,
+        headlightLensMaterial,
+        headlightHaloMaterial,
+        headlightConeMaterial,
+        headlightRoadPoolMaterial,
+        baseSpotIntensity: 54.0,
+        basePointIntensity: 24.0,
+        baseTailIntensity: 3.4,
+        baseLensEmissive: 4.0,
+        baseHaloOpacity: 0.64,
+        baseConeOpacity: 0.22,
+        baseRoadPoolOpacity: 0.36,
         headlightMaterials: assets.materials.carHeadlightCovers,
       })
       .addComponent(carroId, 'Renderable', {
@@ -704,56 +1055,56 @@ export class UrbanGlbSceneBuilder {
         stage.playerRimLight.intensity = 1.1;
       }
     } else if (mode === 'rain') {
-      // Stormy Cyber-Noir: restrained global fill so unlit roofs/asphalt breathe darkly around focal pools
-      stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#05080B');
-      stage.ambientHemi.intensity = 0.32;
+      // Stormy Cyber-Noir: cohesive moonlit storm fill keeps distant facades & roofs legible around wet focal pools
+      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#9EB2C2'), 0.25);
+      stage.ambientHemi.groundColor.set('#0E151C');
+      stage.ambientHemi.intensity = 0.58;
 
-      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#9BB0C2'), 0.35);
-      stage.keyDirLight.intensity = 0.62;
+      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#ACC0D2'), 0.42);
+      stage.keyDirLight.intensity = 1.02;
       stage.keyDirLight.position.set(14, 27, 18);
 
-      stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.42;
+      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#8AB4C4'), 0.35);
+      stage.rimDirLight.intensity = 0.62;
 
-      rig.storefrontEastLight.intensity = 10.8;
-      rig.storefrontWestLight.intensity = 10.2;
-      rig.kioskWarmLight.intensity = 7.6;
-      rig.streetLampWest.intensity = 14.2;
-      rig.streetLampCenter.intensity = 12.4;
-      rig.streetLampEast.intensity = 10.8;
-      rig.avenueBeaconLight.intensity = 7.0;
+      rig.storefrontEastLight.intensity = 11.4;
+      rig.storefrontWestLight.intensity = 10.8;
+      rig.kioskWarmLight.intensity = 8.0;
+      rig.streetLampWest.intensity = 15.0;
+      rig.streetLampCenter.intensity = 13.2;
+      rig.streetLampEast.intensity = 11.4;
+      rig.avenueBeaconLight.intensity = 7.6;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.82;
+        m.emissiveIntensity = 1.88;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.8;
+        stage.playerRimLight.intensity = 3.9;
       }
     } else {
-      // 'night' — restrained ambient fill + high-contrast focal light pools on storefronts, streetlamps & character
-      stage.ambientHemi.color.copy(cool);
-      stage.ambientHemi.groundColor.set('#060A0E');
-      stage.ambientHemi.intensity = 0.36;
+      // 'night' — balanced nocturnal skyline fill keeps architectural volumes whole & readable around warm pools
+      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#B2C4D4'), 0.28);
+      stage.ambientHemi.groundColor.set('#101720');
+      stage.ambientHemi.intensity = 0.66;
 
-      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C4D3E0'), 0.4);
-      stage.keyDirLight.intensity = 0.72;
+      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C8D8E6'), 0.45);
+      stage.keyDirLight.intensity = 1.15;
       stage.keyDirLight.position.set(16, 28, 18);
 
-      stage.rimDirLight.color.copy(warm);
-      stage.rimDirLight.intensity = 0.38;
+      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#96B8C4'), 0.3);
+      stage.rimDirLight.intensity = 0.58;
 
-      rig.storefrontEastLight.intensity = 9.2;
-      rig.storefrontWestLight.intensity = 8.8;
-      rig.kioskWarmLight.intensity = 6.4;
-      rig.streetLampWest.intensity = 12.2;
-      rig.streetLampCenter.intensity = 10.6;
-      rig.streetLampEast.intensity = 9.2;
-      rig.avenueBeaconLight.intensity = 5.8;
+      rig.storefrontEastLight.intensity = 9.8;
+      rig.storefrontWestLight.intensity = 9.4;
+      rig.kioskWarmLight.intensity = 6.8;
+      rig.streetLampWest.intensity = 12.8;
+      rig.streetLampCenter.intensity = 11.2;
+      rig.streetLampEast.intensity = 9.8;
+      rig.avenueBeaconLight.intensity = 6.4;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.55;
+        m.emissiveIntensity = 1.62;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.4;
+        stage.playerRimLight.intensity = 3.6;
       }
     }
 
@@ -798,9 +1149,9 @@ export class UrbanGlbSceneBuilder {
         applyScaledNormal(mat, sidewalkNormalFactor);
       }
 
-      // Keep unlit nocturnal roofs/walls subdued while preserving directional masonry/seam normal relief
-      const wallBaseHex = mode === 'day' ? '#F2F5F8' : mode === 'rain' ? '#848F9A' : '#8E9AA6';
-      const wallNormalFactor = mode === 'day' ? 1.15 : mode === 'rain' ? 0.96 : 1.06;
+      // Keep nocturnal roofs/walls cohesive & readable while preserving directional masonry/seam normal relief
+      const wallBaseHex = mode === 'day' ? '#F2F5F8' : mode === 'rain' ? '#92A0AD' : '#9EACB8';
+      const wallNormalFactor = mode === 'day' ? 1.15 : mode === 'rain' ? 0.98 : 1.08;
       for (const mat of stage.assets.materials.walls) {
         mat.color.set(wallBaseHex);
         applyScaledNormal(mat, wallNormalFactor);
@@ -874,7 +1225,7 @@ export class UrbanGlbSceneBuilder {
       }
     }
 
-    // Update `Carro_Grupo` moving headlight intensities per preset
+    // Update `Carro_Grupo` moving headlight SpotLights, emissive lenses, halos, cones & road reflection per preset
     if (ecsWorld && stage.carroEntityId !== null) {
       const traffic = ecsWorld.getComponent(stage.carroEntityId, 'TrafficCycle');
       if (traffic) {
@@ -882,14 +1233,26 @@ export class UrbanGlbSceneBuilder {
           traffic.baseSpotIntensity = 5.5;
           traffic.basePointIntensity = 2.8;
           traffic.baseTailIntensity = 0.8;
+          traffic.baseLensEmissive = 0.65;
+          traffic.baseHaloOpacity = 0.12;
+          traffic.baseConeOpacity = 0.0;
+          traffic.baseRoadPoolOpacity = 0.04;
         } else if (mode === 'rain') {
-          traffic.baseSpotIntensity = 26.5;
-          traffic.basePointIntensity = 14.5;
-          traffic.baseTailIntensity = 3.6;
+          traffic.baseSpotIntensity = 68.0;
+          traffic.basePointIntensity = 30.0;
+          traffic.baseTailIntensity = 4.2;
+          traffic.baseLensEmissive = 4.6;
+          traffic.baseHaloOpacity = 0.78;
+          traffic.baseConeOpacity = 0.30;
+          traffic.baseRoadPoolOpacity = 0.48;
         } else {
-          traffic.baseSpotIntensity = 21.5;
-          traffic.basePointIntensity = 12.2;
-          traffic.baseTailIntensity = 3.0;
+          traffic.baseSpotIntensity = 54.0;
+          traffic.basePointIntensity = 24.0;
+          traffic.baseTailIntensity = 3.4;
+          traffic.baseLensEmissive = 4.0;
+          traffic.baseHaloOpacity = 0.64;
+          traffic.baseConeOpacity = 0.22;
+          traffic.baseRoadPoolOpacity = 0.36;
         }
       }
     }

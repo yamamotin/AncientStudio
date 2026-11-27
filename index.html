@@ -323,6 +323,14 @@
           <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="scene-body">[ expandir ]</button>
         </div>
       </div>
+      <div class="scene-toolbar" role="group" aria-label="Controle de tamanho da fonte ASCII" data-i18n-attr="aria-label:scene.fontGroupAria">
+        <div class="scene-font-control">
+          <label for="scene-cell-size" data-i18n="scene.fontSizeLabel">Fonte / célula</label>
+          <input id="scene-cell-size" type="range" min="2" max="8" step="0.01" value="8" disabled aria-label="Tamanho da fonte e célula ASCII em pixels" data-i18n-attr="aria-label:scene.fontSizeAria">
+          <output id="scene-cell-value" for="scene-cell-size">8px</output>
+          <button id="scene-cell-reset" class="cmd-button cmd-button--small" type="button" disabled aria-label="Restaurar tamanho inicial da fonte ASCII" data-i18n="scene.fontReset" data-i18n-attr="aria-label:scene.fontResetAria">[ restaurar ]</button>
+        </div>
+      </div>
       <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>
       <p class="sr-only" data-i18n="scene.aria">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
       <div id="scene-body" class="collapse-body">

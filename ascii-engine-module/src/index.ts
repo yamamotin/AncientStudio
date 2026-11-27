@@ -15,10 +15,17 @@ export {
 export { EngineLoop, type LoopFrameInfo, type LoopTelemetry } from './core/EngineLoop';
 export { LifecycleManager } from './core/LifecycleManager';
 export {
+  buildMicroCellStops,
   computeAdaptiveResolution,
   detectResolutionTier,
+  mapNormalizedToMicroCell,
+  MICRO_COARSE_STEP,
+  MICRO_FINE_STEP,
+  MICRO_FINE_STEP_THRESHOLD,
+  MIN_MICRO_CELL_SIZE,
   type ResolutionInput,
   ResolutionTransitionController,
+  snapToMicroCellStop,
 } from './core/ResolutionController';
 
 export {
