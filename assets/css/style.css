@@ -832,6 +832,13 @@ body.scene-fullscreen-active { overflow: hidden; }
 #penguin-stage canvas,
 #penguin-stage * { pointer-events: none; }
 
+/* Lighter outline/halo for the live mascot: a CSS drop-shadow keeps the render
+   untouched (same cells, same colors, same rotation) while lifting the edges off
+   the dark stage. */
+#penguin-stage canvas {
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 5px rgba(150, 255, 205, 0.22));
+}
+
 #penguin-stage {
   background-color: #13222E;
   background-image:
@@ -850,54 +857,22 @@ body.scene-fullscreen-active { overflow: hidden; }
   place-items: center;
   min-height: inherit;
   padding: var(--space-2);
-  color: var(--green);
-  font-size: 10px;
-  line-height: 1.08;
+  /* Fixed size (no slider anymore): 4px, with a lighter outline so the art stays
+     readable over the dark stage. */
+  color: #E9FFF6;
+  font-size: var(--penguin-font-px, 4px);
+  line-height: 1.06;
   text-align: left;
   white-space: pre;
-  text-shadow: 0 0 10px rgba(0, 255, 65, 0.22);
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.9),
+    0 0 4px rgba(180, 255, 220, 0.5),
+    0 0 10px rgba(0, 255, 65, 0.28);
   user-select: none;
 }
 
 .engine-stage[data-mode="engine"] .penguin-fallback { display: none; }
 
-/* TEMPORARY (assets/js/penguin-font.js): the dashed bar and this override are the
-   only CSS the visual-test control needs. Delete both blocks to remove it. */
-.penguin-font-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  align-items: center;
-  margin-bottom: var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  color: var(--muted);
-  font-size: var(--fs-tiny);
-}
-
-.penguin-font-bar label { color: var(--cyan); white-space: nowrap; }
-
-.penguin-font-bar input[type="range"] {
-  width: clamp(6rem, 22vw, 10rem);
-  min-height: 1.5rem;
-  margin: 0;
-  accent-color: var(--green);
-  cursor: pointer;
-}
-
-.penguin-font-bar output {
-  min-width: 5ch;
-  color: var(--green);
-  font-variant-numeric: tabular-nums;
-}
-
-.penguin-font-tag { color: var(--red); }
-
-#penguin-stage[data-font-override="true"] .penguin-fallback {
-  font-size: var(--penguin-font-px, 10px) !important;
-  line-height: 1.06;
-}
 .engine-hint { margin-top: var(--space-2); font-size: var(--fs-tiny); }
 
 .specs { display: grid; gap: var(--space-2); align-content: center; }
@@ -1028,10 +1003,11 @@ body.scene-fullscreen-active { overflow: hidden; }
 
 /* CAPTCHA challenge dialog (assets/js/captcha.js).
    Native <dialog> + showModal() gives the focus trap and the inert background for
-   free; the styles only own the terminal look. Nothing remote is ever embedded. */
+   free; the styles only own the terminal look. Compact: challenge image/prompt,
+   one answer field, send/cancel. Nothing remote is ever embedded. */
 .captcha-dialog {
-  width: min(34rem, calc(100vw - 2 * var(--space-4)));
-  max-height: min(90vh, 44rem);
+  width: min(24rem, calc(100vw - 2 * var(--space-4)));
+  max-height: min(90vh, 34rem);
   margin: auto;
   padding: 0;
   overflow-y: auto;
@@ -1047,48 +1023,50 @@ body.scene-fullscreen-active { overflow: hidden; }
 .captcha-form {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-5);
+  padding: var(--space-4);
 }
 
-.captcha-form .panel-head h2 { color: var(--green); letter-spacing: var(--tracking); }
+.captcha-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+}
 
-.captcha-form .muted { font-size: var(--fs-small); }
+.captcha-head h2 { margin: 0; color: var(--green); font-size: var(--fs-small); letter-spacing: var(--tracking); }
 
-.captcha-detail {
-  padding: var(--space-2) var(--space-3);
-  border-left: 2px solid var(--cyan);
+.captcha-challenge {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
   background: var(--terminal-bg);
+}
+
+.captcha-image {
+  display: block;
+  max-width: 100%;
+  max-height: 7.5rem;
+  border: 1px solid var(--border-soft);
+  border-radius: calc(var(--radius) / 2);
+  background: #f4f7f5;
+  image-rendering: crisp-edges;
+}
+
+.captcha-image[hidden] { display: none; }
+
+.captcha-prompt {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-tiny);
+  text-align: center;
   overflow-wrap: anywhere;
 }
 
-.captcha-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  gap: var(--space-2) var(--space-3);
-  margin: 0;
-  font-size: var(--fs-tiny);
-}
-
-.captcha-meta dt { color: var(--muted); }
-.captcha-meta dd { margin: 0.1rem 0 0; color: var(--cyan); overflow-wrap: anywhere; }
-
-.captcha-portal { margin: 0; font-size: var(--fs-small); }
-.captcha-portal a { color: var(--green); text-decoration: underline dotted; }
-.captcha-portal a:hover { color: var(--cyan); }
-.captcha-portal a[hidden] { display: none; }
-
-.captcha-steps-block { display: grid; gap: var(--space-1); }
 .captcha-label { color: var(--muted); font-size: var(--fs-tiny); }
-
-.captcha-steps {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding-left: 1.25rem;
-  font-size: var(--fs-small);
-}
-
-.captcha-steps li { overflow-wrap: anywhere; }
 
 .captcha-error {
   margin: 0;
@@ -1107,10 +1085,14 @@ body.scene-fullscreen-active { overflow: hidden; }
   align-items: center;
 }
 
-.captcha-privacy { margin: 0; font-size: var(--fs-tiny); }
+.captcha-countdown {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-tiny);
+  font-variant-numeric: tabular-nums;
+}
 
 @media (max-width: 30rem) {
-  .captcha-form { padding: var(--space-4); }
-  .captcha-meta { grid-template-columns: 1fr; }
   .captcha-actions .cmd-button { flex: 1 1 100%; }
+  .captcha-countdown { margin-left: 0; }
 }

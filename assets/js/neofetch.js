@@ -1,7 +1,8 @@
 /* Static, friendly ASCII penguin placeholder for [ STACK // NEOFETCH ].
    - Targets `#penguin-stage` and `.penguin-fallback` (with backward compatibility for `.neofetch .ascii-logo`)
-   - Adaptive grid (`computeFallbackGrid`) still scales font-size/container density from the real
-     stage bounds & device profile, in parity with the engine's `ResolutionController`.
+   - The font size is fixed at `PENGUIN_FONT_PX` (4px, set by CSS `--penguin-font-px` as well);
+     the adaptive grid (`computeFallbackGrid`) only chooses the column/row density used to
+     center the art, in parity with the engine's `ResolutionController`.
    - The placeholder is 100% static: no yaw advance, no animation loop, no pointer/touch.
    - It disappears via CSS as soon as `data-mode="engine"` / `tp:scene-mode` reports the live 3D
      mascot, and stays visible as a safe fallback if the engine never mounts. */
@@ -28,6 +29,9 @@ window.TP = window.TP || {};
     '     /_\\       /_\\'
   ];
 
+  // Fixed by design: the penguin is no longer resizable (the temporary test bar is gone).
+  var PENGUIN_FONT_PX = 4;
+
   var ART_WIDTH = STATIC_PENGUIN.reduce(function ( widest, line ) {
     return Math.max(widest, line.length);
   }, 0);
@@ -37,7 +41,7 @@ window.TP = window.TP || {};
     logoEl: null,
     cols: 34,
     rows: 20,
-    fontPx: 9.5,
+    fontPx: PENGUIN_FONT_PX,
     yaw: 0.14,
     engineActive: false,
     resizeObserver: null,
@@ -47,6 +51,8 @@ window.TP = window.TP || {};
   /**
    * Computes adaptive fallback ASCII grid dimensions from real container size & DPR/pointer profile,
    * mirroring `ResolutionController` so placeholder and WebGL2 share coherent density & proportions.
+   * `fontPx` is intentionally constant: the penguin keeps its fixed 4px typography and only the
+   * centering density follows the container.
    */
   function computeFallbackGrid(width, height) {
     var w = Math.max(160, width || 260);
@@ -59,23 +65,18 @@ window.TP = window.TP || {};
     }
 
     var targetCols;
-    var fontPx;
     if (coarse && w < 420) {
       targetCols = 28;
-      fontPx = 9.5;
     } else if (w < 260) {
       targetCols = 30;
-      fontPx = 8.5;
     } else if (w >= 420 && !coarse) {
       targetCols = 42;
-      fontPx = 8.0;
     } else {
       targetCols = 36;
-      fontPx = 8.8;
     }
 
     var targetRows = Math.max(16, Math.min(28, Math.round((targetCols * (h / w)) * 0.68)));
-    return { cols: targetCols, rows: targetRows, fontPx: fontPx };
+    return { cols: targetCols, rows: targetRows, fontPx: PENGUIN_FONT_PX };
   }
 
   function applyAdaptiveGrid(width, height) {
@@ -89,7 +90,7 @@ window.TP = window.TP || {};
     state.lastRenderedText = '';
 
     if (state.logoEl) {
-      state.logoEl.style.fontSize = grid.fontPx + 'px';
+      state.logoEl.style.fontSize = PENGUIN_FONT_PX + 'px';
       state.logoEl.style.lineHeight = '1.06';
     }
   }
@@ -161,11 +162,13 @@ window.TP = window.TP || {};
       // static, so yaw is recorded but never drives a render or an animation.
       state.yaw = yawRad;
     },
+    fontPx: PENGUIN_FONT_PX,
     getState: function () {
       return {
         yaw: state.yaw,
         cols: state.cols,
         rows: state.rows,
+        fontPx: PENGUIN_FONT_PX,
         autoSpin: false,
         engineActive: state.engineActive
       };

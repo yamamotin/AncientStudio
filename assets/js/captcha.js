@@ -1,24 +1,30 @@
 /* CAPTCHA challenge flow for the public connectors.
    The backend answers HTTP 422 with `code: "CAPTCHA_REQUIRED"` and a problem+json body
-   carrying the challenge metadata (site_key, portal/form URL, instructions). This module
-   turns that response into a focused, translated dialog and resolves with the fields the
-   caller must resend so the backend can finish the real query.
+   carrying the challenge metadata. This module turns that response into a *compact*
+   dialog — only the mirrored challenge image (or its short prompt), a single answer
+   field and the send/cancel actions — and resolves with the fields the caller must
+   resend so the backend can finish the real query.
 
    Security posture:
    - every URL is validated before use: https only, no credentials, strict host allowlist;
-     `javascript:`, `data:`, `http:` and unknown hosts are simply dropped;
+     `javascript:`, `data:` (except a strict base64 image), `http:` and unknown hosts are
+     simply dropped;
+   - the challenge image may be a strict `data:image/…;base64,` payload produced by the
+     backend, or an https URL on the official TJPR hosts (the only ones present in the
+     document CSP `img-src`); it is never loaded from an arbitrary origin;
    - all external text is bounded and rendered with createElement/textContent — the module
      never assigns innerHTML;
-   - the dialog never embeds a remote frame (the CSP forbids frame-src), so the user is
-     sent to the official portal in a new tab with rel="noopener noreferrer";
-   - tokens and session cookies are treated as sensitive: never persisted, wiped on close,
-     on `pagehide` and when the challenge expires. */
+   - the dialog never embeds a remote frame (the CSP forbids frame-src) and never renders
+     the portal page: the user only reads the cloned challenge and types the answer;
+   - the answer (and the optional session cookie, kept for programmatic callers) is
+     treated as sensitive: never persisted, wiped on close, on `pagehide` and when the
+     challenge expires. */
 window.TP = window.TP || {};
 
 (function (TP) {
   'use strict';
 
-  // Only the official portals and the CAPTCHA vendors they use may be opened by the popup.
+  // Only the official portals and the CAPTCHA vendors they use may be referenced.
   var ALLOWED_HOSTS = [
     'consulta.tjpr.jus.br',
     'www.tjpr.jus.br',
@@ -27,18 +33,28 @@ window.TP = window.TP || {};
     'recaptcha.google.com',
     'www.recaptcha.net'
   ];
+  // Hosts allowed to serve the cloned challenge image (mirrors the CSP `img-src`).
+  var IMAGE_HOSTS = ['consulta.tjpr.jus.br', 'www.tjpr.jus.br', 'tjpr.jus.br'];
   var CHALLENGE_TTL_MS = 300000; // 5 minutes when the backend sends no expires_at
   var MAX_INSTRUCTIONS = 6;
   var MAX_INSTRUCTION_LEN = 240;
   var MAX_DETAIL_LEN = 320;
+  var MAX_PROMPT_LEN = 160;
   var MAX_TOKEN_LEN = 4096;
-  var TOKEN_MIN_LEN = 6;
+  var MAX_ANSWER_LEN = 4096; // long portal tokens and short image answers share the field
+  var TOKEN_MIN_LEN = 3;
   var MAX_COOKIE_LEN = 1024;
+  var MAX_IMAGE_DATA_LEN = 400000;
   var TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
   var COOKIE_PATTERN = /^[A-Za-z0-9._~=%:;+/@!$&'()*,-]+$/;
   var SITE_KEY_PATTERN = /^[A-Za-z0-9_-]{10,100}$/;
   var CHALLENGE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
   var CALLBACK_PATTERN = /^[A-Za-z0-9_]{1,80}$/;
+  // Strict mirror of the challenge bitmap: base64 of a real image type, nothing else.
+  var IMAGE_DATA_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/]+={0,2}$/;
+  // Inert 1x1 pixel shipped in the markup: the real bitmap replaces it while the dialog
+  // is open, and it is restored on close so no challenge data survives in the DOM.
+  var IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   var state = {
     challenge: null,
@@ -47,6 +63,7 @@ window.TP = window.TP || {};
     countdownTimer: null,
     previousFocus: null,
     expired: false,
+    imageBroken: false,
     bound: false
   };
 
@@ -90,10 +107,32 @@ window.TP = window.TP || {};
     return parsed.href;
   }
 
+  /* The challenge bitmap: either a strict base64 data URL (the backend mirrors the image,
+     which is what the CSP `data:` entry is for) or https on the official TJPR hosts. */
+  function safeImageSource(raw) {
+    var value = String(raw === null || raw === undefined ? '' : raw).trim();
+    if (!value) return '';
+    if (value.slice(0, 5).toLowerCase() === 'data:') {
+      if (value.length > MAX_IMAGE_DATA_LEN) return '';
+      return IMAGE_DATA_PATTERN.test(value) ? value : '';
+    }
+    if (value.length > 2048) return '';
+    var parsed;
+    try {
+      parsed = new URL(value);
+    } catch (error) {
+      return '';
+    }
+    if (parsed.protocol !== 'https:') return '';
+    if (parsed.username || parsed.password) return '';
+    if (IMAGE_HOSTS.indexOf(parsed.hostname.toLowerCase()) === -1) return '';
+    return parsed.href;
+  }
+
   function normalizeToken(raw) {
     var value = String(raw === null || raw === undefined ? '' : raw).trim();
     if (!value || value.length > MAX_TOKEN_LEN) return '';
-    if (value.length < TOKEN_MIN_LEN) return '';
+    if (value.length < TOKEN_MIN_LEN || value.length > MAX_ANSWER_LEN) return '';
     return TOKEN_PATTERN.test(value) ? value : '';
   }
 
@@ -107,10 +146,10 @@ window.TP = window.TP || {};
     var hint = String(raw || '').toLowerCase();
     if (hint.indexOf('hcaptcha') !== -1) return 'hcaptcha';
     if (hint.indexOf('recaptcha') !== -1 || hint.indexOf('google') !== -1) return 'recaptcha';
+    if (hint.indexOf('image') !== -1) return 'image';
     if (/^h/i.test(siteKey)) return 'hcaptcha';
     if (siteKey) return 'recaptcha';
-    if (hint.indexOf('image') !== -1 || hint.indexOf('captcha') !== -1) return 'image';
-    return 'unknown';
+    return 'image';
   }
 
   function expiryOf(raw) {
@@ -177,6 +216,11 @@ window.TP = window.TP || {};
       portalUrl: safeExternalUrl(field(raw, 'portal_url', 'portalUrl')),
       formUrl: safeExternalUrl(field(raw, 'form_url', 'formUrl')),
       challengeUrl: safeExternalUrl(field(raw, 'challenge_url', 'challengeUrl')),
+      // `raw.image` keeps sanitizeChallenge() idempotent, like `raw.text` below.
+      image: safeImageSource(field(raw, 'image_data_url', 'imageDataUrl')) ||
+        safeImageSource(field(raw, 'image_url', 'imageUrl')) ||
+        safeImageSource(raw.image),
+      text: text(field(raw, 'challenge_text', 'challengeText') || raw.text, MAX_PROMPT_LEN),
       callback: callback,
       detail: text(raw.detail, MAX_DETAIL_LEN),
       instructions: instructionsOf(raw.instructions),
@@ -201,7 +245,8 @@ window.TP = window.TP || {};
     return sanitizeChallenge(error);
   }
 
-  /* Payload appended to the retried request. */
+  /* Payload appended to the retried request. `session_cookie` stays supported for
+     programmatic callers, but the compact popup no longer exposes a field for it. */
   function buildResolution(challenge, fields) {
     var input = fields || {};
     var token = normalizeToken(input.token);
@@ -213,13 +258,6 @@ window.TP = window.TP || {};
     return payload;
   }
 
-  function providerLabel(provider) {
-    if (provider === 'hcaptcha') return t('captcha.providerHcaptcha');
-    if (provider === 'recaptcha') return t('captcha.providerRecaptcha');
-    if (provider === 'image') return t('captcha.providerImage');
-    return t('captcha.providerUnknown');
-  }
-
   function formatCountdown(ms) {
     var seconds = Math.max(0, Math.ceil(ms / 1000));
     var minutes = Math.floor(seconds / 60);
@@ -227,45 +265,31 @@ window.TP = window.TP || {};
     return minutes + ':' + (rest < 10 ? '0' : '') + rest;
   }
 
-  function portalHref(challenge) {
-    return challenge.challengeUrl || challenge.formUrl || challenge.portalUrl || '';
+  /* The single line of guidance under the challenge: backend prompt, then the backend
+     detail, then the translated default. */
+  function promptOf(challenge) {
+    if (challenge.text) return challenge.text;
+    if (state.imageBroken) return t('captcha.imageUnavailable');
+    if (challenge.detail) return challenge.detail;
+    return t('captcha.promptFallback');
   }
 
   function renderChallenge() {
     var challenge = state.challenge;
     if (!challenge || !els.dialog) return;
 
-    if (els.provider) els.provider.textContent = providerLabel(challenge.provider);
-    if (els.siteKey) els.siteKey.textContent = challenge.siteKey || '—';
-    if (els.detail) {
-      els.detail.textContent = challenge.detail;
-      els.detail.hidden = !challenge.detail;
-    }
-
-    var href = portalHref(challenge);
-    if (els.portalLink) {
-      if (href) {
-        els.portalLink.setAttribute('href', href);
-        els.portalLink.setAttribute('target', '_blank');
-        els.portalLink.setAttribute('rel', 'noopener noreferrer');
-        els.portalLink.hidden = false;
+    if (els.image) {
+      if (challenge.image && !state.imageBroken) {
+        els.image.setAttribute('src', challenge.image);
+        els.image.hidden = false;
       } else {
-        els.portalLink.removeAttribute('href');
-        els.portalLink.removeAttribute('target');
-        els.portalLink.removeAttribute('rel');
-        els.portalLink.hidden = true;
+        els.image.setAttribute('src', IMAGE_PLACEHOLDER);
+        els.image.hidden = true;
       }
+      els.image.setAttribute('alt', t('captcha.imageAlt'));
     }
 
-    if (els.instructions) {
-      els.instructions.textContent = '';
-      challenge.instructions.forEach(function (item) {
-        var li = document.createElement('li');
-        li.textContent = item;
-        els.instructions.appendChild(li);
-      });
-      els.instructions.hidden = challenge.instructions.length === 0;
-    }
+    if (els.prompt) els.prompt.textContent = promptOf(challenge);
 
     updateExpiryLabel();
   }
@@ -322,22 +346,14 @@ window.TP = window.TP || {};
   }
 
   /* Drop everything the challenge put on screen: nothing about a solved/abandoned
-     challenge stays in the DOM once the dialog is gone. */
+     challenge stays in the DOM once the dialog is gone (the image bitmap included). */
   function clearRendered() {
-    if (els.provider) els.provider.textContent = '—';
-    if (els.siteKey) els.siteKey.textContent = '—';
+    if (els.image) {
+      els.image.setAttribute('src', IMAGE_PLACEHOLDER);
+      els.image.hidden = true;
+    }
+    if (els.prompt) els.prompt.textContent = t('captcha.promptFallback');
     if (els.expires) els.expires.textContent = '—';
-    if (els.detail) {
-      els.detail.textContent = '';
-      els.detail.hidden = true;
-    }
-    if (els.instructions) els.instructions.textContent = '';
-    if (els.portalLink) {
-      els.portalLink.removeAttribute('href');
-      els.portalLink.removeAttribute('target');
-      els.portalLink.removeAttribute('rel');
-      els.portalLink.hidden = true;
-    }
     if (els.submit) els.submit.disabled = false;
   }
 
@@ -346,11 +362,11 @@ window.TP = window.TP || {};
       els.token.value = '';
       els.token.removeAttribute('aria-invalid');
     }
-    if (els.session) els.session.value = '';
     showError('');
     clearRendered();
     state.challenge = null;
     state.expired = false;
+    state.imageBroken = false;
   }
 
   function openDialog() {
@@ -379,13 +395,7 @@ window.TP = window.TP || {};
     els.dialog.removeAttribute('open');
   }
 
-  function finish(reason) {
-    var pending = state.pending;
-    state.pending = null;
-    clearTimers();
-    var expired = state.expired || reason === 'expired';
-    closeDialog();
-    wipeFields();
+  function restoreFocus() {
     if (state.previousFocus && typeof state.previousFocus.focus === 'function') {
       try {
         state.previousFocus.focus();
@@ -394,6 +404,16 @@ window.TP = window.TP || {};
       }
     }
     state.previousFocus = null;
+  }
+
+  function finish(reason) {
+    var pending = state.pending;
+    state.pending = null;
+    clearTimers();
+    var expired = state.expired || reason === 'expired';
+    closeDialog();
+    wipeFields();
+    restoreFocus();
     if (!pending) return;
     if (reason === 'submit') return;
     pending.reject(failure(expired ? 'CAPTCHA_EXPIRED' : 'CAPTCHA_CANCELLED', expired ? 'challenge expired' : 'challenge cancelled'));
@@ -408,8 +428,7 @@ window.TP = window.TP || {};
     }
 
     var resolution = buildResolution(state.challenge, {
-      token: els.token ? els.token.value : '',
-      session_cookie: els.session ? els.session.value : ''
+      token: els.token ? els.token.value : ''
     });
 
     if (!resolution) {
@@ -424,14 +443,7 @@ window.TP = window.TP || {};
     clearTimers();
     closeDialog();
     wipeFields();
-    if (state.previousFocus && typeof state.previousFocus.focus === 'function') {
-      try {
-        state.previousFocus.focus();
-      } catch (error) {
-        /* element may be gone */
-      }
-    }
-    state.previousFocus = null;
+    restoreFocus();
     pending.resolve(resolution);
   }
 
@@ -441,6 +453,17 @@ window.TP = window.TP || {};
     if (els.form) els.form.addEventListener('submit', onSubmit);
     if (els.cancel) els.cancel.addEventListener('click', function () { finish('cancel'); });
     if (els.close) els.close.addEventListener('click', function () { finish('cancel'); });
+    if (els.image) {
+      // A blocked/broken image never blocks the flow: the prompt takes over.
+      els.image.addEventListener('error', function () {
+        state.imageBroken = true;
+        if (els.image) {
+          els.image.setAttribute('src', IMAGE_PLACEHOLDER);
+          els.image.hidden = true;
+        }
+        if (els.prompt && state.challenge) els.prompt.textContent = promptOf(state.challenge);
+      });
+    }
     if (els.dialog) {
       els.dialog.addEventListener('cancel', function (event) {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
@@ -451,7 +474,7 @@ window.TP = window.TP || {};
       });
     }
     window.addEventListener('pagehide', function () {
-      // never leave a token behind in memory/DOM
+      // never leave an answer/image behind in memory/DOM
       wipeFields();
       clearTimers();
     });
@@ -461,14 +484,10 @@ window.TP = window.TP || {};
     return {
       dialog: document.getElementById('captcha-dialog'),
       form: document.getElementById('captcha-form'),
-      provider: document.getElementById('captcha-provider'),
-      siteKey: document.getElementById('captcha-site-key'),
-      portalLink: document.getElementById('captcha-portal-link'),
+      image: document.getElementById('captcha-image'),
+      prompt: document.getElementById('captcha-prompt'),
       expires: document.getElementById('captcha-expires'),
-      detail: document.getElementById('captcha-detail'),
-      instructions: document.getElementById('captcha-instructions'),
       token: document.getElementById('captcha-token'),
-      session: document.getElementById('captcha-session'),
       error: document.getElementById('captcha-error'),
       submit: document.getElementById('captcha-submit'),
       cancel: document.getElementById('captcha-cancel'),
@@ -503,10 +522,13 @@ window.TP = window.TP || {};
 
     state.challenge = sanitizeChallenge(rawChallenge);
     state.expired = false;
+    state.imageBroken = false;
     state.previousFocus = document.activeElement || null;
     showError('');
-    if (els.token) els.token.value = '';
-    if (els.session) els.session.value = '';
+    if (els.token) {
+      els.token.value = '';
+      els.token.removeAttribute('aria-invalid');
+    }
     if (els.submit) els.submit.disabled = false;
 
     renderChallenge();
@@ -531,14 +553,19 @@ window.TP = window.TP || {};
     fromError: fromError,
     sanitizeChallenge: sanitizeChallenge,
     safeExternalUrl: safeExternalUrl,
+    safeImageSource: safeImageSource,
     buildResolution: buildResolution,
     normalizeToken: normalizeToken,
     normalizeSessionCookie: normalizeCookie,
     config: {
       allowedHosts: ALLOWED_HOSTS.slice(),
+      imageHosts: IMAGE_HOSTS.slice(),
       challengeTtlMs: CHALLENGE_TTL_MS,
       maxInstructions: MAX_INSTRUCTIONS,
-      tokenPattern: String(TOKEN_PATTERN)
+      maxAnswerLen: MAX_ANSWER_LEN,
+      tokenPattern: String(TOKEN_PATTERN),
+      imageDataPattern: String(IMAGE_DATA_PATTERN),
+      imagePlaceholder: IMAGE_PLACEHOLDER
     }
   };
 })(window.TP);

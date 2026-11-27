@@ -287,6 +287,11 @@ test('fallback penguin is static ASCII art without pointer events or RAF', () =>
   assert.match(staticArt, /-----/, 'belly is legible');
   assert.ok(staticArt.includes('/_\\'), 'webbed feet are legible');
   assert.equal(queuedFrame, null, 'no fallback RAF loop is scheduled');
+  // Fixed 4px typography, independent of the container width (the slider is gone).
+  assert.equal(logo.style.fontSize, '4px', 'the fallback is rendered at 4px');
+  assert.equal(sandbox.TP.neofetch.getState().fontPx, 4, 'the reported font size is 4px');
+  assert.equal(sandbox.TP.neofetch.computeFallbackGrid(320, 200).fontPx, 4);
+  assert.equal(sandbox.TP.neofetch.computeFallbackGrid(1280, 720).fontPx, 4);
   assert.equal(sandbox.TP.neofetch.getState().autoSpin, false);
   assert.equal(frame.getAttribute('data-auto-spin'), 'false');
 

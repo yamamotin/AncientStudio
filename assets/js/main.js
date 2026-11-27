@@ -1018,8 +1018,6 @@ window.TP = window.TP || {};
     TP.pipeline.init();
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
-    // TEMPORARY (assets/js/penguin-font.js): remove this line with the module.
-    if (TP.penguinFont) TP.penguinFont.init();
     initBrightness();
     initContactButton();
     initSensitiveInputs();
