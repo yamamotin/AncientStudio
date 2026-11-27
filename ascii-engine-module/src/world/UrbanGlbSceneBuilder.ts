@@ -1066,18 +1066,18 @@ export class UrbanGlbSceneBuilder {
       // Bright, open sunlit urban day: clear sky fill, warm solar key, and opposite-azimuth bounce
       // so streets, sidewalks, shaded facades, trees, Player_Rig, and Carro_Grupo read effortlessly
       stage.ambientFill.color.set('#D6E4F0');
-      stage.ambientFill.intensity = 0.98;
+      stage.ambientFill.intensity = 0.70;
 
       stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#E4F0FA'), 0.72);
       stage.ambientHemi.groundColor.set('#6E7F8E');
-      stage.ambientHemi.intensity = 2.25;
+      stage.ambientHemi.intensity = 1.70;
 
       stage.keyDirLight.color.set('#FFF6E8');
-      stage.keyDirLight.intensity = 3.55;
+      stage.keyDirLight.intensity = 2.65;
       stage.keyDirLight.position.set(20, 34, 18);
 
       stage.rimDirLight.color.copy(cool).lerp(new THREE.Color('#C6DCF0'), 0.55);
-      stage.rimDirLight.intensity = 1.10;
+      stage.rimDirLight.intensity = 0.70;
 
       rig.storefrontEastLight.intensity = 1.4;
       rig.storefrontWestLight.intensity = 1.3;
@@ -1090,7 +1090,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 0.28;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 0.55;
+        stage.playerRimLight.intensity = 0.30;
       }
     } else if (mode === 'rain') {
       // Stormy Cyber-Noir: cool overcast storm-cloud wash + intense wet-asphalt reflection pools
@@ -1119,7 +1119,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 1.95;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 0.9;
+        stage.playerRimLight.intensity = 0.5;
       }
     } else {
       // 'night' — darker than day yet genuinely legible: moonlit skyline + broad warm street/facade pools
@@ -1148,7 +1148,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 1.72;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 0.8;
+        stage.playerRimLight.intensity = 0.45;
       }
     }
 
@@ -1170,16 +1170,16 @@ export class UrbanGlbSceneBuilder {
         mat.normalScale.set(baseX * factor, baseY * factor);
       };
 
-      const reflection = THREE.MathUtils.clamp(config.reflectionStrength ?? 0.35, 0, 1);
-      const roadRoughness = THREE.MathUtils.lerp(mode === 'day' ? 0.98 : 0.94, mode === 'rain' ? 0.50 : 0.65, reflection);
-      const roadMetalness = 0.04 * reflection;
+      const reflection = THREE.MathUtils.clamp(config.reflectionStrength ?? 0.25, 0, 1);
+      const roadRoughness = THREE.MathUtils.lerp(0.98, mode === 'rain' ? 0.78 : 0.86, reflection);
+      const roadMetalness = 0.02 * reflection;
       // Compensate `real_road` embedded texture's 0.0084 linear albedo while keeping full aggregate texture detail
       const roadColorScale: [number, number, number] =
         mode === 'day'
-          ? [11.5, 12.2, 13.0]
+          ? [7.0, 7.4, 7.8]
           : mode === 'rain'
-            ? [5.2, 5.9, 6.8]
-            : [5.8, 6.4, 7.2];
+            ? [5.0, 5.5, 6.0]
+            : [5.2, 5.7, 6.2];
       const roadEmissiveIntensity = mode === 'day' ? 0.03 : mode === 'rain' ? 0.09 : 0.08;
       const roadNormalFactor = mode === 'rain' ? 0.62 : mode === 'day' ? 1.08 : 0.92;
       for (const mat of stage.assets.materials.roads) {
@@ -1196,11 +1196,11 @@ export class UrbanGlbSceneBuilder {
         applyScaledNormal(mat, roadNormalFactor);
       }
 
-      const sidewalkRoughness = mode === 'rain' ? 0.16 : mode === 'day' ? 0.86 : 0.38;
-      const sidewalkMetalness = mode === 'rain' ? 0.16 : mode === 'day' ? 0.04 : 0.1;
+      const sidewalkRoughness = THREE.MathUtils.lerp(0.98, mode === 'rain' ? 0.72 : 0.84, reflection);
+      const sidewalkMetalness = 0.02 * reflection;
       const sidewalkColorScale: [number, number, number] =
         mode === 'day'
-          ? [1.42, 1.48, 1.54]
+          ? [0.90, 0.94, 0.98]
           : mode === 'rain'
             ? [0.98, 1.08, 1.18]
             : [1.04, 1.12, 1.2];
@@ -1224,7 +1224,7 @@ export class UrbanGlbSceneBuilder {
       // Keep architectural walls, roofs, lampposts & urban props cohesive and sculpted across all 3 presets
       const wallColorScale: [number, number, number] =
         mode === 'day'
-          ? [1.3, 1.35, 1.4]
+          ? [0.90, 0.94, 0.98]
           : mode === 'rain'
             ? [0.96, 1.06, 1.16]
             : [1.02, 1.1, 1.18];
@@ -1243,7 +1243,10 @@ export class UrbanGlbSceneBuilder {
       const charEmissive = mode === 'day' ? 0.03 : mode === 'rain' ? 0.08 : 0.07;
       const charNormalFactor = mode === 'day' ? 1.08 : 1.0;
       for (const mat of stage.assets.materials.character) {
-        mat.color.set(mode === 'day' ? '#788A98' : '#8796A2');
+        // Do not replace authored character albedo/maps when a future GLB supplies them.
+        const authoredColor = mat.userData.__playerBaseColor as THREE.Color | undefined;
+        if (authoredColor) mat.color.copy(authoredColor);
+        else mat.color.set('#55778A');
         mat.roughness = Math.max(0.7, mat.roughness);
         mat.metalness = Math.min(0.04, mat.metalness);
         applyScaledNormal(mat, charNormalFactor);

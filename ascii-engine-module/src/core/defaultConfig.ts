@@ -43,7 +43,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   edgeStrength: 0.96,
   blockBlendWeight: 0.06,
   windStrength: 1.0,
-  reflectionStrength: 0.35,
+  reflectionStrength: 0.25,
   bloomIntensity: 0.28,
   bloomThreshold: 0.58,
   dofFocusDistance: 0.34,

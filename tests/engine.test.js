@@ -402,6 +402,11 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   };
 
   const rawGlb = readFileSync(path.join(root, 'assets/models/cena_completa.glb'));
+  const gltfJson = JSON.parse(rawGlb.subarray(20, 20 + rawGlb.readUInt32LE(12)).toString('utf8'));
+  const girlNode = gltfJson.nodes.find(n => n.name === 'FuturisticGirl');
+  const girlPrimitive = gltfJson.meshes[girlNode.mesh].primitives[0];
+  assert.equal(girlPrimitive.material, undefined, 'Character primitive in the source GLB has no material or assigned texture');
+  assert.ok(girlPrimitive.attributes.TEXCOORD_0 !== undefined, 'Character UV coordinates exist');
   const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
 
   const loader = new pkg.GlbSceneLoader();
@@ -966,6 +971,10 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(decalMesh.visible, true, 'skipNormalPass decal restored immediately after Pass 2');
   assert.equal(cutout.visible, true);
   assert.equal(mappedMesh.material, mappedMat, 'Original PBR material restored immediately after Pass 2');
+  mappedMat.normalScale.set(0, 0);
+  passCache.beginPass(passScene);
+  assert.equal(mappedMesh.material.normalScale.length(), 0, 'Pass 2 respects explicitly flat road normals');
+  passCache.endPass();
 
   const dirKey = new pkg.THREE.DirectionalLight(0xffffff, 2.0);
   dirKey.name = 'KeyDirectionalLight';
@@ -1502,7 +1511,10 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
     'cellDensitySupport',
     'geomMinLuma',
     'effectiveBlockWeight',
-    'stepReflY'
+    'stepReflY',
+    'vec3(0.16)',
+    '* uReflectionStrength',
+    'exp(-max(finalRgb - vec3(0.70)'
   ]);
 
   // 2. Adapter preset palettes must clearly differentiate day, night, and rain
@@ -1561,6 +1573,16 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   const roadB = prepared.nodes.cidade.getObjectByName('Cidade_Object_67');
   assert.equal(roadA.material, roadB.material, 'Both adjoining asphalt halves share a material');
   assert.equal(roadA.material.roughnessMap, null, 'Baked roughness map no longer creates inconsistent specular patches');
+  assert.ok(roadA.material.map, 'Original road albedo and lane markings remain');
+  assert.ok(roadA.matrixWorld.determinant() * roadB.matrixWorld.determinant() < 0, 'Second road tile has mirrored transform');
+  for (const mesh of [roadA, roadB]) {
+    assert.equal(mesh.receiveShadow, false, 'Identical shadow policy across road tiles');
+    assert.equal(mesh.material.normalScale.length(), 0, 'Mirrored tangent map cannot split road lighting');
+  }
+  const girl = prepared.nodes.playerRig.getObjectByName('FuturisticGirl');
+  assert.ok(girl.isSkinnedMesh && girl.geometry.getAttribute('uv'));
+  assert.equal(girl.material.name, 'PlayerProtagonistMaterial');
+  assert.equal(girl.material.map, null, 'GLB has UVs but no assigned character base-color map');
   assert.ok(prepared.materials.character.every(m => m.color.r < 0.5 && m.roughness >= 0.7));
 
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(
@@ -1604,10 +1626,24 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   const rainFog = stage.scene.fog.density;
   const rainLamp = stage.urbanLightRig.streetLampWest.intensity;
 
+  for (const atmosphere of ['day', 'night', 'rain']) {
+    const values = [];
+    for (const reflectionStrength of [0, 0.25, 1]) {
+      pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, { ...baseCfg, atmosphere, reflectionStrength }, ecsWorld);
+      values.push({ road: roadA.material.roughness, sidewalk: prepared.materials.sidewalks[0].roughness });
+      assert.equal(roadA.material.normalScale.length(), 0);
+      assert.ok(roadA.material.metalness <= 0.02);
+      assert.ok(prepared.materials.sidewalks[0].metalness <= 0.02);
+    }
+    assert.ok(values[0].road > values[1].road && values[1].road > values[2].road);
+    assert.ok(values[0].sidewalk > values[1].sidewalk && values[1].sidewalk > values[2].sidewalk);
+    assert.ok(values[2].road >= 0.78 && values[2].sidewalk >= 0.72, '100% reflection remains bounded');
+  }
+
   // Verify clear preset hierarchy: day wide sunlight >> storm/night, night local lamps >> day, rain fog > night > day
-  assert.ok(dayKey > nightKey * 1.5 && dayKey < 4.0, `Day key (${dayKey}) remains stronger but avoids previous overexposure`);
+  assert.ok(dayKey > nightKey && dayKey < 3.0, `Day key (${dayKey}) remains stronger but avoids previous overexposure`);
   assert.ok(dayHemi > nightHemi && dayAmb > nightAmb, 'Day sky/ambient fill brighter than night');
-  assert.ok(dayRoadScale > 10.0 && nightRoadScale > 5.0 && dayRoadScale > nightRoadScale * 1.7, 'real_road 0.0084 linear albedo compensated cleanly in both day and night');
+  assert.ok(dayRoadScale > nightRoadScale && dayRoadScale < 8 && nightRoadScale >= 5, 'road texture albedo compensated without prior extreme gain');
   assert.ok(rainAmb > nightAmb && rainLamp > nightLamp && nightLamp > 15.0, 'Rain storm fill and wet lamp reflections stronger than dry night');
   assert.ok(dayFog < nightFog && nightFog < rainFog, `Fog density hierarchy preserved: day (${dayFog}) < night (${nightFog}) < rain (${rainFog})`);
 
