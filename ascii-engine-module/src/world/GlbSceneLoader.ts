@@ -309,6 +309,9 @@ export function extractAndPrepareGlbNodes(
       }
 
       if (/real_road|road|asphalt/i.test(name)) {
+        // Pass 2 identifies only actual road pixels, not nearby sidewalk or actors.
+        mat.userData.asciiRoadSurface = true;
+        mat.fog = false; // avoid lifting dark asphalt toward the brighter fog color
         // Mirrored transforms can change the tangent-space normal response across the join.
         // Preserve the embedded map for ownership/disposal, but use the flat plane normals.
         ensureSurfaceNormalMap(mat, proceduralNormals.asphalt, 0.0, 0.0);

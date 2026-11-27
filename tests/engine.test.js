@@ -953,12 +953,20 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   );
   decalMesh.userData.skipNormalPass = true;
   const cutout = new pkg.THREE.Mesh(new pkg.THREE.PlaneGeometry(), new pkg.THREE.MeshStandardMaterial({ alphaTest: 0.5 }));
-  passScene.add(mappedMesh, decalMesh, cutout);
+  const roadMat = new pkg.THREE.MeshStandardMaterial({ side: pkg.THREE.DoubleSide });
+  roadMat.userData.asciiRoadSurface = true;
+  const roadMesh = new pkg.THREE.Mesh(new pkg.THREE.PlaneGeometry(), roadMat);
+  passScene.add(mappedMesh, decalMesh, cutout, roadMesh);
 
   const passCache = new pkg.NormalPassMaterialCache();
   passCache.beginPass(passScene);
   assert.equal(decalMesh.visible, false, 'skipNormalPass decal hidden during Pass 2');
   assert.equal(cutout.visible, false, 'alpha-tested geometry must not become a solid normal card');
+  assert.equal(roadMesh.material.opacity, 0, 'Pass 2 tags road in alpha even without a normal map');
+  assert.equal(roadMesh.material.blending, pkg.THREE.NoBlending, 'road marker writes alpha without transparent blending');
+  assert.equal(roadMesh.material.transparent, false, 'road remains depth-tested in opaque draw order');
+  assert.equal(roadMesh.material.side, pkg.THREE.DoubleSide);
+  assert.equal(mappedMesh.material.opacity, 1, 'ordinary geometry is never tagged as road');
   assert.ok(
     mappedMesh.material.isMeshNormalMaterial && mappedMesh.material.normalMap === normalSet.facade,
     'Opaque mesh receives normal-mapped MeshNormalMaterial during Pass 2'
@@ -971,6 +979,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(decalMesh.visible, true, 'skipNormalPass decal restored immediately after Pass 2');
   assert.equal(cutout.visible, true);
   assert.equal(mappedMesh.material, mappedMat, 'Original PBR material restored immediately after Pass 2');
+  assert.equal(roadMesh.material, roadMat, 'road source material restored after Pass 2');
   mappedMat.normalScale.set(0, 0);
   passCache.beginPass(passScene);
   assert.equal(mappedMesh.material.normalScale.length(), 0, 'Pass 2 respects explicitly flat road normals');
@@ -1512,10 +1521,20 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
     'geomMinLuma',
     'effectiveBlockWeight',
     'stepReflY',
+    'normalCenterSample.a',
+    'mix(max(sceneCol, structuralMassFloor), sceneCol, roadMask)',
+    'finalRgb = mix(finalRgb, darkRoad, roadMask)',
     'vec3(0.16)',
     '* uReflectionStrength',
     'exp(-max(finalRgb - vec3(0.70)'
   ]);
+
+  // The road luminance shoulder is continuous and retains a positive difference
+  // between dark pavement and brighter lane marks, even at high illumination.
+  const roadGrade = l => l * 0.32 / (0.32 + l);
+  for (const l of [0, 0.03, 0.1, 0.3, 1, 10]) assert.ok(roadGrade(l) < 0.32);
+  assert.ok(roadGrade(0.4) > roadGrade(0.1));
+  assert.ok(roadGrade(0.8) - roadGrade(0.4) < 0.1, 'bright pavement stays subdued');
 
   // 2. Adapter preset palettes must clearly differentiate day, night, and rain
   assert.match(adapter, /day:\s*\{[\s\S]*?background:\s*'#213242'/);
@@ -1574,6 +1593,19 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   assert.equal(roadA.material, roadB.material, 'Both adjoining asphalt halves share a material');
   assert.equal(roadA.material.roughnessMap, null, 'Baked roughness map no longer creates inconsistent specular patches');
   assert.ok(roadA.material.map, 'Original road albedo and lane markings remain');
+  assert.equal(roadA.material.userData.asciiRoadSurface, true);
+  assert.equal(roadA.material.fog, false, 'dark road is not washed toward fog color');
+  assert.ok(prepared.materials.sidewalks.every(m => !m.userData.asciiRoadSurface));
+  assert.ok(prepared.materials.character.every(m => !m.userData.asciiRoadSurface));
+  assert.ok(prepared.materials.carBody.every(m => !m.userData.asciiRoadSurface));
+  const roadPass = new pkg.NormalPassMaterialCache();
+  roadPass.beginPass(stage.scene);
+  assert.equal(roadA.material.opacity, 0);
+  assert.equal(roadB.material.opacity, 0);
+  const sidewalkMesh = prepared.nodes.cidade.getObjectByName('Cidade_Object_61');
+  assert.equal(sidewalkMesh.material.opacity, 1, 'sidewalk does not receive road grade');
+  roadPass.endPass();
+  roadPass.dispose();
   assert.ok(roadA.matrixWorld.determinant() * roadB.matrixWorld.determinant() < 0, 'Second road tile has mirrored transform');
   for (const mesh of [roadA, roadB]) {
     assert.equal(mesh.receiveShadow, false, 'Identical shadow policy across road tiles');
