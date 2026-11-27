@@ -41,6 +41,8 @@ from api.connectors.validators import clean_digits, mask_cnpj, mask_cpf
 
 DEFAULT_CHALLENGE_TTL_SECONDS = 300
 MAX_CAPTCHA_IMAGE_BYTES = 1_048_576
+MAX_POPUP_DATA_URL_CHARS = 1_450_000
+DEFAULT_RECAPTCHA_FALLBACK_BASE = "https://www.google.com/recaptcha/api/fallback"
 
 _SITEKEY_JS_RE = re.compile(
     r"(?:data-sitekey|['\"]?sitekey['\"]?)\s*[=:]\s*['\"]([0-9A-Za-z_-]{12,100})['\"]",
@@ -85,6 +87,12 @@ _CAPTCHA_IMG_HINT_RE = re.compile(
     r"simplecaptcha|stickyimg|desafio)",
     re.IGNORECASE,
 )
+_SCRIPT_CAPTCHA_IMG_RE = re.compile(
+    r"['\"]([^'\"\s<>]{3,240}(?:captcha\.svl|gerarCaptcha|gerarImagem|"
+    r"imagemCaptcha|imagemSeguranca|jcaptcha|kaptcha|stickyImg|simpleCaptcha)"
+    r"[^'\"\s<>]{0,160})['\"]",
+    re.IGNORECASE,
+)
 _UNSAFE_SVG_RE = re.compile(
     rb"(<\s*script\b|javascript\s*:|on[a-z]+\s*=|<\s*foreignobject\b)",
     re.IGNORECASE,
@@ -97,6 +105,23 @@ def _utc_now() -> datetime:
 
 def _format_utc(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_utc(iso_str: str | None) -> datetime | None:
+    if not iso_str:
+        return None
+    cleaned = str(iso_str).strip()
+    if not cleaned:
+        return None
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _sanitize_cookie_str(value: str | None) -> str | None:
@@ -121,18 +146,23 @@ def _is_safe_http_url(url: str | None) -> bool:
 def _is_safe_image_payload(raw_bytes: bytes, mime_type: str) -> bool:
     if not raw_bytes or len(raw_bytes) > MAX_CAPTCHA_IMAGE_BYTES:
         return False
-    return mime_type in {
+    if mime_type not in {
         "image/png",
         "image/jpeg",
         "image/gif",
         "image/webp",
         "image/bmp",
-    }
+    }:
+        return False
+    estimated_data_url_len = len(f"data:{mime_type};base64,") + ((len(raw_bytes) + 2) // 3) * 4
+    return estimated_data_url_len <= MAX_POPUP_DATA_URL_CHARS
 
 
 def _sniff_image_mime(raw_bytes: bytes, content_type: str | None = None) -> str:
     if content_type:
         media = content_type.split(";", 1)[0].strip().lower()
+        if media == "image/jpg":
+            return "image/jpeg"
         if media.startswith("image/"):
             return media
     if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -143,6 +173,8 @@ def _sniff_image_mime(raw_bytes: bytes, content_type: str | None = None) -> str:
         return "image/gif"
     if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WEBP":
         return "image/webp"
+    if raw_bytes.startswith(b"BM"):
+        return "image/bmp"
     if b"<svg" in raw_bytes[:256].lower():
         return "image/svg+xml"
     return "image/png"
@@ -164,6 +196,7 @@ class DetectedCaptcha:
     image_base64: str | None = None
     image_mime_type: str | None = None
     image_data_uri: str | None = None
+    fallback_url: str | None = None
     prompt_label: str | None = None
     rejected_previous_attempt: bool = False
 
@@ -181,6 +214,7 @@ class _CaptchaDomParser(HTMLParser):
         self.form_fields: dict[str, str] = {}
         self.response_field: str | None = None
         self.image_src: str | None = None
+        self.fallback_src: str | None = None
         self.prompt_label: str | None = None
 
         self._in_form = False
@@ -252,6 +286,13 @@ class _CaptchaDomParser(HTMLParser):
         elif tag_l in {"input", "textarea"}:
             name = attr.get("name", "").strip()
             input_type = attr.get("type", "text").strip().lower()
+            if input_type == "image":
+                src = attr.get("src", "").strip()
+                img_hint = f"{name} {attr.get('id', '')} {attr.get('alt', '')} {src[:160]}"
+                if src and _CAPTCHA_IMG_HINT_RE.search(img_hint):
+                    self.image_src = src
+                    self._mark_provider("image")
+                return
             if name in {
                 "g-recaptcha-response",
                 "h-captcha-response",
@@ -296,9 +337,12 @@ class _CaptchaDomParser(HTMLParser):
                 self._current_form_fields.setdefault(name, attr.get("value", ""))
 
         elif tag_l == "iframe":
-            src = attr.get("src", "").lower()
+            raw_src = attr.get("src", "").strip()
+            src = raw_src.lower()
             if "recaptcha" in src:
                 self._mark_provider("recaptcha")
+                if "api/fallback" in src and not self.fallback_src:
+                    self.fallback_src = raw_src
             elif "hcaptcha" in src:
                 self._mark_provider("hcaptcha")
             elif "turnstile" in src:
@@ -362,6 +406,13 @@ class _CaptchaDomParser(HTMLParser):
                     if candidate_cb.startswith("executaRecaptcha") and self.provider is None:
                         self._mark_provider("recaptcha")
 
+        if not self.image_src:
+            js_img_match = _SCRIPT_CAPTCHA_IMG_RE.search(script_blob)
+            if js_img_match:
+                self.image_src = js_img_match.group(1).strip()
+                if self.provider is None:
+                    self._mark_provider("image")
+
         prompt_match = _IMAGE_PROMPT_RE.search(visible_text)
         if prompt_match:
             if not self.prompt_label:
@@ -395,11 +446,29 @@ class _CaptchaDomParser(HTMLParser):
         if self.image_src:
             data_match = _DATA_URI_RE.match(self.image_src)
             if data_match:
-                image_mime = data_match.group("mime").lower()
-                image_b64 = re.sub(r"\s+", "", data_match.group("b64"))
-                image_data_uri = f"data:{image_mime};base64,{image_b64}"
+                raw_mime = data_match.group("mime").lower()
+                if raw_mime == "image/jpg":
+                    raw_mime = "image/jpeg"
+                cleaned_b64 = re.sub(r"\s+", "", data_match.group("b64"))
+                try:
+                    decoded = base64.b64decode(cleaned_b64, validate=False)
+                except Exception:
+                    decoded = b""
+                sniffed = _sniff_image_mime(decoded, raw_mime)
+                if decoded and _is_safe_image_payload(decoded, sniffed):
+                    image_mime = sniffed
+                    image_b64 = cleaned_b64
+                    image_data_uri = f"data:{image_mime};base64,{image_b64}"
             else:
-                image_url = urljoin(base_url, self.image_src)
+                candidate_url = urljoin(base_url, self.image_src)
+                if _is_safe_http_url(candidate_url):
+                    image_url = candidate_url
+
+        fallback_url: str | None = None
+        if self.fallback_src:
+            candidate_fb = urljoin(base_url, self.fallback_src)
+            if _is_safe_http_url(candidate_fb):
+                fallback_url = candidate_fb
 
         resolved_site_key = self.site_key or (
             default_site_key if provider in {"recaptcha", "hcaptcha", "turnstile"} else None
@@ -410,10 +479,10 @@ class _CaptchaDomParser(HTMLParser):
         action_url = urljoin(base_url, self.form_action) if self.form_action else base_url
 
         default_prompts = {
-            "recaptcha": "Resolva o desafio Google reCAPTCHA exigido pelo portal oficial.",
-            "hcaptcha": "Resolva o desafio hCaptcha exigido pelo portal oficial.",
-            "turnstile": "Confirme a verificação Cloudflare Turnstile exigida pelo portal.",
-            "image": "Digite os caracteres exibidos na imagem de segurança do portal.",
+            "recaptcha": "Informe a resposta do desafio de segurança exibido neste popup.",
+            "hcaptcha": "Informe a resposta do desafio hCaptcha exibido neste popup.",
+            "turnstile": "Confirme a verificação de segurança exibida neste popup.",
+            "image": "Digite os caracteres exibidos na imagem de segurança.",
         }
 
         return DetectedCaptcha(
@@ -429,6 +498,7 @@ class _CaptchaDomParser(HTMLParser):
             image_base64=image_b64,
             image_mime_type=image_mime,
             image_data_uri=image_data_uri,
+            fallback_url=fallback_url,
             prompt_label=self.prompt_label or default_prompts.get(provider),
             rejected_previous_attempt=rejected,
         )
@@ -456,6 +526,237 @@ def detect_captcha_in_html(
         default_site_key=default_site_key,
         default_callback=default_callback,
     )
+
+
+class _RecaptchaFallbackParser(HTMLParser):
+    """Parse Google reCAPTCHA HTML fallback (``/recaptcha/api/fallback?k=...``) challenges."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.fallback_c: str | None = None
+        self.payload_img_src: str | None = None
+        self.mode: str = "text"
+        self.checkbox_values: list[str] = []
+        self.verification_token: str | None = None
+        self.prompt_label: str | None = None
+        self._in_token_textarea = False
+        self._token_chunks: list[str] = []
+        self._desc_depth = 0
+        self._desc_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr = {k.lower(): (v or "") for k, v in attrs}
+        tag_l = tag.lower()
+        classes = attr.get("class", "").lower()
+
+        if tag_l == "input":
+            name = attr.get("name", "").strip()
+            input_type = attr.get("type", "text").strip().lower()
+            if name == "c" and attr.get("value"):
+                self.fallback_c = attr["value"].strip()
+            elif name == "response" and input_type == "checkbox":
+                self.mode = "tiles"
+                if attr.get("value") is not None:
+                    self.checkbox_values.append(attr["value"].strip())
+        elif tag_l == "img":
+            src = attr.get("src", "").strip()
+            if src and ("fbc-imageselect-payload" in classes or "api2/payload" in src):
+                self.payload_img_src = src
+        elif tag_l == "textarea":
+            if "fbc-verification-token" in classes or "readonly" in attr:
+                self._in_token_textarea = True
+                self._token_chunks = []
+        elif tag_l in {"div", "label", "span"}:
+            if self._desc_depth > 0:
+                self._desc_depth += 1
+            elif any(
+                hint in classes
+                for hint in (
+                    "rc-imageselect-desc-no-canonical",
+                    "rc-imageselect-desc",
+                    "fbc-imageselect-message-text",
+                )
+            ):
+                self._desc_depth = 1
+                self._desc_chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_token_textarea:
+            self._token_chunks.append(data)
+        if self._desc_depth > 0 and data.strip():
+            self._desc_chunks.append(data.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_l = tag.lower()
+        if tag_l == "textarea" and self._in_token_textarea:
+            self._in_token_textarea = False
+            candidate = "".join(self._token_chunks).strip()
+            if candidate and not self.verification_token:
+                self.verification_token = candidate
+        elif tag_l in {"div", "label", "span"} and self._desc_depth > 0:
+            self._desc_depth -= 1
+            if self._desc_depth == 0 and self._desc_chunks and not self.prompt_label:
+                joined = re.sub(r"\s+", " ", " ".join(self._desc_chunks)).strip()
+                if joined:
+                    self.prompt_label = joined
+
+
+def fetch_recaptcha_fallback_challenge(
+    site_key: str,
+    *,
+    referer_url: str,
+    fallback_url: str | None = None,
+    transport: HttpTransport,
+    timeout_seconds: float = 2.5,
+) -> dict[str, Any] | None:
+    """Fetch a visual challenge image + ``c`` token from Google's HTML fallback when available."""
+    key_clean = str(site_key or "").strip()
+    if not key_clean:
+        return None
+    target_url = fallback_url or f"{DEFAULT_RECAPTCHA_FALLBACK_BASE}?k={key_clean}"
+    if not _is_safe_http_url(target_url):
+        return None
+    try:
+        fb_resp = transport.request(
+            target_url,
+            method="GET",
+            headers={"Referer": referer_url},
+            timeout_seconds=timeout_seconds,
+        )
+    except UpstreamConnectorError:
+        return None
+    if fb_resp.status_code != 200 or not fb_resp.body:
+        return None
+
+    parser = _RecaptchaFallbackParser()
+    parser.feed(fb_resp.text())
+    if not parser.fallback_c or not parser.payload_img_src:
+        return None
+
+    img_url = urljoin(target_url, parser.payload_img_src)
+    if not _is_safe_http_url(img_url):
+        return None
+
+    try:
+        img_resp = transport.request(
+            img_url,
+            method="GET",
+            headers={"Referer": target_url},
+            timeout_seconds=timeout_seconds,
+        )
+    except UpstreamConnectorError:
+        return None
+    if img_resp.status_code != 200 or not img_resp.body:
+        return None
+
+    sniffed_mime = _sniff_image_mime(img_resp.body, img_resp.headers.get("content-type"))
+    if not _is_safe_image_payload(img_resp.body, sniffed_mime):
+        return None
+
+    img_b64 = base64.b64encode(img_resp.body).decode("ascii")
+    img_data_uri = f"data:{sniffed_mime};base64,{img_b64}"
+    prompt = parser.prompt_label or "Resolva o desafio exibido na imagem acima."
+    if parser.mode == "tiles" and "quadro" not in prompt.lower() and "índice" not in prompt.lower():
+        prompt = f"{prompt} (informe os números dos quadros, ex.: 1,4,7)"
+
+    return {
+        "recaptcha_fallback_url": target_url,
+        "recaptcha_fallback_c": parser.fallback_c,
+        "recaptcha_fallback_mode": parser.mode,
+        "upstream_image_url": img_url,
+        "image_mime_type": sniffed_mime,
+        "image_base64": img_b64,
+        "image_data_uri": img_data_uri,
+        "prompt_label": prompt,
+    }
+
+
+def _build_fallback_response_pairs(solution: str, mode: str) -> list[tuple[str, str]]:
+    cleaned = solution.strip()
+    if mode != "tiles":
+        return [("response", cleaned)]
+    tokens = [tok for tok in re.split(r"[\s,;/-]+", cleaned) if tok]
+    if len(tokens) == 1 and tokens[0].isdigit() and len(tokens[0]) > 1:
+        tokens = list(tokens[0])
+    indices: list[str] = []
+    if all(tok.isdigit() for tok in tokens) and tokens:
+        nums = [int(tok) for tok in tokens]
+        # Convert 1-based human grid numbers (1..9 / 1..16) to 0-based indices when >= 1
+        zero_based = [n - 1 for n in nums] if min(nums) >= 1 and "0" not in tokens else nums
+        indices = [str(max(0, idx)) for idx in zero_based]
+    if not indices:
+        return [("response", cleaned)]
+    return [("response", idx) for idx in indices]
+
+
+def exchange_recaptcha_fallback_solution(
+    *,
+    fallback_url: str,
+    fallback_c: str,
+    fallback_mode: str = "text",
+    solution: str,
+    transport: HttpTransport,
+    timeout_seconds: float = 3.5,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Exchange a popup answer against ``/recaptcha/api/fallback`` for ``g-recaptcha-response``."""
+    if not _is_safe_http_url(fallback_url) or not fallback_c or not solution.strip():
+        return None, None
+
+    pairs: list[tuple[str, str]] = [
+        ("c", fallback_c),
+        *_build_fallback_response_pairs(solution, fallback_mode),
+    ]
+    body_bytes = urlencode(pairs).encode("utf-8")
+    fb_resp = transport.request(
+        fallback_url,
+        method="POST",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": fallback_url,
+        },
+        data=body_bytes,
+        timeout_seconds=timeout_seconds,
+    )
+    parser = _RecaptchaFallbackParser()
+    parser.feed(fb_resp.text())
+    if parser.verification_token:
+        return parser.verification_token, None
+
+    if parser.fallback_c and parser.payload_img_src:
+        img_url = urljoin(fallback_url, parser.payload_img_src)
+        refreshed: dict[str, Any] = {
+            "recaptcha_fallback_url": fallback_url,
+            "recaptcha_fallback_c": parser.fallback_c,
+            "recaptcha_fallback_mode": parser.mode,
+            "upstream_image_url": img_url,
+            "prompt_label": parser.prompt_label
+            or "Resposta incorreta. Resolva a nova imagem exibida neste popup.",
+        }
+        if _is_safe_http_url(img_url):
+            try:
+                img_resp = transport.request(
+                    img_url,
+                    method="GET",
+                    headers={"Referer": fallback_url},
+                    timeout_seconds=min(timeout_seconds, 2.5),
+                )
+                if img_resp.status_code == 200 and img_resp.body:
+                    sniffed = _sniff_image_mime(
+                        img_resp.body, img_resp.headers.get("content-type")
+                    )
+                    if _is_safe_image_payload(img_resp.body, sniffed):
+                        b64 = base64.b64encode(img_resp.body).decode("ascii")
+                        refreshed["image_mime_type"] = sniffed
+                        refreshed["image_base64"] = b64
+                        refreshed["image_data_uri"] = f"data:{sniffed};base64,{b64}"
+            except UpstreamConnectorError:
+                pass
+        return None, refreshed
+
+    return None, {
+        "recaptcha_fallback_url": fallback_url,
+        "prompt_label": "Resposta não validada. Tente novamente diretamente neste popup.",
+    }
 
 
 @dataclass
@@ -503,11 +804,28 @@ class CaptchaChallenge:
                 sanitized["cnpj_mascarado"] = mask_cnpj(digits)
         return sanitized
 
+    def remaining_ttl_seconds(self) -> int:
+        """Compute remaining lifetime in whole seconds from ``expires_at``."""
+        expires_dt = _parse_utc(self.expires_at)
+        if expires_dt is None:
+            return max(0, int(self.ttl_seconds))
+        delta = (expires_dt - _utc_now()).total_seconds()
+        return max(0, min(int(self.ttl_seconds), int(delta + 0.999)))
+
     def to_public_payload(self) -> dict[str, Any]:
         """Serialize challenge metadata safe for compact frontend popup rendering & resumption."""
         expected_param = "captcha_token"
         accepted_params = ["captcha_token", "captcha_solution"]
         session_init = bool(self.cookie_jar or self.session_cookie)
+        expires_in = self.remaining_ttl_seconds()
+        data_uri = self.challenge_data.get("image_data_uri") or self.challenge_data.get(
+            "image_data_url"
+        )
+        prompt_text = self.challenge_data.get("prompt_label") or (
+            "Digite os caracteres exibidos na imagem de segurança."
+            if data_uri or self.provider == "image"
+            else "Informe a resposta do desafio de segurança exibido neste popup."
+        )
         image_endpoint = (
             f"/api/v1/captcha/challenges/{self.challenge_id}/image"
             if self.challenge_data.get("image_base64")
@@ -517,19 +835,36 @@ class CaptchaChallenge:
             "mode": self.provider,
             "challenge_id": self.challenge_id,
             "provider": self.provider,
-            "prompt_label": self.challenge_data.get("prompt_label"),
+            "prompt_label": prompt_text,
+            "challenge_text": prompt_text,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
             "challenge_param": "challenge_id",
             "session_param": "session_cookie",
             "response_field": self.response_field,
             "session_initialized": session_init,
-            "image_data_uri": self.challenge_data.get("image_data_uri"),
+            "captcha_image": data_uri,
+            "image_data_url": data_uri,
+            "image_data_uri": data_uri,
+            "image_base64": self.challenge_data.get("image_base64"),
             "image_mime_type": self.challenge_data.get("image_mime_type"),
+            "image_url": self.challenge_data.get("image_url"),
             "image_endpoint": image_endpoint,
             "site_key": self.site_key,
+            "form_url": self.challenge_url,
             "challenge_url": self.challenge_url,
             "expires_at": self.expires_at,
+            "expires_in_seconds": expires_in,
+        }
+        public_challenge_data = {
+            k: v
+            for k, v in self.challenge_data.items()
+            if k
+            not in {
+                "recaptcha_fallback_c",
+                "recaptcha_fallback_url",
+                "upstream_image_url",
+            }
         }
         payload: dict[str, Any] = {
             "challenge_id": self.challenge_id,
@@ -548,27 +883,26 @@ class CaptchaChallenge:
             "response_field": self.response_field,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
+            "captcha_image": data_uri,
+            "image_data_url": data_uri,
+            "image_data_uri": data_uri,
+            "image_base64": self.challenge_data.get("image_base64"),
+            "image_mime_type": self.challenge_data.get("image_mime_type"),
+            "image_url": self.challenge_data.get("image_url"),
+            "image_endpoint": image_endpoint,
+            "challenge_text": prompt_text,
             "popup": popup_descriptor,
-            "challenge_data": dict(self.challenge_data),
+            "challenge_data": public_challenge_data,
             "consulta_payload": self.public_consulta_payload(),
             "resume_endpoint": self.resume_endpoint,
             "resume_method": self.resume_method,
             "resolve_endpoint": self.resolve_endpoint,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
+            "expires_in_seconds": expires_in,
             "ttl_seconds": self.ttl_seconds,
             "instructions": list(self.instructions),
         }
-        for img_key in ("image_url", "image_base64", "image_mime_type", "image_data_uri"):
-            if self.challenge_data.get(img_key) is not None:
-                payload[img_key] = self.challenge_data[img_key]
-        if self.challenge_data.get("image_data_uri") is not None:
-            payload["image_data_url"] = self.challenge_data["image_data_uri"]
-            payload["captcha_image"] = self.challenge_data["image_data_uri"]
-        if self.challenge_data.get("prompt_label") is not None:
-            payload["challenge_text"] = self.challenge_data["prompt_label"]
-        if image_endpoint is not None:
-            payload["image_endpoint"] = image_endpoint
         return payload
 
     def public_metadata(self) -> dict[str, Any]:
@@ -586,6 +920,16 @@ class CaptchaChallenge:
             "session_initialized": bool(self.cookie_jar or self.session_cookie),
             **(extra or {}),
         }
+        public_challenge_data = {
+            k: v
+            for k, v in self.challenge_data.items()
+            if k
+            not in {
+                "recaptcha_fallback_c",
+                "recaptcha_fallback_url",
+                "upstream_image_url",
+            }
+        }
         return ConnectorCaptchaRequiredError(
             detail,
             challenge_id=self.challenge_id,
@@ -599,7 +943,7 @@ class CaptchaChallenge:
             callback=self.callback,
             recaptcha_callback=self.callback,
             response_field=self.response_field,
-            challenge_data=self.challenge_data,
+            challenge_data=public_challenge_data,
             consulta_payload=self.public_consulta_payload(),
             connector=self.connector,
             operation=self.operation,
@@ -608,6 +952,7 @@ class CaptchaChallenge:
             resolve_endpoint=self.resolve_endpoint,
             expires_at=self.expires_at,
             ttl_seconds=self.ttl_seconds,
+            expires_in_seconds=self.remaining_ttl_seconds(),
             instructions=self.instructions,
             extra=merged_extra,
         )
@@ -690,35 +1035,17 @@ class CaptchaChallengeStore:
         resume_endpoint: str,
         challenge_id: str,
     ) -> list[str]:
+        _ = challenge_url, site_key, callback
         if provider == "image":
             return [
-                (
-                    "1. Visualize a imagem do desafio "
-                    f"(challenge_data.image_data_uri ou {challenge_url})."
-                ),
-                (
-                    "2. Digite os caracteres exibidos na imagem no campo "
-                    "'captcha_solution' (ou 'captcha_token')."
-                ),
-                (
-                    f"3. Envie 'challenge_id' ('{challenge_id}') + 'captcha_solution' "
-                    f"para '{resume_endpoint}' ou para 'POST /api/v1/captcha/resolve' "
-                    "para concluir a consulta real."
-                ),
+                "1. Visualize a imagem do desafio exibida diretamente neste popup (`image_data_url` / `captcha_image`).",
+                "2. Digite os caracteres exibidos na imagem no campo `captcha_token` (ou `captcha_solution`) sem sair do portfólio.",
+                f"3. Confirme o envio com `challenge_id`: '{challenge_id}' para '{resume_endpoint}' (ou 'POST /api/v1/captcha/resolve') e conclua a consulta real.",
             ]
-        key_hint = site_key or "<site_key do portal>"
-        cb_hint = f", callback: {callback}" if callback else ""
         return [
-            (
-                f"1. Exiba/resolva o desafio {provider} referente a "
-                f"{challenge_url} (site_key: {key_hint}{cb_hint})."
-            ),
-            "2. Capture o token de resolução em 'captcha_token' (ou 'captcha_solution').",
-            (
-                f"3. Reenvie para '{resume_endpoint}' (ou 'POST /api/v1/captcha/resolve') "
-                f"informando 'challenge_id': '{challenge_id}' e 'captcha_token' "
-                "(preservando 'session_cookie' se enviado)."
-            ),
+            f"1. Visualize o desafio de segurança ({provider}) apresentado diretamente neste popup.",
+            "2. Informe a resposta/token no campo `captcha_token` (ou `captcha_solution`) sem abrir o portal externo.",
+            f"3. Reenvie para '{resume_endpoint}' (ou 'POST /api/v1/captcha/resolve') com `challenge_id`: '{challenge_id}' (preservando `session_cookie`) para concluir a consulta real.",
         ]
 
     def issue_challenge(
@@ -744,6 +1071,8 @@ class CaptchaChallengeStore:
         image_base64: str | None = None,
         image_mime_type: str | None = None,
         image_data_uri: str | None = None,
+        fallback_url: str | None = None,
+        extra_challenge_data: dict[str, Any] | None = None,
         prompt_label: str | None = None,
         rejected_previous_attempt: bool = False,
         instructions: list[str] | None = None,
@@ -761,11 +1090,10 @@ class CaptchaChallengeStore:
         if image_url and not _is_safe_http_url(image_url):
             image_url = None
 
-        # When an image CAPTCHA URL is session-bound on the origin portal, fetch its bytes
-        # using the exact same session cookie so the frontend popup can render a data: URI.
+        # When any CAPTCHA image URL is present on the origin portal, fetch its bytes
+        # using the exact same session cookie so the frontend popup renders a data: URI.
         if (
-            provider == "image"
-            and image_url
+            image_url
             and not image_base64
             and transport is not None
             and _is_safe_http_url(image_url)
@@ -793,6 +1121,29 @@ class CaptchaChallengeStore:
             except UpstreamConnectorError:
                 pass
 
+        fallback_meta: dict[str, Any] = dict(extra_challenge_data or {})
+        if (
+            not image_base64
+            and provider == "recaptcha"
+            and site_key
+            and transport is not None
+            and "recaptcha_fallback_c" not in fallback_meta
+        ):
+            mirrored = fetch_recaptcha_fallback_challenge(
+                site_key,
+                referer_url=challenge_url,
+                fallback_url=fallback_url,
+                transport=transport,
+                timeout_seconds=min(timeout_seconds, 2.5),
+            )
+            if mirrored:
+                image_mime_type = mirrored.get("image_mime_type")
+                image_base64 = mirrored.get("image_base64")
+                image_data_uri = mirrored.get("image_data_uri")
+                if mirrored.get("prompt_label"):
+                    prompt_label = str(mirrored["prompt_label"])
+                fallback_meta.update(mirrored)
+
         if image_base64 and not image_data_uri:
             mime = image_mime_type or "image/png"
             image_mime_type = mime
@@ -819,7 +1170,13 @@ class CaptchaChallengeStore:
             k: v for k, v in (form_fields or {}).items() if k != resolved_field
         }
 
+        resolved_prompt = prompt_label or (
+            "Digite os caracteres exibidos na imagem de segurança."
+            if image_data_uri or provider == "image"
+            else f"Informe a resposta do desafio de segurança ({provider}) exibido neste popup."
+        )
         challenge_data: dict[str, Any] = {
+            **fallback_meta,
             "provider": provider,
             "site_key": site_key,
             "response_field": resolved_field,
@@ -832,12 +1189,9 @@ class CaptchaChallengeStore:
             "image_base64": image_base64,
             "image_mime_type": image_mime_type,
             "image_data_uri": image_data_uri,
-            "prompt_label": prompt_label
-            or (
-                "Digite os caracteres da imagem de segurança."
-                if provider == "image"
-                else f"Resolva a verificação {provider} exigida pelo portal oficial."
-            ),
+            "image_data_url": image_data_uri,
+            "captcha_image": image_data_uri,
+            "prompt_label": resolved_prompt,
             "rejected_previous_attempt": rejected_previous_attempt,
             "session_initialized": bool(jar),
         }
@@ -1025,21 +1379,91 @@ class CaptchaChallengeStore:
             image_base64=detected.image_base64,
             image_mime_type=detected.image_mime_type,
             image_data_uri=detected.image_data_uri,
+            fallback_url=detected.fallback_url,
             prompt_label=detected.prompt_label,
             rejected_previous_attempt=was_rejected,
             transport=transport,
             timeout_seconds=timeout_seconds,
         )
         detail_msg = (
-            f"O portal de origem ({connector}) recusou a resposta anterior do CAPTCHA "
-            f"({detected.provider}) e emitiu um novo desafio."
+            f"A resposta anterior do desafio ({detected.provider}) foi recusada. "
+            "Resolva o novo desafio exibido diretamente neste popup."
             if was_rejected
             else (
-                f"O portal oficial ({connector}) exigiu verificação humana CAPTCHA "
-                f"({detected.provider}) para concluir a consulta real."
+                f"Esta consulta requer verificação humana ({detected.provider}). "
+                "Resolva o desafio exibido diretamente neste popup para concluir a consulta real."
             )
         )
         raise challenge.to_exception(detail_msg)
+
+    def resolve_recaptcha_fallback_if_needed(
+        self,
+        challenge: CaptchaChallenge,
+        solution: str,
+        *,
+        transport: HttpTransport,
+        timeout_seconds: float = 3.5,
+        raw_session_cookie: str | None = None,
+        instructions: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> str:
+        """Exchange a popup answer against Google's HTML fallback if ``challenge`` uses one."""
+        fallback_c = challenge.challenge_data.get("recaptcha_fallback_c")
+        fallback_url = challenge.challenge_data.get("recaptcha_fallback_url")
+        cleaned = solution.strip()
+        # Pre-minted g-recaptcha-response tokens are long (~200+ chars); short answers are
+        # direct popup responses to the mirrored fallback visual challenge.
+        if not fallback_c or not fallback_url or len(cleaned) >= 120:
+            return cleaned
+
+        minted, refreshed = exchange_recaptcha_fallback_solution(
+            fallback_url=str(fallback_url),
+            fallback_c=str(fallback_c),
+            fallback_mode=str(challenge.challenge_data.get("recaptcha_fallback_mode") or "text"),
+            solution=cleaned,
+            transport=transport,
+            timeout_seconds=timeout_seconds,
+        )
+        if minted:
+            return minted
+
+        self.consume_challenge(challenge.challenge_id)
+        refreshed_meta = refreshed or {}
+        next_challenge = self.issue_challenge(
+            connector=challenge.connector,
+            operation=challenge.operation,
+            provider=challenge.provider,
+            site_key=challenge.site_key,
+            challenge_url=challenge.challenge_url,
+            portal_url=challenge.portal_url,
+            action_url=challenge.action_url,
+            http_method=challenge.http_method,
+            callback=challenge.callback,
+            response_field=challenge.response_field,
+            cookie_jar=challenge.cookie_jar,
+            raw_session_cookie=raw_session_cookie or challenge.session_cookie,
+            form_fields=challenge.form_fields,
+            consulta_payload=challenge.consulta_payload,
+            resume_endpoint=challenge.resume_endpoint,
+            resume_method=challenge.resume_method,
+            image_base64=refreshed_meta.get("image_base64"),
+            image_mime_type=refreshed_meta.get("image_mime_type"),
+            image_data_uri=refreshed_meta.get("image_data_uri"),
+            fallback_url=str(fallback_url),
+            extra_challenge_data=refreshed_meta,
+            prompt_label=refreshed_meta.get("prompt_label")
+            or "Resposta não validada. Resolva a nova imagem exibida neste popup.",
+            rejected_previous_attempt=True,
+            instructions=instructions,
+            transport=transport,
+            timeout_seconds=timeout_seconds,
+            ttl_seconds=challenge.ttl_seconds,
+        )
+        raise next_challenge.to_exception(
+            "A resposta informada no popup não validou o desafio de segurança. "
+            "Resolva a nova imagem exibida diretamente neste popup.",
+            extra=extra,
+        )
 
     def inspect_upstream_error_for_captcha(
         self,
@@ -1093,14 +1517,22 @@ class CaptchaChallengeStore:
         jar = dict(challenge.cookie_jar)
         jar.update(resolved.cookie_jar)
 
+        effective_solution = self.resolve_recaptcha_fallback_if_needed(
+            challenge,
+            resolved.solution,
+            transport=transport,
+            timeout_seconds=timeout_seconds,
+            raw_session_cookie=resolved.session_cookie,
+        )
+
         payload_fields: dict[str, Any] = dict(extra_params or {})
         payload_fields.update(challenge.form_fields)
-        payload_fields[challenge.response_field] = resolved.solution
+        payload_fields[challenge.response_field] = effective_solution
 
         submit_headers: dict[str, str] = {
             "Referer": challenge.challenge_url,
-            "X-Captcha-Token": resolved.solution,
-            "X-Captcha-Response": resolved.solution,
+            "X-Captcha-Token": effective_solution,
+            "X-Captcha-Response": effective_solution,
         }
         cookie_hdr = merge_cookie_header(jar, resolved.session_cookie)
         if cookie_hdr:

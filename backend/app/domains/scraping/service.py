@@ -351,7 +351,8 @@ class ScrapingService:
                 and hasattr(self._fetcher, "fetch_binary")
             ):
                 try:
-                    raw_img, fetched_mime = await self._fetcher.fetch_binary(  # type: ignore[attr-defined]
+                    fetch_bin = self._fetcher.fetch_binary  # type: ignore[attr-defined]
+                    raw_img, fetched_mime = await fetch_bin(
                         detected.image_url,
                         timeout_seconds=min(self._settings.scraper_timeout_seconds, 10.0),
                         headers={"Referer": raw_doc.final_url},
@@ -392,11 +393,11 @@ class ScrapingService:
                 rejected_previous_attempt=resuming_captcha,
             )
             detail_msg = (
-                "A solução CAPTCHA enviada foi recusada ou expirou na URL alvo; "
-                "resolva o novo desafio para concluir a extração real."
+                "A solução CAPTCHA enviada foi recusada ou expirou; "
+                "resolva o novo desafio exibido neste popup para concluir a extração real."
                 if resuming_captcha
-                else f"A página pública '{raw_doc.final_url}' exige resolução de CAPTCHA "
-                f"({detected.provider}) antes de liberar o conteúdo real."
+                else f"A extração requer resolução de CAPTCHA ({detected.provider}) "
+                "diretamente neste popup antes de liberar o conteúdo real."
             )
             raise challenge.to_exception(detail_msg)
 

@@ -40,16 +40,28 @@ Consulta processos públicos cíveis/fazendários por CPF (11 dígitos) ou CNPJ 
   "type": "about:blank",
   "title": "CAPTCHA verification required",
   "status": 422,
-  "detail": "A Consulta Pública do PROJUDI TJPR exige validação reCAPTCHA (g-recaptcha-response) ou sessão autenticada ativa.",
+  "detail": "A Consulta Pública do PROJUDI TJPR requer verificação humana (g-recaptcha-response). Resolva o desafio diretamente neste popup para concluir a consulta real.",
   "code": "CAPTCHA_REQUIRED",
+  "challenge_id": "cap_9f4b2c8e1d7a6054b3e12f9a",
+  "provider": "recaptcha",
   "site_key": "<sitekey extraída do DOM do TJPR>",
+  "session_cookie": "JSESSIONID=0001ABCDEF",
   "portal_url": "https://consulta.tjpr.jus.br/projudi_consulta/",
   "form_url": "https://consulta.tjpr.jus.br/projudi_consulta/processo/consultaPublica.do?actionType=iniciar",
   "recaptcha_callback": "executaRecaptchaPBC_actre_consulta_publica",
+  "captcha_image": "data:image/png;base64,iVBORw0KGgo...",
+  "image_data_url": "data:image/png;base64,iVBORw0KGgo...",
+  "image_base64": "iVBORw0KGgo...",
+  "image_mime_type": "image/png",
+  "image_url": "https://consulta.tjpr.jus.br/projudi_consulta/captcha.svl",
+  "challenge_text": "Digite os caracteres exibidos na imagem de segurança.",
+  "expires_at": "2026-11-25T18:05:00Z",
+  "expires_in_seconds": 300,
+  "dados_sinteticos_ou_mock": false,
   "instructions": [
-    "1. Acesse o formulário público em https://consulta.tjpr.jus.br/projudi_consulta/processo/consultaPublica.do?actionType=iniciar ...",
-    "2. Resolva o desafio Google reCAPTCHA público do TJPR ... para obter o token 'g-recaptcha-response'.",
-    "3. Reenvie a requisição informando 'captcha_token' e opcionalmente 'session_cookie' (JSESSIONID=...)."
+    "1. Visualize o desafio de segurança do PROJUDI TJPR apresentado diretamente neste popup.",
+    "2. Informe a resposta/token de segurança no campo `captcha_token` (ou `captcha_solution`) sem sair do portfólio.",
+    "3. Confirme o envio para '/api/v1/projudi/processos/consulta' (ou 'POST /api/v1/captcha/resolve') com `challenge_id` (preservando `session_cookie` `JSESSIONID=...`) para concluir a consulta real."
   ]
 }
 ```

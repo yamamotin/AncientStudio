@@ -471,7 +471,18 @@ def test_fastapi_projudi_image_captcha_popup_and_resumo_real_completion() -> Non
     assert err["resume_endpoint"] == "/api/v1/projudi/processos"
     assert err["resume_method"] == "GET"
     assert err["image_data_uri"].startswith("data:image/png;base64,")
+    assert err["image_data_url"] == err["image_data_uri"]
+    assert err["captcha_image"] == err["image_data_uri"]
+    assert isinstance(err["image_base64"], str) and len(err["image_base64"]) > 8
+    assert "captcha.svl" in err["image_url"]
+    assert err["session_cookie"] == "JSESSIONID=FASTAPI_IMG_1"
+    assert "projudi_consulta" in err["form_url"]
+    assert "consultaPublica.do" in err["action_url"]
+    assert 0 < err["expires_in_seconds"] <= 300
+    assert isinstance(err["challenge_text"], str) and err["challenge_text"]
+    assert "acesse o formulário" not in " ".join(err["instructions"]).lower()
     assert err["popup"]["mode"] == "image"
+    assert err["popup"]["expires_in_seconds"] == err["expires_in_seconds"]
     assert "52998224725" not in str(err["consulta_payload"])
     cid = err["challenge_id"]
 
@@ -491,6 +502,26 @@ def test_fastapi_projudi_image_captcha_popup_and_resumo_real_completion() -> Non
     assert ddata["captcha_resumed"] is True
     assert ddata["total_processos"] == 1
     assert ddata["processos"][0]["numero_processo"] == VALID_CNJ
+
+    # 3b. POST /consulta resumption with blank cpf="" + challenge_id + captcha_token works
+    fake_registry.cache.clear()
+    post_422 = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={"cpf": "529.982.247-25", "tribunal": "TJPR"},
+    )
+    assert post_422.status_code == 422
+    post_err = post_422.json()
+    post_done = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={
+            "cpf": "",
+            "challenge_id": post_err["challenge_id"],
+            "captcha_token": "PRJ84K",
+        },
+    )
+    assert post_done.status_code == 200
+    assert post_done.json()["data"]["total_processos"] == 1
+    assert post_done.json()["data"]["compliance"]["dados_sinteticos_ou_mock"] is False
 
     # 4. /resumo on cold cache emits /resumo challenge and completes real scrape upon resolution
     fake_registry.cache.clear()
