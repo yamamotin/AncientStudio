@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>[ CI/CD &amp; DOCKER PIPELINE ] — referência técnica</title>
+  <meta name="description" content="Referência técnica da seção LIVE CI/CD &amp; DOCKER PIPELINE do portfólio: workflows reais, resumo executivo, cache, rate-limit, segurança no cliente e validação.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0f0c; --panel: #0f1511; --text: #d6f5d0; --muted: #7f9c86;
+      --green: #46e07a; --cyan: #5ad9e6; --border: #1e2a21; --code: #080c09;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 2.5rem 1.25rem 5rem;
+      background: var(--bg); color: var(--text);
+      font: 16px/1.7 ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+    }
+    main { max-width: 62rem; margin: 0 auto; }
+    a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover, a:focus-visible { color: var(--green); }
+    h1 { font-size: 1.35rem; letter-spacing: .02em; margin: 0 0 1.5rem; color: var(--green); }
+    h2 { font-size: 1.05rem; margin: 2.5rem 0 .9rem; padding-bottom: .4rem; border-bottom: 1px solid var(--border); color: var(--green); }
+    h3 { font-size: .98rem; margin: 1.75rem 0 .6rem; color: var(--cyan); }
+    p, li { color: var(--text); }
+    ul, ol { padding-left: 1.4rem; }
+    li { margin: .3rem 0; }
+    code { background: var(--code); border: 1px solid var(--border); border-radius: 4px; padding: .05rem .35rem; font-size: .92em; }
+    pre.code { background: var(--code); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; }
+    pre.code code { border: 0; background: none; padding: 0; }
+    blockquote { margin: 1.2rem 0; padding: .8rem 1rem; border-left: 2px solid var(--green); background: var(--panel); }
+    blockquote p { margin: .35rem 0; color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+    .table-wrap { overflow-x: auto; margin: 1rem 0; }
+    table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+    th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; vertical-align: top; }
+    th { background: var(--panel); color: var(--cyan); }
+    nav.doc-nav {
+      display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center;
+      margin-bottom: 2rem; padding: .75rem 1rem;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+      font-size: .88rem;
+    }
+    nav.doc-nav a { text-decoration: none; }
+    footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav class="doc-nav" aria-label="Referência">
+      <a href="../index.html">[ voltar ao portfólio ]</a>
+      <a href="https://github.com/yamamotin/AncientStudio/blob/main/docs/ci-cd-pipeline.md" rel="noopener noreferrer">[ markdown fonte no GitHub ]</a>
+      <span lang="en">rendered copy of docs/ci-cd-pipeline.md</span>
+    </nav>
+<h1>CI/CD &amp; Docker pipeline — painel real, cache e segurança frontend</h1>
+<p>Documento de referência da seção <code>[ LIVE CI/CD &amp; DOCKER PIPELINE ]</code> do portfólio. Cobre (1) a arquitetura real dos workflows do repositório, (2) o resumo executivo orientado ao cliente e o detalhamento colapsável, (3) como o frontend consome os metadados públicos do GitHub Actions, (4) cache e rate-limit, (5) os controles de segurança aplicados no cliente e (6) como validar tudo localmente.</p>
+<p>Versão renderizada (é o alvo do link <code>[ documentação técnica ]</code> do portfólio): <code>docs/ci-cd-pipeline.html</code>. O Markdown continua sendo a fonte.</p>
+<blockquote><p><strong>Escopo:</strong> somente metadados públicos, somente leitura. Nenhum token, segredo ou credencial é embutido, solicitado ou enviado pelo frontend.</p><p><strong>Contratos preservados:</strong> <code>ascii-engine-module/</code>, <code>assets/js/ascii-engine.bundle.js</code> e <code>assets/js/engine-adapter.js</code> não foram alterados. O valor interno <code>mode: 'playground'</code> do adapter é contrato da engine 3D e continua igual; o que saiu do portfólio foi apenas o texto “Playground” de títulos, rótulos e metadados.</p></blockquote>
+<hr>
+<h2>1. Arquitetura real dos workflows</h2>
+<p>Os dados exibidos no painel vêm dos workflows versionados em <code>.github/workflows/</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Workflow</th><th>Arquivo</th><th>O que executa</th></tr></thead><tbody><tr><td><code>CI — Backend, ASCII 3D Engine &amp; Portfolio Integrity</code></td><td><code>ci.yml</code></td><td>Node 22 + Python 3.11, <code>npm ci</code>/<code>typecheck</code>/<code>build</code>/<code>build:portfolio</code> da engine, verificação do bundle <code>assets/js/ascii-engine.bundle.js</code> (não vazio e sem diff), <code>node --test tests/*.test.js</code> e <code>python3 -m unittest discover -s tests -p "test_*.py"</code>.</td></tr><tr><td><code>CI/CD — backend, Docker and deploy</code></td><td><code>ci-cd.yml</code></td><td><code>ruff check .</code> + <code>pytest</code> em <code>backend/</code>, build da imagem <code>infra/docker/Dockerfile</code> e deploy de produção na Vercel (quando os secrets existem).</td></tr><tr><td><code>Deploy static site to GitHub Pages</code></td><td><code>pages.yml</code></td><td>Publica o artefato estático no GitHub Pages e executa a checagem de paridade <code>Pages × Vercel</code> <strong>não bloqueante</strong> (<code>scripts/verify-pages-parity.sh</code>).</td></tr><tr><td><code>PR tests</code></td><td><code>pr-tests.yml</code></td><td>Suíte modular rápida em pull requests (<code>node --check</code>, <code>node --test</code>).</td></tr><tr><td><code>Auto-merge verified PRs</code></td><td><code>auto-merge.yml</code></td><td>Aplica a ordem permanente <code>merge (resolve-conflicts) → delete-branch → redeploy</code>, disparando <code>pages.yml</code> e <code>ci-cd.yml</code> com o SHA exato.</td></tr><tr><td><code>VCR Image Retention Cleanup</code></td><td><code>vcr-cleanup.yml</code></td><td>Retenção automatizada das <strong>3 imagens mais recentes</strong> <code>dockerfile</code> no Vercel Container Registry (VCR), via <code>scripts/vcr-cleanup.js</code> (CLI <code>vercel vcr</code> ou REST API), com modo <code>dry_run</code>, agendamento diário e gatilho após o CI/CD.</td></tr></tbody></table></div>
+<p>Observações de infraestrutura:</p>
+<ul>
+<li>O <code>Dockerfile</code> da raiz continua servindo <code>api/server.py</code> na hospedagem atual da Vercel; <code>infra/docker/Dockerfile</code> empacota o backend FastAPI completo.</li>
+<li>A limpeza do VCR existe justamente porque o registro tem limite de imagens (<code>repository has reached the maximum allowed number of images</code>), falha que já bloqueou builds de produção. Detalhes em <a href="https://github.com/yamamotin/AncientStudio/blob/main/docs/vcr-cleanup.md"><code>vcr-cleanup.md</code></a>.</li>
+</ul>
+<h2>2. Como o frontend consome os dados públicos</h2>
+<p>Arquivo: <code>assets/js/pipeline.js</code> (exposto como <code>TP.pipeline</code>).</p>
+<p>Somente dois endpoints públicos, sem autenticação:</p>
+<pre class="code"><code>GET https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=10
+GET https://api.github.com/repos/yamamotin/AncientStudio/actions/workflows</code></pre>
+<ul>
+<li><code>Accept: application/vnd.github+json</code> e <code>X-GitHub-Api-Version: 2022-11-28</code>.</li>
+<li><code>credentials: 'omit'</code>, <code>cache: 'no-store'</code>, <code>referrerPolicy: 'no-referrer'</code>, <code>mode: 'cors'</code>.</li>
+<li>Nenhum header <code>Authorization</code> existe no arquivo.</li>
+<li><code>actions/workflows</code> é consultado no máximo uma vez por dia (24 h, nomes e paths mudam pouco); <code>actions/runs</code> respeita o TTL de 5 minutos.</li>
+<li>Busca até 10 execuções, renderiza no máximo 6 (<code>TP.pipeline.config.maxRuns</code>).</li>
+</ul>
+<p>Campos exibidos por execução, todos verificáveis no GitHub:</p>
+<div class="table-wrap"><table><thead><tr><th>Campo</th><th>Origem na API</th><th>Renderização</th></tr></thead><tbody><tr><td>Nome do workflow</td><td><code>name</code></td><td>texto</td></tr><tr><td>Branch</td><td><code>head_branch</code></td><td>texto</td></tr><tr><td>Commit curto</td><td><code>head_sha</code> (7 primeiros caracteres)</td><td>texto/wait</td></tr><tr><td>Status/conclusão</td><td><code>status</code>, <code>conclusion</code></td><td>selo (<code>success</code>, <code>failure</code>, <code>in_progress</code>, …)</td></tr><tr><td>Duração</td><td><code>run_started_at</code> → <code>updated_at</code></td><td><code>Xs</code> ou <code>Xm Ys</code></td></tr><tr><td>Timestamp</td><td><code>updated_at</code></td><td><code>YYYY-MM-DD HH:MM UTC</code></td></tr><tr><td>Número do run</td><td><code>run_number</code></td><td><code>#N</code></td></tr><tr><td>Link do run</td><td><code>html_url</code></td><td>no máximo <strong>um</strong> link allowlisted, na documentação técnica</td></tr></tbody></table></div>
+<h2>3. Cache, rate-limit e fallback informativo</h2>
+<ul>
+<li><strong>TTL de dados:</strong> <code>300000 ms</code> (5 minutos) em <code>localStorage</code> sob a chave <code>tp.gh-actions.v1</code>. Se o storage estiver bloqueado (<code>file://</code>, modo privado, cota cheia) o estado continua em memória — o painel nunca depende do storage.</li>
+<li><strong>Cache defensivo:</strong> o conteúdo lido do storage é re-sanitizado com <code>sanitizeRuns()</code> antes de renderizar, então um cache adulterado não injeta URL ou campo inválido.</li>
+<li><strong>Rate-limit não autenticado:</strong> 60 requisições/hora por IP. O painel lê <code>x-ratelimit-remaining</code> e <code>x-ratelimit-reset</code>; abaixo de 10 restantes a cota aparece na linha de status, e um <code>403</code>/<code>429</code> mostra a mensagem de limite com o horário de renovação.</li>
+<li><strong>Fallback informativo:</strong> em falha de rede, timeout ou rate-limit, o painel mantém os últimos dados em cache (marcados como cache, com a idade em segundos) e informa quando a API volta a responder. Links externos por execução não existem mais: a única URL externa do painel é o link allowlisted da última execução, dentro da documentação técnica, e a referência <code>https://github.com/yamamotin/AncientStudio/actions</code> no <code>&lt;noscript&gt;</code>.</li>
+<li><strong>Timeout:</strong> <code>AbortController</code> com 8 s por requisição; o timer é sempre limpo no <code>finally</code>. A mesma regra vale para o resto do frontend: 10 s em <code>/api/v1</code> (<code>api-client.js</code>), 5 s no probe <code>api-status.json</code>, 4 s no dicionário i18n — nenhuma chamada <code>fetch</code> fica sem limite de tempo.</li>
+<li><strong>Anti-flood:</strong> <code>state.loading</code> impede requisições concorrentes, o botão fica desabilitado com <code>aria-busy="true"</code> durante a chamada e existe um cooldown de 4 s entre tentativas manuais (clique duplo ou repetido não gera tráfego extra).</li>
+</ul>
+<h2>4. Monitor compacto orientado ao cliente</h2>
+<p>A seção deixou de ser uma lista de links e virou uma <strong>tela de monitoramento compacta</strong>:</p>
+<ul>
+<li><strong>Resumo executivo sempre visível</strong> (<code>#pipeline-summary</code>, quatro cartões preenchidos apenas com dados reais da API): última execução (<code>status · HH:MM UTC</code>), confiabilidade (<code>sucessos/concluídas · %</code>), higiene das imagens Docker (última execução do <code>vcr-cleanup.yml</code>, política das 3 imagens mais recentes) e quantidade de workflows monitorados.</li>
+<li><strong>Sem links repetidos por item:</strong> cada linha da lista mostra nome, selo de status, branch, SHA curto, duração e timestamp. O <code>[ abrir run ]</code> de cada execução e o botão <code>[ open actions ]</code> foram removidos; sobrou apenas <code>[ atualizar ]</code>.</li>
+<li><strong>Ruído interno filtrado:</strong> execuções do <code>Auto-merge verified PRs</code> e conclusões <code>skipped</code>/<code>cancelled</code> não entram no resumo nem na lista. Quando algo é filtrado, a nota <code>#pipeline-filter-note</code> explica o critério (<code>pipeline.filtersNote</code>).</li>
+<li><strong>Detalhamento colapsável:</strong> o corpo (<code>#pipeline-body</code>) guarda a lista de execuções, a nota de filtro, o <code>&lt;noscript&gt;</code> e o bloco <code>[ documentação técnica ]</code>. O painel abre recolhido (<code>data-collapsed="true"</code>) para não empurrar o resto do portfólio.</li>
+<li><strong>Sem fabricação de dados:</strong> o cliente nunca inventa status, imagens ou contagens; se a API não responde, os cartões mostram o último valor carregado ou <code>—</code>.</li>
+</ul>
+<p>A mesma política de altura compacta vale para as seções altas do portfólio: <code>#gateway</code> (abre recolhida), <code>#scene</code> e <code>#stack</code> (abrem expandidas e podem ser recolhidas). O mecanismo é único: <code>[data-collapsible]</code> + <code>[data-collapse-toggle]</code> + <code>.collapse-body</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Peça</th><th>Papel</th></tr></thead><tbody><tr><td><code>data-collapsible</code> / <code>data-collapsed</code></td><td>marca a seção e o estado inicial</td></tr><tr><td><code>[data-collapse-toggle][aria-controls]</code></td><td>botão <code>[ expandir ]</code> / <code>[ recolher ]</code> com <code>aria-expanded</code></td></tr><tr><td><code>.collapse-body</code></td><td>corpo limitado por <code>max-height</code> + gradiente; <strong>nunca</strong> <code>display:none</code></td></tr><tr><td><code>body.inert</code></td><td>remove foco/ordem de tabulação do conteúdo recolhido</td></tr><tr><td><code>TP.collapse</code> (<code>assets/js/main.js</code>)</td><td>aplica estado, traduz o rótulo e reage a <code>tp:languagechange</code></td></tr></tbody></table></div>
+<p>Detalhes de implementação relevantes:</p>
+<ul>
+<li>Recolher <strong>não</strong> destrói nem remede a cena 3D: o corpo é apenas recortado por <code>max-height</code>, a engine mantém o mesmo contrato público (<code>engine-adapter.js</code>, <code>ascii-engine.bundle.js</code>) e o <code>ResizeObserver</code> do adapter continua válido.</li>
+<li>Entrar em fullscreen na cena chama <code>TP.collapse.expand(#scene)</code>, porque fullscreen é o gesto explícito de "mostrar tudo".</li>
+<li>Rótulos traduzidos em pt-br <strong>e</strong> en (<code>common.expand</code> / <code>common.collapse</code>), presentes nos dois JSON e no dicionário embutido <code>BUNDLED</code>.</li>
+</ul>
+<h2>5. Segurança no cliente</h2>
+<h3>5.1 Zero segredos</h3>
+<ul>
+<li>Nenhum <code>GITHUB_TOKEN</code>, <code>VERCEL_TOKEN</code>, chave de API ou credencial em <code>assets/js/**</code>, <code>index.html</code> ou dicionários.</li>
+<li>A chamada é pública: <code>credentials: 'omit'</code> e nenhum header de autorização.</li>
+<li>A chave de API digitada na UI (<code>#workflow-token</code>) é <code>type="password"</code>, <code>autocomplete="new-password"</code>, marcada com <code>data-sensitive="true"</code>, <strong>nunca</strong> é gravada em storage e é apagada em <code>pagehide</code> e em <code>visibilitychange</code> → <code>hidden</code> (<code>initSensitiveInputs()</code> em <code>assets/js/main.js</code>).</li>
+<li>O formulário público de consulta PROJUDI (Gateway → ETL/Integrações) recebe um CPF validado por mod-11. Esse campo é <code>data-sensitive="true"</code>, sem <code>autocomplete</code>, sem <code>spellcheck</code>, e a regra é genérica: nenhum <code>input[data-sensitive]</code> é gravado em storage, todos são limpos em <code>pagehide</code>/aba oculta e ficam mascarados quando fora de foco (<code>input[data-sensitive]:not(:focus) { -webkit-text-security: disc }</code>). O valor só viaja no corpo da própria requisição para <code>/api/v1/projudi/*</code>, nunca é ecoado no painel de resposta nem no console. A máscara definitiva de exibição LGPD (<code>***.456.789-**</code>) é aplicada no servidor.</li>
+<li>O runner fictício saiu do cliente: <code>TP.api.runPipeline</code> foi removido e o painel nunca dispara builds. O endpoint <code>POST /api/v1/pipeline/run</code> continua existindo apenas no backend legado, com seus próprios testes, sem uso pela interface.</li>
+</ul>
+<h3>5.2 Proteção contra XSS e injeção de DOM</h3>
+<ul>
+<li>Toda renderização usa <code>document.createElement</code> + <code>textContent</code>. Não existe <code>innerHTML</code>, <code>outerHTML</code>, <code>insertAdjacentHTML</code> ou <code>document.write</code> com dado externo.</li>
+<li><code>text(value, max)</code> coage qualquer valor a string, remove caracteres de controle e marcas de direção Unicode (<code>\u202a</code>–<code>\u202e</code>, <code>\u200b</code>–<code>\u200f</code>), normaliza espaços e limita o tamanho (96 caracteres por padrão; 72 para nomes).</li>
+<li><code>safeRunUrl()</code> é uma allowlist estrita: <code>^https://github.com/yamamotin/AncientStudio/actions/runs/\d{1,20}$</code>. Qualquer outro valor — <code>javascript:</code>, outro repositório, path traversal, host da API — retorna string vazia e o link simplesmente não é criado.</li>
+<li><code>sanitizeRun()</code> só aceita <code>status</code>/<code>conclusion</code> no formato <code>[a-z_]{3,24}</code>, SHA hexadecimal e timestamps ISO <code>YYYY-MM-DDTHH:MM:SSZ</code>; o resto é descartado.</li>
+<li>Todo elemento externo criado recebe <code>target="_blank"</code> + <code>rel="noopener noreferrer"</code>. O link da última execução (<code>#pipeline-last-run-link</code>) fica <code>hidden</code> até existir uma URL que passe na allowlist; sem URL válida, <code>href</code>, <code>target</code> e <code>rel</code> são removidos.</li>
+</ul>
+<h3>5.3 CSP e higiene de requisições</h3>
+<p><code>index.html</code> declara, via <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code>:</p>
+<pre class="code"><code>default-src &#x27;self&#x27;; base-uri &#x27;self&#x27;; object-src &#x27;none&#x27;; script-src &#x27;self&#x27;;
+style-src &#x27;self&#x27;; img-src &#x27;self&#x27; data:; font-src &#x27;self&#x27;;
+connect-src &#x27;self&#x27; https://api.github.com; form-action &#x27;self&#x27;; frame-src &#x27;none&#x27;</code></pre>
+<ul>
+<li>Sem <code>unsafe-inline</code> e sem <code>unsafe-eval</code>: não há script inline, o CSS é externo e o bundle da engine não usa <code>eval</code>/<code>new Function</code>.</li>
+<li><code>connect-src</code> limita as chamadas de rede ao próprio site (<code>/api/v1</code>, <code>api-status.json</code>) e ao host público do GitHub.</li>
+<li><code>&lt;meta name="referrer" content="strict-origin-when-cross-origin"&gt;</code> evita vazar a URL completa do portfólio em navegações externas.</li>
+<li><strong>Decisão consciente:</strong> não foi criado <code>vercel.json</code> com headers de segurança, para não alterar a configuração de deploy do projeto (o ambiente Vercel é usado apenas para verificação). Headers HTTP definitivos ficam no middleware do backend (<code>backend/app/core/middleware.py</code>); a CSP em <code>&lt;meta&gt;</code> já vale para GitHub Pages e Vercel sem tocar em infraestrutura.</li>
+<li><code>rel="noopener noreferrer"</code> em todos os links externos do HTML (LinkedIn, Actions, documentação).</li>
+</ul>
+<h2>6. Documentação: por que existe um HTML</h2>
+<p>O link <code>[ documentação técnica ]</code> apontava para <code>docs/ci-cd-pipeline.md</code>. Servidores estáticos (<code>api/server.py</code> na Vercel e o Pages) entregam <code>.md</code> como <code>text/markdown</code>/<code>text/plain</code>: o navegador baixa o arquivo ou mostra texto cru, sem índice, sem tabelas. Não havia router JS nem renderer de Markdown no cliente — interceptar o link não resolveria nada.</p>
+<p>Correção aplicada: <code>docs/ci-cd-pipeline.html</code> é uma renderização estática, autocontida (css inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com o Markdown. O link do painel (<code>#pipeline-doc-link</code>) aponta para <code>docs/ci-cd-pipeline.html</code>, um caminho relativo que funciona em <code>file://</code>, no GitHub Pages (<code>/AncientStudio/docs/...</code>) e na Vercel. A página inclui um link de volta para o Markdown fonte no GitHub.</p>
+<h2>7. Validação</h2>
+<pre class="code"><code>node --check assets/js/*.js
+node --test tests/*.test.js
+python3 -m unittest discover -s tests -p &quot;test_*.py&quot; -v
+npx html-validate index.html</code></pre>
+<p>Cobertura específica do painel em <code>tests/pipeline-panel.test.js</code>:</p>
+<ol>
+<li>endpoints/TTL/timeout/cooldown exatos (<code>TP.pipeline.config</code>);</li>
+<li>ausência de credenciais, presença de <code>AbortController</code>, <code>credentials: 'omit'</code> e ausência de <code>innerHTML</code>;</li>
+<li>allowlist de URL e sanitização de payload hostil (URL inválida, status inválido, caractere nulo, nome longo);</li>
+<li>cálculo de duração e validação de timestamps;</li>
+<li>títulos das seções e proibição de <code>playground|simulator|simulador|sandbox</code> em pt-br/en;</li>
+<li>política CSP e <code>referrer</code> no <code>index.html</code>;</li>
+<li>ausência de links por execução (<code>pipeline.runLink</code> / <code>pipeline.openActions</code>), presença do resumo executivo e do controle de recolher/expandir;</li>
+<li>paridade das novas chaves i18n (<code>common.expand</code>, <code>common.collapse</code>, <code>pipeline.summary.*</code>) entre pt-br, en e o dicionário embutido.</li>
+</ol>
+<hr>
+<h2>English summary</h2>
+<p>The <code>[ LIVE CI/CD &amp; DOCKER PIPELINE ]</code> section replaced the old fake simulator. It reads only public, read-only GitHub Actions metadata for <code>yamamotin/AncientStudio</code> (<code>/actions/runs?per_page=6</code> and <code>/actions/workflows</code>), renders workflow name, branch, short SHA, status/conclusion, duration, UTC timestamp and the direct run link, and never sends credentials (<code>credentials: 'omit'</code>, no <code>Authorization</code>).</p>
+<p>The section is now a compact, collapsible monitoring screen: an always-visible executive summary (latest run, reliability, Docker image hygiene, monitored workflows) plus a filtered run list inside a collapsed body, with a single <code>[ refresh ]</code> action and an <code>[ expand ]</code> / <code>[ collapse ]</code> control translated in every locale. Per-run <code>[ open run ]</code> links and the <code>[ open actions ]</code> button were removed on purpose.</p>
+<p>The technical documentation link now opens <code>docs/ci-cd-pipeline.html</code>, a self-contained static rendering served correctly by GitHub Pages and Vercel (raw <code>.md</code> was being downloaded as plain text). The Markdown file remains the source.</p>
+<p>A five-minute <code>localStorage</code> cache (validated again on read), an 8 s <code>AbortController</code> timeout, an in-flight lock plus a 4 s cooldown protect both the visitor and the public API rate limit; failures degrade to cached data plus a direct link to the Actions page.</p>
+<p>All external values are coerced to bounded, control-character-free strings and inserted with <code>createElement</code>/<code>textContent</code>; <code>href</code> is allowed only when it matches <code>https://github.com/yamamotin/AncientStudio/actions/runs/&lt;id&gt;</code>, and external links use <code>rel="noopener noreferrer"</code>. A <code>&lt;meta&gt;</code> CSP restricts scripts, styles, fonts and images to <code>'self'</code> and network access to <code>'self'</code> plus <code>https://api.github.com</code>. No <code>vercel.json</code> was added, deliberately avoiding deployment-config changes.</p>
+    <footer>
+      <p>documento estático gerado a partir de <code>docs/ci-cd-pipeline.md</code> · sem script, sem dependência externa · funciona em file://, GitHub Pages e Vercel</p>
+      <p><a href="../index.html#pipeline">[ voltar para a seção do pipeline ]</a></p>
+    </footer>
+  </main>
+</body>
+</html>
