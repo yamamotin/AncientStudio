@@ -1000,8 +1000,6 @@ body.scene-fullscreen-active { overflow: hidden; }
 .captcha-portal a[hidden] { display: none; }
 
 .captcha-steps-block { display: grid; gap: var(--space-1); }
-.captcha-steps-block[hidden] { display: none; }
-
 .captcha-label { color: var(--muted); font-size: var(--fs-tiny); }
 
 .captcha-steps {
@@ -1032,12 +1030,6 @@ body.scene-fullscreen-active { overflow: hidden; }
 }
 
 .captcha-privacy { margin: 0; font-size: var(--fs-tiny); }
-
-/* "expiring" turns the countdown red without reflowing the meta row. */
-#captcha-expires[data-expiring="true"] { color: var(--red); }
-
-.captcha-dialog.is-submitting .captcha-actions { opacity: 0.6; }
-.captcha-dialog.is-submitting #captcha-submit { pointer-events: none; }
 
 @media (max-width: 30rem) {
   .captcha-form { padding: var(--space-4); }
