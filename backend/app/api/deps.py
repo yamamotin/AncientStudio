@@ -131,6 +131,7 @@ def get_scraping_service(
     cache: CacheBackend = Depends(get_cache_backend),
     fetcher: PageFetcherPort = Depends(get_page_fetcher),
     event_bus: EventBus = Depends(get_event_bus),
+    connectors: PublicConnectorsRegistry = Depends(get_public_connectors),
 ) -> ScrapingService:
     return ScrapingService(
         settings=settings,
@@ -138,6 +139,7 @@ def get_scraping_service(
         cache=cache,
         fetcher=fetcher,
         event_bus=event_bus,
+        captcha_store=connectors.captcha,
     )
 
 

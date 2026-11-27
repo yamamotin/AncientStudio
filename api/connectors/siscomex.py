@@ -28,8 +28,14 @@ import re
 from typing import Any
 
 from api.connectors.cache import ConnectorTTLCache
+from api.connectors.captcha import CaptchaChallengeStore, ResolvedCaptchaInput
 from api.connectors.errors import ConnectorValidationError, UpstreamConnectorError
-from api.connectors.http_client import HttpTransport, UrllibHttpTransport
+from api.connectors.http_client import (
+    HttpResponse,
+    HttpTransport,
+    UrllibHttpTransport,
+    merge_cookie_header,
+)
 from api.connectors.validators import clean_digits, normalize_search_text, strip_html_tags
 
 SISCOMEX_PUBLIC_JSON_URL = (
@@ -632,6 +638,7 @@ class SiscomexNCMService:
         *,
         transport: HttpTransport | None = None,
         cache: ConnectorTTLCache | None = None,
+        captcha_store: CaptchaChallengeStore | None = None,
         seed_path: Path | None = None,
         timeout_seconds: float = 4.0,
         catalog_ttl_seconds: float = 86400.0,
@@ -641,6 +648,7 @@ class SiscomexNCMService:
             max_response_bytes=16 * 1024 * 1024,
         )
         self._cache = cache or ConnectorTTLCache()
+        self._captcha_store = captcha_store or CaptchaChallengeStore(cache=self._cache)
         self._seed_path = seed_path or SEED_FILE_PATH
         self._timeout = timeout_seconds
         self._catalog_ttl = catalog_ttl_seconds
@@ -710,17 +718,65 @@ class SiscomexNCMService:
             "avisos": avisos,
         }
 
-    def _get_catalog(self) -> tuple[dict[str, Any], bool]:
-        cache_key = "siscomex:ncm:catalog:v2"
-        hit, cached = self._cache.get(cache_key)
-        if hit:
-            return cached, True
+    def _build_request_headers(
+        self,
+        cookie_jar: dict[str, str],
+        raw_session_cookie: str | None,
+        solution: str | None,
+    ) -> dict[str, str] | None:
+        headers: dict[str, str] = {}
+        merged_cookie = merge_cookie_header(cookie_jar, raw_session_cookie)
+        if merged_cookie:
+            headers["Cookie"] = merged_cookie
+        if solution:
+            headers["X-Captcha-Response"] = solution
+        return headers or None
 
+    def _get_catalog(
+        self,
+        *,
+        consulta_payload: dict[str, Any] | None = None,
+        cookie_jar: dict[str, str] | None = None,
+        raw_session_cookie: str | None = None,
+        solution: str | None = None,
+        prefetched_response: HttpResponse | None = None,
+        bypass_cache: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        cache_key = "siscomex:ncm:catalog:v2"
+        if not bypass_cache:
+            hit, cached = self._cache.get(cache_key)
+            if hit:
+                return cached, True
+
+        active_jar = cookie_jar if cookie_jar is not None else {}
         avisos: list[str] = []
         try:
-            resp = self._transport.request(
-                SISCOMEX_PUBLIC_JSON_URL,
-                params={"perfil": "PUBLICO"},
+            if prefetched_response is not None:
+                resp = prefetched_response
+            else:
+                req_params: dict[str, Any] = {"perfil": "PUBLICO"}
+                if solution and not active_jar and not raw_session_cookie:
+                    req_params["g-recaptcha-response"] = solution
+                resp = self._transport.request(
+                    SISCOMEX_PUBLIC_JSON_URL,
+                    params=req_params,
+                    headers=self._build_request_headers(
+                        active_jar, raw_session_cookie, solution
+                    ),
+                    timeout_seconds=self._timeout,
+                )
+            active_jar.update(resp.cookies())
+            self._captcha_store.inspect_response_for_captcha(
+                resp,
+                connector="siscomex",
+                operation="search_ncm_catalog",
+                consulta_payload=consulta_payload or {},
+                resume_endpoint="/api/v1/siscomex/ncm",
+                resume_method="GET",
+                portal_url=SISCOMEX_PUBLIC_JSON_URL,
+                cookie_jar=active_jar,
+                raw_session_cookie=raw_session_cookie,
+                transport=self._transport,
                 timeout_seconds=self._timeout,
             )
             raw_json = resp.json()
@@ -730,6 +786,19 @@ class SiscomexNCMService:
                 raw_json, "online_portal_unico_siscomex", avisos
             )
         except UpstreamConnectorError as exc:
+            self._captcha_store.inspect_upstream_error_for_captcha(
+                exc,
+                connector="siscomex",
+                operation="search_ncm_catalog",
+                consulta_payload=consulta_payload or {},
+                resume_endpoint="/api/v1/siscomex/ncm",
+                resume_method="GET",
+                portal_url=SISCOMEX_PUBLIC_JSON_URL,
+                cookie_jar=active_jar,
+                raw_session_cookie=raw_session_cookie,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+            )
             avisos.append(
                 f"Download online Siscomex indisponível ({exc.detail}); "
                 "consultando base local oficial NCM/SH-2022."
@@ -813,32 +882,77 @@ class SiscomexNCMService:
         digit_query: str,
         expanded_terms: list[str],
         avisos: list[str],
+        *,
+        consulta_payload: dict[str, Any] | None = None,
+        cookie_jar: dict[str, str] | None = None,
+        raw_session_cookie: str | None = None,
+        solution: str | None = None,
+        prefetched_response: HttpResponse | None = None,
+        bypass_cache: bool = False,
     ) -> tuple[list[dict[str, Any]], str]:
         """Search Receita Federal ``Soluções de Consulta`` (live SIJUT2 + verified seed)."""
         cache_key = f"siscomex:decisoes:{norm_query or digit_query}"
-        hit, cached = self._cache.get(cache_key)
-        if hit:
-            return cached["items"], cached["modo"]
+        if not bypass_cache:
+            hit, cached = self._cache.get(cache_key)
+            if hit:
+                return cached["items"], cached["modo"]
 
+        active_jar = cookie_jar if cookie_jar is not None else {}
         live_rulings: list[dict[str, Any]] = []
         modo = "base_verificada_solucoes_consulta_rfb"
 
         search_term = raw_query.strip()
         if search_term:
             try:
-                resp = self._transport.request(
-                    RECEITA_SIJUT2_CONSULTA_URL,
-                    params={
+                if prefetched_response is not None:
+                    resp = prefetched_response
+                else:
+                    sijut_params: dict[str, Any] = {
                         "tipoAtoFacet": "Solução de Consulta",
                         "termoBusca": search_term,
                         "optOrdem": "relevancia",
-                    },
+                    }
+                    if solution and not active_jar and not raw_session_cookie:
+                        sijut_params["g-recaptcha-response"] = solution
+                    resp = self._transport.request(
+                        RECEITA_SIJUT2_CONSULTA_URL,
+                        params=sijut_params,
+                        headers=self._build_request_headers(
+                            active_jar, raw_session_cookie, solution
+                        ),
+                        timeout_seconds=self._timeout,
+                    )
+                active_jar.update(resp.cookies())
+                self._captcha_store.inspect_response_for_captcha(
+                    resp,
+                    connector="siscomex",
+                    operation="search_ncm_sijut2",
+                    consulta_payload=consulta_payload or {},
+                    resume_endpoint="/api/v1/siscomex/ncm",
+                    resume_method="GET",
+                    portal_url=RECEITA_SIJUT2_CONSULTA_URL,
+                    cookie_jar=active_jar,
+                    raw_session_cookie=raw_session_cookie,
+                    transport=self._transport,
                     timeout_seconds=self._timeout,
                 )
                 live_rulings = parse_sijut2_solucoes_html(resp.text())
                 if live_rulings:
                     modo = "online_receita_federal_sijut2"
             except UpstreamConnectorError as exc:
+                self._captcha_store.inspect_upstream_error_for_captcha(
+                    exc,
+                    connector="siscomex",
+                    operation="search_ncm_sijut2",
+                    consulta_payload=consulta_payload or {},
+                    resume_endpoint="/api/v1/siscomex/ncm",
+                    resume_method="GET",
+                    portal_url=RECEITA_SIJUT2_CONSULTA_URL,
+                    cookie_jar=active_jar,
+                    raw_session_cookie=raw_session_cookie,
+                    transport=self._transport,
+                    timeout_seconds=self._timeout,
+                )
                 avisos.append(
                     f"Consulta online SIJUT2/Decisões RFB indisponível ({exc.detail}); "
                     "utilizando decisões publicadas verificadas."
@@ -890,13 +1004,58 @@ class SiscomexNCMService:
 
     def search_ncm(
         self,
-        q: str | None,
+        q: str | None = None,
         *,
-        limite: int = 10,
-        somente_vigentes: bool = True,
+        limite: int | None = None,
+        somente_vigentes: bool | None = None,
+        challenge_id: str | None = None,
+        captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Search NCM nomenclature + Soluções de Consulta (Decisões) + Sugestões."""
-        raw_query = str(q or "").strip()
+        explicit_lookup = dict(consulta_payload or {})
+        if q is not None and str(q).strip():
+            explicit_lookup["q"] = str(q).strip()
+        if limite is not None:
+            explicit_lookup["limite"] = limite
+        if somente_vigentes is not None:
+            explicit_lookup["somente_vigentes"] = somente_vigentes
+
+        resolved: ResolvedCaptchaInput = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+
+        effective_q = (
+            q
+            if (q is not None and str(q).strip())
+            else resolved.consulta_payload.get("q")
+        )
+        effective_limite = (
+            limite
+            if limite is not None
+            else (
+                int(resolved.consulta_payload["limite"])
+                if resolved.consulta_payload.get("limite") is not None
+                else 10
+            )
+        )
+        effective_vigentes = (
+            somente_vigentes
+            if somente_vigentes is not None
+            else (
+                bool(resolved.consulta_payload["somente_vigentes"])
+                if resolved.consulta_payload.get("somente_vigentes") is not None
+                else True
+            )
+        )
+
+        raw_query = str(effective_q or "").strip()
         norm_query = normalize_search_text(raw_query)
         digit_query = clean_digits(raw_query)
 
@@ -905,13 +1064,63 @@ class SiscomexNCMService:
                 "Informe ao menos 2 caracteres em 'q' (descrição comercial/técnica ou código NCM).",
                 extra={"field": "q"},
             )
-        if not isinstance(limite, int) or limite < 1 or limite > 50:
+        if not isinstance(effective_limite, int) or effective_limite < 1 or effective_limite > 50:
             raise ConnectorValidationError(
                 "Parâmetro 'limite' deve ser um inteiro entre 1 e 50.",
                 extra={"field": "limite"},
             )
 
-        catalog, cache_hit = self._get_catalog()
+        active_payload: dict[str, Any] = {
+            "q": raw_query,
+            "limite": effective_limite,
+            "somente_vigentes": effective_vigentes,
+        }
+        cookie_jar = dict(resolved.cookie_jar)
+        prefetched_catalog: HttpResponse | None = None
+        prefetched_sijut: HttpResponse | None = None
+        resuming_captcha = bool(resolved.challenge_id or resolved.solution)
+
+        if resolved.challenge is not None and resolved.challenge.connector == "siscomex":
+            extra_params: dict[str, Any] | None = None
+            if resolved.challenge.operation == "search_ncm_catalog":
+                extra_params = {"perfil": "PUBLICO"}
+            elif resolved.challenge.operation == "search_ncm_sijut2":
+                extra_params = {
+                    "tipoAtoFacet": "Solução de Consulta",
+                    "termoBusca": raw_query,
+                    "optOrdem": "relevancia",
+                }
+            sub_resp, cookie_jar = self._captcha_store.submit_upstream_solution(
+                resolved.challenge,
+                resolved,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+                extra_params=extra_params,
+            )
+            if resolved.challenge.operation == "search_ncm_catalog":
+                try:
+                    maybe_json = sub_resp.json()
+                    if isinstance(maybe_json, dict) and isinstance(
+                        maybe_json.get("Nomenclaturas"), list
+                    ):
+                        prefetched_catalog = sub_resp
+                except UpstreamConnectorError:
+                    prefetched_catalog = None
+            elif resolved.challenge.operation == "search_ncm_sijut2":
+                if parse_sijut2_solucoes_html(sub_resp.text()):
+                    prefetched_sijut = sub_resp
+
+        catalog, cache_hit = self._get_catalog(
+            consulta_payload=active_payload,
+            cookie_jar=cookie_jar,
+            raw_session_cookie=resolved.session_cookie,
+            solution=resolved.solution,
+            prefetched_response=prefetched_catalog,
+            bypass_cache=resuming_captcha and (
+                resolved.challenge is None
+                or resolved.challenge.operation == "search_ncm_catalog"
+            ),
+        )
         avisos = list(catalog["avisos"])
         by_digits: dict[str, dict[str, str]] = catalog["by_digits"]
 
@@ -919,8 +1128,23 @@ class SiscomexNCMService:
             raw_query, norm_query, digit_query
         )
         decisoes, decisoes_modo = self._search_decisoes(
-            raw_query, norm_query, digit_query, expanded_terms, avisos
+            raw_query,
+            norm_query,
+            digit_query,
+            expanded_terms,
+            avisos,
+            consulta_payload=active_payload,
+            cookie_jar=cookie_jar,
+            raw_session_cookie=resolved.session_cookie,
+            solution=resolved.solution,
+            prefetched_response=prefetched_sijut,
+            bypass_cache=resuming_captcha and (
+                resolved.challenge is None
+                or resolved.challenge.operation == "search_ncm_sijut2"
+            ),
         )
+        limite = effective_limite
+        somente_vigentes = effective_vigentes
 
         # Build boost map from Sugestões and Decisões (Soluções de Consulta)
         suggested_ncm_boost: dict[str, tuple[float, str]] = {}
@@ -1067,6 +1291,7 @@ class SiscomexNCMService:
                 "sugestoes_classif": sugestoes_modo,
             },
             "cache_hit": cache_hit,
+            "captcha_resumed": resuming_captcha,
             "data_atualizacao_tabela": catalog["data_atualizacao"],
             "ato_referencia": catalog["ato_referencia"],
             "termo_busca": raw_query,

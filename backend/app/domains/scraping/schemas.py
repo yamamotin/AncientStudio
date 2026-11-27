@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any
 
 from app.queue.models import JobStatus
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScrapeStrategy(str, Enum):
@@ -28,6 +28,27 @@ class ScrapeJobRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
 
 
+class ScrapeSyncRequest(BaseModel):
+    """Synchronous scrape specification supporting interactive 422 CAPTCHA_REQUIRED resumption."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    url: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=2048,
+        description="URL pública alvo. Opcional na retomada quando 'challenge_id' é enviado.",
+    )
+    strategy: ScrapeStrategy = ScrapeStrategy.STRUCTURED_METADATA
+    selectors: list[str] = Field(default_factory=list, max_length=20)
+    cache_ttl_seconds: int = Field(default=300, ge=1, le=86400)
+    challenge_id: str | None = Field(default=None, max_length=128)
+    captcha_token: str | None = Field(default=None, max_length=8192)
+    captcha_solution: str | None = Field(default=None, max_length=8192)
+    session_cookie: str | None = Field(default=None, max_length=4096)
+    consulta_payload: dict[str, Any] | None = Field(default=None)
+
+
 class ScrapedDocument(BaseModel):
     """Normalized output contract produced by concrete scraper workers."""
 
@@ -40,6 +61,7 @@ class ScrapedDocument(BaseModel):
     content_sha256: str
     fetched_at: datetime
     cached: bool = False
+    captcha_resumed: bool = False
 
 
 class ScrapeJobAccepted(BaseModel):

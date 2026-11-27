@@ -17,6 +17,7 @@ from app.domains.scraping.schemas import (
     ScrapeJobAccepted,
     ScrapeJobRequest,
     ScrapeStrategy,
+    ScrapeSyncRequest,
 )
 from app.domains.scraping.service import (
     SCRAPING_COMPLETED_EVENT,
@@ -35,6 +36,7 @@ __all__ = [
     "ScrapeJobAccepted",
     "ScrapeJobRequest",
     "ScrapeStrategy",
+    "ScrapeSyncRequest",
     "ScrapedDocument",
     "ScrapingService",
     "SitemapXmlExtractor",

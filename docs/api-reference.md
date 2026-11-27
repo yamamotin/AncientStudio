@@ -2,6 +2,8 @@
 
 Esta referência documenta os endpoints públicos `/api/v1/*` implementados no pacote desacoplado `api/connectors/` e expostos de forma idêntica tanto pelo monólito modular **FastAPI** (`backend/app/main.py`) quanto pelo servidor **Python stdlib** (`api/server.py`, utilizado no `Dockerfile` da Vercel).
 
+Para o fluxo completo e padronizado de **resolução interativa de CAPTCHA** (`consulta -> 422 CAPTCHA_REQUIRED -> popup no frontend -> conclusão da consulta real no backend`, incluindo `GET /api/v1/captcha/challenges/{challenge_id}`, `POST /api/v1/captcha/resolve` e `POST /api/v1/scraping/extract`), consulte **[`docs/api-scrapers.md`](./api-scrapers.md)**.
+
 ---
 
 ## 1. PROJUDI (TJPR) — Raspagem Pública Real (Zero Mocks)

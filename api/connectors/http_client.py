@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import re
-import socket
+from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -19,6 +18,59 @@ DEFAULT_USER_AGENT = (
 )
 
 _CHARSET_RE = re.compile(r"charset\s*=\s*['\"]?([A-Za-z0-9._-]+)", re.IGNORECASE)
+_COOKIE_ATTR_NAMES = frozenset(
+    {
+        "path",
+        "domain",
+        "expires",
+        "max-age",
+        "secure",
+        "httponly",
+        "samesite",
+        "priority",
+        "partitioned",
+        "version",
+        "comment",
+    }
+)
+
+
+def parse_cookie_string(
+    raw_cookie: str | None, *, default_name: str = "JSESSIONID"
+) -> dict[str, str]:
+    """Parse a raw ``Cookie`` or ``Set-Cookie`` string into a clean ``{name: value}`` map."""
+    if not raw_cookie:
+        return {}
+    cleaned = str(raw_cookie).strip()
+    if not cleaned:
+        return {}
+    if "=" not in cleaned:
+        return {default_name: cleaned}
+
+    jar: dict[str, str] = {}
+    for line in cleaned.splitlines():
+        for part in line.split(";"):
+            token = part.strip()
+            if "=" not in token:
+                continue
+            key, val = token.split("=", 1)
+            k_clean = key.strip()
+            if not k_clean or k_clean.lower() in _COOKIE_ATTR_NAMES:
+                continue
+            jar[k_clean] = val.strip()
+    return jar
+
+
+def merge_cookie_header(
+    jar: dict[str, str] | None,
+    raw_cookie: str | None = None,
+    *,
+    default_name: str = "JSESSIONID",
+) -> str:
+    """Merge a cookie dictionary and optional caller cookie string into a ``Cookie`` header."""
+    merged: dict[str, str] = dict(jar or {})
+    merged.update(parse_cookie_string(raw_cookie, default_name=default_name))
+    return "; ".join(f"{k}={v}" for k, v in merged.items() if k and v is not None)
 
 
 @dataclass(frozen=True)
@@ -77,7 +129,8 @@ class HttpResponse:
             return json.loads(self.body.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise UpstreamConnectorError(
-                f"Resposta JSON inválida recebida de {self.url}: {exc}"
+                f"Resposta JSON inválida recebida de {self.url}: {exc}",
+                http_response=self,
             ) from exc
 
 
@@ -177,11 +230,31 @@ class UrllibHttpTransport:
                     body=b"".join(chunks),
                 )
         except HTTPError as exc:
+            err_body = b""
+            err_headers: dict[str, str] = {}
+            try:
+                if exc.headers is not None:
+                    err_headers = {k.lower(): v for k, v in exc.headers.items()}
+                    get_all = getattr(exc.headers, "get_all", None)
+                    if callable(get_all):
+                        all_cookies = get_all("Set-Cookie")
+                        if all_cookies:
+                            err_headers["set-cookie"] = "\n".join(all_cookies)
+                err_body = exc.read(131072) or b""
+            except Exception:
+                err_body = b""
+            err_response = HttpResponse(
+                url=getattr(exc, "url", full_url) or full_url,
+                status_code=int(exc.code),
+                headers=err_headers,
+                body=err_body,
+            )
             raise UpstreamConnectorError(
                 f"HTTP {exc.code} ao consultar fonte pública {full_url}.",
                 extra={"status_code": exc.code, "url": full_url},
+                http_response=err_response,
             ) from exc
-        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+        except (URLError, TimeoutError, OSError) as exc:
             raise UpstreamConnectorError(
                 f"Falha de rede/timeout ({timeout:.1f}s) ao consultar {full_url}: {exc}",
                 extra={"url": full_url},

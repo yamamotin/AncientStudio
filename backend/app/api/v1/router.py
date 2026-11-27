@@ -3,6 +3,7 @@
 from app.api.v1 import (
     ai_workflows,
     bcb,
+    captcha,
     etl,
     gateway,
     health,
@@ -26,6 +27,7 @@ router.include_router(bcb.router)
 router.include_router(siscomex.router)
 router.include_router(transparencia.router)
 router.include_router(projudi.router)
+router.include_router(captcha.router)
 router.include_router(playground.router)
 router.include_router(workflows.router)
 router.include_router(jobs.router)

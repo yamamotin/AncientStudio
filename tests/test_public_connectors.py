@@ -665,10 +665,21 @@ class BCBAndStdlibServerEndToEndTestCase(unittest.TestCase):
             data: bytes | None,
         ) -> HttpResponse:
             if "consulta.tjpr.jus.br" in url:
+                body_str = (data or b"").decode("ascii", errors="replace")
+                if method == "POST" and "SOLVED_STDLIB_TOKEN" in body_str:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
                 return HttpResponse(
                     url=url,
                     status_code=200,
-                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": "JSESSIONID=STDLIB_SRV_01; Path=/projudi_consulta",
+                    },
                     body=REALISTIC_TJPR_FORM_HTML.encode("iso-8859-1"),
                 )
             raise UpstreamConnectorError("Offline fallback test", status_code=503)
@@ -739,6 +750,457 @@ class BCBAndStdlibServerEndToEndTestCase(unittest.TestCase):
         self.assertEqual(st_proj, 422)
         self.assertEqual(proj_err["code"], "CAPTCHA_REQUIRED")
         self.assertIn("site_key", proj_err)
+        self.assertTrue(proj_err["challenge_id"].startswith("cap_"))
+        self.assertEqual(proj_err["provider"], "recaptcha")
+        self.assertEqual(proj_err["connector"], "projudi")
+        self.assertEqual(proj_err["resolve_endpoint"], "/api/v1/captcha/resolve")
+
+        cid = proj_err["challenge_id"]
+        st_meta, meta = self._request_json(f"/api/v1/captcha/challenges/{cid}")
+        self.assertEqual(st_meta, 200)
+        self.assertEqual(meta["data"]["challenge_id"], cid)
+
+        st_res, res_body = self._request_json(
+            "/api/v1/captcha/resolve",
+            method="POST",
+            payload={"challenge_id": cid, "captcha_token": "SOLVED_STDLIB_TOKEN"},
+        )
+        self.assertEqual(st_res, 200)
+        self.assertTrue(res_body["ok"])
+        self.assertTrue(res_body["data"]["captcha_resolved"])
+        self.assertEqual(res_body["data"]["total_processos"], 2)
+        self.assertEqual(
+            res_body["data"]["processos"][0]["numero_processo"], VALID_CNJ_1
+        )
+
+
+class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
+    """End-to-end verification of 422 CAPTCHA_REQUIRED -> popup solution -> real query."""
+
+    def test_projudi_challenge_store_reuses_jsessionid_and_completes_real_scrape(self) -> None:
+        from api.connectors import create_public_connectors
+
+        bootstrap_count = 0
+        submitted_cookies: list[str] = []
+        submitted_bodies: list[str] = []
+
+        def tjpr_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            nonlocal bootstrap_count
+            if method == "GET" and "actionType=visualizar" not in url:
+                bootstrap_count += 1
+                sid = f"JSESSIONID_BOOT_{bootstrap_count}"
+                html = (
+                    REALISTIC_TJPR_FRAMESET_HTML
+                    if "consultaPublica.do" not in url
+                    else REALISTIC_TJPR_FORM_HTML
+                )
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": f"JSESSIONID={sid}; Path=/projudi_consulta",
+                    },
+                    body=html.encode("iso-8859-1"),
+                )
+
+            if method == "POST" and "actionType=pesquisar" in url:
+                cookie_hdr = headers.get("Cookie", "")
+                body_str = (data or b"").decode("ascii", errors="replace")
+                submitted_cookies.append(cookie_hdr)
+                submitted_bodies.append(body_str)
+                # Reject wrong token with TJPR CAPTCHA error HTML
+                if "g-recaptcha-response=BAD_TOKEN" in body_str:
+                    err_html = (
+                        REALISTIC_TJPR_FORM_HTML
+                        + "<div class='error'>Validação do reCAPTCHA inválida.</div>"
+                    )
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=err_html.encode("iso-8859-1"),
+                    )
+                # Require exact JSESSIONID from initial bootstrap + solved token
+                if "JSESSIONID=JSESSIONID_BOOT_2" in cookie_hdr and "VALID_TOKEN" in body_str:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=REALISTIC_TJPR_FORM_HTML.encode("iso-8859-1"),
+                )
+
+            raise UpstreamConnectorError(f"Unexpected URL {url}", status_code=503)
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": tjpr_handler})
+        )
+
+        # Step 1: Initial query raises standardized 422 CAPTCHA_REQUIRED
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx:
+            registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+
+        err = ctx.exception
+        self.assertEqual(err.status_code, 422)
+        self.assertEqual(err.code, "CAPTCHA_REQUIRED")
+        cid1 = err.extra["challenge_id"]
+        self.assertTrue(cid1.startswith("cap_"))
+        self.assertEqual(err.extra["provider"], "recaptcha")
+        self.assertEqual(err.extra["session_cookie"], "JSESSIONID=JSESSIONID_BOOT_2")
+        self.assertEqual(err.extra["consulta_payload"]["cpf_mascarado"], "***.444.777-**")
+        self.assertNotIn("cpf", err.extra["consulta_payload"])
+        self.assertEqual(bootstrap_count, 2)  # frameset + mainFrame
+
+        # Public metadata endpoint returns active challenge without leaking raw CPF
+        meta = registry.get_captcha_challenge(cid1)
+        self.assertEqual(meta["challenge_id"], cid1)
+        self.assertNotIn("11144477735", json.dumps(meta))
+
+        # Step 2: Invalid token consumes cid1 and issues a fresh challenge (no extra bootstrap GET!)
+        with self.assertRaises(ConnectorCaptchaRequiredError) as retry_ctx:
+            registry.resolve_captcha(challenge_id=cid1, captcha_token="BAD_TOKEN")
+
+        cid2 = retry_ctx.exception.extra["challenge_id"]
+        self.assertNotEqual(cid1, cid2)
+        self.assertTrue(retry_ctx.exception.extra["challenge_data"]["rejected_previous_attempt"])
+        self.assertEqual(bootstrap_count, 2)  # Reused stored session without re-bootstrapping!
+        with self.assertRaises(ConnectorNotFoundError):
+            registry.get_captcha_challenge(cid1)
+
+        # Step 3: Valid token completes the real TJPR query using stored CPF + JSESSIONID
+        completed = registry.resolve_captcha(challenge_id=cid2, captcha_token="VALID_TOKEN")
+        self.assertTrue(completed["captcha_resolved"])
+        self.assertTrue(completed["captcha_resumed"])
+        self.assertEqual(completed["modo_execucao"], "raspagem_real_projudi_tjpr")
+        self.assertEqual(completed["total_processos"], 2)
+        self.assertEqual(completed["processos"][0]["numero_processo"], VALID_CNJ_1)
+        self.assertIn("JSESSIONID=JSESSIONID_BOOT_2", submitted_cookies[-1])
+        self.assertIn("cpfCnpj=11144477735", submitted_bodies[-1])
+        self.assertEqual(bootstrap_count, 2)
+
+        # Challenge is one-time and consumed after real completion
+        with self.assertRaises(ConnectorNotFoundError):
+            registry.get_captcha_challenge(cid2)
+
+    def test_siscomex_waf_image_captcha_fetches_base64_and_resumes_real_ncm_query(self) -> None:
+        from api.connectors import create_public_connectors
+
+        fake_png = b"\x89PNG\r\n\x1a\nCAPTCHA_BYTES"
+        waf_html = """<!DOCTYPE html>
+        <html>
+          <body>
+            <form action="/classif/api/publico/nomenclatura/download/json" method="get">
+              <input type="hidden" name="waf_nonce" value="nonce-987" />
+              <label>Digite os caracteres da imagem abaixo:</label>
+              <img src="/waf/captcha-img.png" alt="captcha" />
+              <input type="text" name="cod_captcha" placeholder="Código da imagem" />
+            </form>
+          </body>
+        </html>
+        """
+        image_cookie_seen: list[str] = []
+
+        def siscomex_waf_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            cookie_hdr = headers.get("Cookie", "")
+            if "/waf/captcha-img.png" in url:
+                image_cookie_seen.append(cookie_hdr)
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    body=fake_png,
+                )
+            # Unlocked when WAF session cookie + solved cod_captcha are sent
+            if "WAF_SID=sec999" in cookie_hdr and (
+                (params and params.get("cod_captcha") == "X7K9P")
+                or headers.get("X-Captcha-Response") == "X7K9P"
+            ):
+                live_catalog = {
+                    "Data_Ultima_Atualizacao_NCM": "25/11/2026",
+                    "Ato": "Resolução Gecex nº 926/2026",
+                    "Nomenclaturas": [
+                        {
+                            "Codigo": "84",
+                            "Descricao": "Reatores nucleares, caldeiras, máquinas",
+                            "Data_Inicio": "01/04/2022",
+                            "Data_Fim": "31/12/9999",
+                        },
+                        {
+                            "Codigo": "84.71",
+                            "Descricao": "Máquinas automáticas para processamento de dados",
+                            "Data_Inicio": "01/04/2022",
+                            "Data_Fim": "31/12/9999",
+                        },
+                        {
+                            "Codigo": "8471.80.00",
+                            "Descricao": "Outras unidades de máquinas automáticas para processamento de dados",
+                            "Data_Inicio": "01/04/2022",
+                            "Data_Fim": "31/12/9999",
+                        },
+                    ],
+                }
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "application/json; charset=utf-8"},
+                    body=json.dumps(live_catalog).encode("utf-8"),
+                )
+
+            # Simulate HTTP 403 WAF HTML CAPTCHA challenge (must NOT fall back to offline seed!)
+            err_resp = HttpResponse(
+                url=url,
+                status_code=403,
+                headers={
+                    "content-type": "text/html; charset=utf-8",
+                    "set-cookie": "WAF_SID=sec999; Path=/",
+                },
+                body=waf_html.encode("utf-8"),
+            )
+            raise UpstreamConnectorError(
+                "HTTP 403 WAF Challenge",
+                status_code=403,
+                http_response=err_resp,
+            )
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport(
+                {
+                    "portalunico.siscomex.gov.br": siscomex_waf_handler,
+                    "receita.fazenda.gov.br": HttpResponse(
+                        url="https://normas.receita.fazenda.gov.br/sijut2consulta/consulta.action",
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=utf-8"},
+                        body=REALISTIC_SIJUT2_GPU_HTML.encode("utf-8"),
+                    ),
+                }
+            )
+        )
+
+        # Step 1: 403 WAF HTML CAPTCHA raises 422 CAPTCHA_REQUIRED instead of offline seed fallback
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx:
+            registry.siscomex.search_ncm("GPU", limite=5)
+
+        cap_err = ctx.exception
+        self.assertEqual(cap_err.status_code, 422)
+        self.assertEqual(cap_err.code, "CAPTCHA_REQUIRED")
+        self.assertEqual(cap_err.extra["provider"], "image")
+        self.assertEqual(cap_err.extra["response_field"], "cod_captcha")
+        self.assertEqual(cap_err.extra["session_cookie"], "WAF_SID=sec999")
+        self.assertTrue(
+            cap_err.extra["challenge_data"]["image_data_uri"].startswith(
+                "data:image/png;base64,"
+            )
+        )
+        self.assertEqual(image_cookie_seen, ["WAF_SID=sec999"])
+
+        # Step 2: Resolving via unified resolver completes REAL online Siscomex query
+        resumed = registry.resolve_captcha(
+            challenge_id=cap_err.extra["challenge_id"],
+            captcha_solution="X7K9P",
+        )
+        self.assertTrue(resumed["captcha_resolved"])
+        self.assertTrue(resumed["captcha_resumed"])
+        self.assertEqual(resumed["fonte_modo"], "online_portal_unico_siscomex")
+        self.assertEqual(resumed["termo_busca"], "GPU")
+        self.assertEqual(resumed["resultados"][0]["codigo"], "8471.80.00")
+
+    def test_projudi_struts_image_captcha_popup_metadata_refresh_and_real_resumption(self) -> None:
+        from api.connectors import create_public_connectors
+
+        png_attempt_1 = b"\x89PNG\r\n\x1a\nPROJUDI_IMG_CHALLENGE_1"
+        png_attempt_2 = b"\x89PNG\r\n\x1a\nPROJUDI_IMG_CHALLENGE_2"
+
+        struts_img_form_1 = """<!DOCTYPE html>
+        <html>
+          <body>
+            <form id="buscaProcessoForm" name="buscaProcessoForm"
+                  action="/projudi_consulta/processo/consultaPublica.do?actionType=pesquisar"
+                  method="post">
+              <input type="hidden" name="org.apache.struts.taglib.html.TOKEN" value="struts-tok-1" />
+              <input type="hidden" name="tipoConsulta" value="1" />
+              <img id="imagemCaptcha" src="/projudi_consulta/captcha.svl?d=1" alt="Código de segurança" />
+              <input type="text" name="resposta" id="resposta" placeholder="Digite os caracteres" />
+            </form>
+          </body>
+        </html>
+        """
+        struts_img_form_2 = """<!DOCTYPE html>
+        <html>
+          <body>
+            <div class="erro">Código de segurança inválido.</div>
+            <form id="buscaProcessoForm" name="buscaProcessoForm"
+                  action="/projudi_consulta/processo/consultaPublica.do?actionType=pesquisar"
+                  method="post">
+              <input type="hidden" name="org.apache.struts.taglib.html.TOKEN" value="struts-tok-2" />
+              <input type="hidden" name="tipoConsulta" value="1" />
+              <img id="imagemCaptcha" src="/projudi_consulta/captcha.svl?d=2" alt="Código de segurança" />
+              <input type="text" name="resposta" id="resposta" placeholder="Novo código" />
+            </form>
+          </body>
+        </html>
+        """
+
+        img_requests: list[tuple[str, str]] = []
+        post_bodies: list[str] = []
+
+        def projudi_img_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            cookie_hdr = headers.get("Cookie", "")
+            if "captcha.svl" in url:
+                img_requests.append((url, cookie_hdr))
+                body_bytes = png_attempt_2 if "d=2" in url else png_attempt_1
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    body=body_bytes,
+                )
+            if method == "GET" and url.rstrip("/").endswith("/projudi_consulta"):
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": "JSESSIONID=PROJUDI_IMG_1; Path=/projudi_consulta",
+                    },
+                    body=REALISTIC_TJPR_FRAMESET_HTML.encode("iso-8859-1"),
+                )
+            if method == "GET" and "actionType=iniciar" in url:
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=struts_img_form_1.encode("iso-8859-1"),
+                )
+            if method == "POST" and "consultaPublica.do" in url:
+                form_body = (data or b"").decode("ascii", errors="replace")
+                post_bodies.append(form_body)
+                if "resposta=A7K9P2" in form_body and "PROJUDI_IMG_1" in cookie_hdr:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=struts_img_form_2.encode("iso-8859-1"),
+                )
+            raise UpstreamConnectorError(f"Unexpected URL: {url}", status_code=503)
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": projudi_img_handler})
+        )
+
+        # 1. Initial CPF lookup returns compact-popup-ready 422 CAPTCHA_REQUIRED with PNG data URI
+        with self.assertRaises(ConnectorCaptchaRequiredError) as first_ctx:
+            registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+
+        err1 = first_ctx.exception
+        self.assertEqual(err1.status_code, 422)
+        self.assertEqual(err1.code, "CAPTCHA_REQUIRED")
+        self.assertEqual(err1.extra["provider"], "image")
+        self.assertEqual(err1.extra["response_field"], "resposta")
+        self.assertEqual(err1.extra["expected_param"], "captcha_token")
+        self.assertEqual(err1.extra["accepted_params"], ["captcha_token", "captcha_solution"])
+        self.assertEqual(err1.extra["session_cookie"], "JSESSIONID=PROJUDI_IMG_1")
+        self.assertTrue(err1.extra["image_data_uri"].startswith("data:image/png;base64,"))
+        self.assertEqual(err1.extra["captcha_image"], err1.extra["image_data_uri"])
+        self.assertEqual(
+            err1.extra["image_endpoint"],
+            f"/api/v1/captcha/challenges/{err1.extra['challenge_id']}/image",
+        )
+        self.assertEqual(err1.extra["popup"]["mode"], "image")
+        self.assertEqual(err1.extra["popup"]["response_field"], "resposta")
+        self.assertEqual(err1.extra["popup"]["expected_param"], "captcha_token")
+        self.assertEqual(err1.extra["popup"]["image_data_uri"], err1.extra["image_data_uri"])
+        # LGPD check: raw CPF never serialized in 422 payload
+        self.assertNotIn("cpf", err1.extra["consulta_payload"])
+        self.assertEqual(err1.extra["consulta_payload"]["cpf_mascarado"], "***.444.777-**")
+        # Binary image helper returns exact PNG bytes
+        raw_img, raw_mime = registry.get_captcha_challenge_image(err1.extra["challenge_id"])
+        self.assertEqual(raw_img, png_attempt_1)
+        self.assertEqual(raw_mime, "image/png")
+
+        # 2. Wrong code rotates to new d=2 image and refreshes image_base64 + Struts token
+        with self.assertRaises(ConnectorCaptchaRequiredError) as retry_ctx:
+            registry.projudi.consulta_por_cpf(
+                challenge_id=err1.extra["challenge_id"],
+                captcha_token="WRONG1",
+            )
+        err2 = retry_ctx.exception
+        self.assertNotEqual(err2.extra["challenge_id"], err1.extra["challenge_id"])
+        self.assertNotEqual(err2.extra["image_base64"], err1.extra["image_base64"])
+        raw_img_2, _ = registry.get_captcha_challenge_image(err2.extra["challenge_id"])
+        self.assertEqual(raw_img_2, png_attempt_2)
+
+        # 3. Correct solution completes real TJPR scrape using rotated Struts token + JSESSIONID
+        done = registry.projudi.consulta_por_cpf(
+            challenge_id=err2.extra["challenge_id"],
+            captcha_token="A7K9P2",
+        )
+        self.assertTrue(done["captcha_resumed"])
+        self.assertTrue(done["captcha_token_informado"])
+        self.assertFalse(done["compliance"]["dados_sinteticos_ou_mock"])
+        self.assertEqual(done["total_processos"], 2)
+        self.assertIn("resposta=A7K9P2", post_bodies[-1])
+        self.assertIn("org.apache.struts.taglib.html.TOKEN=struts-tok-2", post_bodies[-1])
+        self.assertEqual(len(img_requests), 2)
+
+    def test_unsafe_svg_captcha_image_is_blocked_for_popup_security(self) -> None:
+        from api.connectors.captcha import CaptchaChallengeStore
+
+        malicious_svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+        store = CaptchaChallengeStore()
+        ch = store.issue_challenge(
+            connector="projudi",
+            operation="consulta_por_cpf",
+            provider="image",
+            challenge_url="https://consulta.tjpr.jus.br/projudi_consulta/form.do",
+            image_url="https://consulta.tjpr.jus.br/projudi_consulta/captcha.svl",
+            resume_endpoint="/api/v1/projudi/processos/consulta",
+            transport=FakeRouteTransport(
+                {
+                    "captcha.svl": HttpResponse(
+                        url="https://consulta.tjpr.jus.br/projudi_consulta/captcha.svl",
+                        status_code=200,
+                        headers={"content-type": "image/svg+xml"},
+                        body=malicious_svg,
+                    )
+                }
+            ),
+        )
+        pub = ch.to_public_payload()
+        self.assertIsNone(pub.get("image_data_uri"))
+        self.assertIsNone(pub.get("image_base64"))
 
 
 if __name__ == "__main__":
