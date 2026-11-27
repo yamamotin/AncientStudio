@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Strict client-side policy: same-origin assets only, GitHub's public read-only
        API as the single cross-origin endpoint, no inline script/style, no frames. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com; form-action 'self'; frame-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://consulta.tjpr.jus.br https://www.tjpr.jus.br https://tjpr.jus.br; font-src 'self'; connect-src 'self' https://api.github.com; form-action 'self'; frame-src 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Eron Yamamoto D. Justina // Backend &amp; Data Engineer</title>
   <meta name="description" content="Portfólio técnico de Eron Yamamoto D. Justina. Python, Linux, APIs REST, automação, CI/CD e pipelines de dados. Disponível remoto.">
@@ -30,7 +30,6 @@
   <script src="assets/js/console.js" defer></script>
   <script src="assets/js/neofetch.js" defer></script>
   <script src="assets/js/captcha.js" defer></script>
-  <script src="assets/js/penguin-font.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </head>
 <body>
@@ -435,17 +434,6 @@
         </div>
       </div>
       <div id="stack-body" class="collapse-body">
-      <!-- TEMPORÁRIO (teste visual de tipografia): controle de fonte/célula do pinguim.
-           Para remover: apague este bloco, a tag de script de penguin-font.js no <head>,
-           o CSS .penguin-font-bar e as chaves penguinFont.* dos dicionários. -->
-      <div id="penguin-font-bar" class="penguin-font-bar" data-temporary="true" role="group" aria-label="Ajuste temporário da fonte do pinguim" data-i18n-attr="aria-label:penguinFont.groupAria">
-        <span class="penguin-font-tag" data-i18n="penguinFont.tag">// temp</span>
-        <label for="penguin-font-size" data-i18n="penguinFont.label">fonte do pinguim</label>
-        <input id="penguin-font-size" type="range" min="4" max="20" step="0.5" value="10" aria-label="Tamanho da fonte e da célula do pinguim em pixels" data-i18n-attr="aria-label:penguinFont.aria">
-        <output id="penguin-font-value" for="penguin-font-size">10px</output>
-        <button id="penguin-font-reset" class="cmd-button cmd-button--small" type="button" aria-label="Restaurar o tamanho padrão do pinguim" data-i18n="penguinFont.reset" data-i18n-attr="aria-label:penguinFont.resetAria">[ restaurar ]</button>
-      </div>
-
       <div class="neofetch">
         <div>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback" aria-hidden="true">
@@ -480,44 +468,29 @@
   </main>
 
   <!-- CAPTCHA challenge dialog: opened only when the API answers 422 CAPTCHA_REQUIRED.
-       No remote frame is embedded (CSP frame-src 'none'); the portal opens in a new tab. -->
-  <dialog id="captcha-dialog" class="captcha-dialog" aria-labelledby="captcha-title" aria-describedby="captcha-hint">
+       Compact by design: the challenge image mirrored from the official portal (or its
+       short prompt), a single answer field and the send/cancel actions. No portal page,
+       no metadata table and no remote frame (CSP frame-src 'none'). -->
+  <dialog id="captcha-dialog" class="captcha-dialog captcha-dialog--compact" aria-labelledby="captcha-title" aria-describedby="captcha-prompt">
     <form id="captcha-form" class="captcha-form" novalidate>
-      <div class="panel-head">
+      <div class="captcha-head">
         <h2 id="captcha-title" data-i18n="captcha.title">[ VERIFICAÇÃO HUMANA ]</h2>
         <button id="captcha-close" class="cmd-button cmd-button--small" type="button" aria-label="Fechar a verificação humana" data-i18n-attr="aria-label:captcha.closeAria" data-i18n="captcha.close">[ fechar ]</button>
       </div>
-      <p id="captcha-hint" class="muted" data-i18n="captcha.hint">Este portal público exige um CAPTCHA resolvido por uma pessoa. Conclua o desafio no portal oficial e cole o token abaixo para o backend concluir a consulta real.</p>
-      <p id="captcha-detail" class="muted captcha-detail" hidden></p>
-      <dl class="captcha-meta">
-        <div>
-          <dt data-i18n="captcha.providerLabel">Provedor</dt>
-          <dd id="captcha-provider">—</dd>
-        </div>
-        <div>
-          <dt data-i18n="captcha.siteKeyLabel">Chave do site</dt>
-          <dd id="captcha-site-key">—</dd>
-        </div>
-        <div>
-          <dt data-i18n="captcha.expiresLabel">Expira em</dt>
-          <dd id="captcha-expires">—</dd>
-        </div>
-      </dl>
-      <p class="captcha-portal"><a id="captcha-portal-link" hidden data-i18n="captcha.openPortal">[ abrir portal oficial ]</a></p>
-      <div class="captcha-steps-block">
-        <p class="captcha-label" data-i18n="captcha.instructionsLabel">Como resolver</p>
-        <ol id="captcha-instructions" class="captcha-steps"></ol>
+      <div class="captcha-challenge">
+        <!-- Inert 1x1 placeholder: the element is only valid markup with a src, and the
+             mirrored challenge bitmap replaces it while the dialog is open. -->
+        <img id="captcha-image" class="captcha-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Desafio CAPTCHA do PROJUDI" data-i18n-attr="alt:captcha.imageAlt" decoding="async" referrerpolicy="no-referrer" hidden>
+        <p id="captcha-prompt" class="captcha-prompt" data-i18n="captcha.promptFallback">Digite os caracteres do desafio exibido na imagem</p>
       </div>
-      <label class="captcha-label" for="captcha-token" data-i18n="captcha.tokenLabel">Token do CAPTCHA (g-recaptcha-response)</label>
-      <input id="captcha-token" class="select-control" type="text" autocomplete="off" spellcheck="false" maxlength="4096" data-sensitive="true" placeholder="cole aqui o token gerado pelo portal" data-i18n-attr="placeholder:captcha.tokenPlaceholder">
-      <label class="captcha-label" for="captcha-session" data-i18n="captcha.sessionLabel">Cookie de sessão (opcional)</label>
-      <input id="captcha-session" class="select-control" type="password" autocomplete="new-password" spellcheck="false" maxlength="1024" data-sensitive="true" placeholder="JSESSIONID=..." data-i18n-attr="placeholder:captcha.sessionPlaceholder">
+      <label class="captcha-label" for="captcha-token" data-i18n="captcha.answerLabel">Resposta do desafio</label>
+      <input id="captcha-token" class="select-control" type="text" autocomplete="off" spellcheck="false" maxlength="4096" data-sensitive="true" placeholder="digite a resposta exibida na imagem" data-i18n-attr="placeholder:captcha.answerPlaceholder">
       <p id="captcha-error" class="captcha-error" role="alert" hidden></p>
       <div class="captcha-actions">
-        <button id="captcha-submit" class="cmd-button cmd-button--primary" type="submit" data-i18n="captcha.submit">[ enviar token ]</button>
+        <button id="captcha-submit" class="cmd-button cmd-button--primary" type="submit" data-i18n="captcha.submit">[ enviar ]</button>
         <button id="captcha-cancel" class="cmd-button" type="button" data-i18n="captcha.cancel">[ cancelar ]</button>
+        <span id="captcha-expires" class="captcha-countdown">—</span>
       </div>
-      <p class="muted captcha-privacy" data-i18n="captcha.privacy">// o token é usado apenas nesta consulta e é apagado ao fechar</p>
     </form>
   </dialog>
 

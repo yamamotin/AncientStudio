@@ -1,7 +1,8 @@
 'use strict';
 
-/* Layout batch: contextual per-card API responses, the temporary penguin font bar,
-   the console position after the API gateway and the 50%-100% brightness curve. */
+/* Layout batch: contextual per-card API responses, the fixed 4px penguin with its
+   lighter outline, the console position after the API gateway and the 50%-100%
+   brightness curve. */
 
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
@@ -16,8 +17,8 @@ const html = read('index.html');
 const main = read('assets/js/main.js');
 const css = read('assets/css/style.css');
 const adapter = read('assets/js/engine-adapter.js');
-const penguinFont = read('assets/js/penguin-font.js');
 const i18n = read('assets/js/i18n.js');
+const neofetch = read('assets/js/neofetch.js');
 const pt = JSON.parse(read('assets/i18n/pt-br.json'));
 const en = JSON.parse(read('assets/i18n/en.json'));
 
@@ -92,173 +93,58 @@ test('main.js keeps a single active response window and closes it on demand', ()
   includesAll(i18n, ['"api.close"', '"api.closeAria"']);
 });
 
-test('the temporary penguin font bar is translated, isolated and removable', () => {
+test('the temporary penguin font slider is gone and the penguin is fixed at 4px', () => {
   const stack = html.slice(html.indexOf('<section id="stack"'), html.indexOf('</main>'));
-  includesAll(stack, [
-    'id="penguin-font-bar"',
-    'data-temporary="true"',
-    'id="penguin-font-size"',
-    'type="range"',
-    'id="penguin-font-value"',
-    '10px',
-    'id="penguin-font-reset"',
-    'data-i18n="penguinFont.label"',
-    'data-i18n="penguinFont.reset"',
-    'data-i18n="penguinFont.tag"'
-  ]);
-  // It targets the penguin stage area, before the neofetch block.
-  assert.ok(stack.indexOf('penguin-font-bar') < stack.indexOf('class="neofetch"'));
-  // The neofetch spec rows are untouched (still exactly seven).
+  // No slider, no px readout, no reset button, no temporary marker anywhere in the page.
+  for (const gone of ['penguin-font-bar', 'penguin-font-size', 'penguin-font-value', 'penguin-font-reset']) {
+    assert.ok(!html.includes(gone), `#${gone} was removed from index.html`);
+  }
+  assert.ok(!html.includes('penguinFont'), 'no penguinFont i18n keys remain in the markup');
+  assert.ok(!html.includes('data-temporary'), 'the temporary container is gone');
+  assert.equal((html.match(/<script src="assets\/js\/penguin-font\.js"/g) || []).length, 0);
+  // The stack section itself is untouched: fixed (no scene-style collapse removal),
+  // seven spec rows and the penguin stage in place.
+  includesAll(stack, ['id="penguin-stage"', 'class="penguin-fallback"', 'id="stack-body"']);
   assert.equal((stack.match(/<dt/g) || []).length, 7);
   assert.equal((stack.match(/<dd/g) || []).length, 7);
+  assert.ok(!stack.includes('type="range"'), 'no range input is left in the penguin section');
 
+  // The module and its translations are gone from every layer.
+  assert.ok(!read('assets/js/main.js').includes('penguinFont'), 'main.js no longer boots the module');
   for (const key of ['penguinFont.label', 'penguinFont.aria', 'penguinFont.reset', 'penguinFont.resetAria', 'penguinFont.groupAria', 'penguinFont.tag']) {
-    assert.ok(pt[key] && en[key], `missing translation for ${key}`);
-    assert.ok(i18n.includes(`"${key}"`), `${key} is mirrored in BUNDLED`);
+    assert.ok(!pt[key] && !en[key], `${key} was pruned from both dictionaries`);
+    assert.ok(!i18n.includes(`"${key}"`), `${key} was pruned from BUNDLED`);
   }
-  includesAll(css, [
-    '.penguin-font-bar',
-    '#penguin-stage[data-font-override="true"] .penguin-fallback',
-    'font-size: var(--penguin-font-px, 10px) !important'
-  ]);
-  includesAll(penguinFont, ['TEMPORARY', 'HOW TO REMOVE IT', '--penguin-font-px', 'setMascotCellSize', 'resetMascotCellSize']);
-  // The mascot mounts after boot: the chosen size is re-applied when the stage reports engine mode.
-  includesAll(penguinFont, ["addEventListener('tp:scene-mode', onStageMode)", "event.detail.mode !== 'engine'"]);
-  // The bar is the only place that owns the override, so deleting it is enough.
-  assert.equal(
-    (html.match(/<script src="assets\/js\/penguin-font\.js"/g) || []).length,
-    1,
-    'one script tag to delete'
-  );
-  assert.ok(main.includes('if (TP.penguinFont) TP.penguinFont.init();'));
-  assert.doesNotMatch(read('assets/js/neofetch.js'), /penguinFont|penguin-font/, 'neofetch.js stays independent');
+  assert.ok(!css.includes('.penguin-font-bar'), 'the bar CSS is gone');
+  assert.ok(!css.includes('data-font-override'), 'the override CSS is gone');
+
+  // 4px is the single source of truth for the ASCII fallback.
+  includesAll(neofetch, ['var PENGUIN_FONT_PX = 4;', 'fontPx: PENGUIN_FONT_PX']);
+  includesAll(css, ['font-size: var(--penguin-font-px, 4px)']);
+  assert.doesNotMatch(neofetch, /fontPx = 9\.5|fontPx = 8\.5|fontPx = 8\.0|fontPx = 8\.8/, 'no adaptive font sizes remain');
 });
 
-test('the penguin font bar resizes the fallback and the live mascot, then resets', () => {
-  const calls = [];
-  const stageHandlers = {};
-  const stage = {
-    attrs: {},
-    styles: {},
-    style: { setProperty(name, value) { stage.styles[name] = value; } },
-    setAttribute(name, value) { stage.attrs[name] = value; },
-    getAttribute(name) { return stage.attrs[name] === undefined ? null : stage.attrs[name]; },
-    addEventListener(type, handler) { (stageHandlers[type] = stageHandlers[type] || []).push(handler); },
-    removeEventListener(type, handler) {
-      stageHandlers[type] = (stageHandlers[type] || []).filter((fn) => fn !== handler);
-    },
-    fire(type, detail) { (stageHandlers[type] || []).forEach((fn) => fn({ type, detail })); }
-  };
-  const input = {
-    value: '10',
-    min: '4',
-    max: '20',
-    step: '0.5',
-    attrs: {},
-    handlers: {},
-    setAttribute(name, value) { input.attrs[name] = String(value); },
-    getAttribute(name) { return input.attrs[name] === undefined ? null : input.attrs[name]; },
-    addEventListener(type, handler) { (input.handlers[type] = input.handlers[type] || []).push(handler); },
-    removeEventListener(type, handler) {
-      input.handlers[type] = (input.handlers[type] || []).filter((fn) => fn !== handler);
-    },
-    fire(type) { (input.handlers[type] || []).forEach((fn) => fn({ type })); }
-  };
-  const output = { textContent: '10px' };
-  const resetButton = {
-    handlers: {},
-    addEventListener(type, handler) { (resetButton.handlers[type] = resetButton.handlers[type] || []).push(handler); },
-    removeEventListener() {},
-    fire(type) { (resetButton.handlers[type] || []).forEach((fn) => fn({ type })); }
-  };
-  const sandbox = {
-    console,
-    Math,
-    Number,
-    isFinite,
-    document: {
-      getElementById(id) {
-        if (id === 'penguin-stage') return stage;
-        if (id === 'penguin-font-size') return input;
-        if (id === 'penguin-font-value') return output;
-        if (id === 'penguin-font-reset') return resetButton;
-        return null;
-      }
-    }
-  };
-  sandbox.window = sandbox;
-  sandbox.window.TP = {
-    scene: {
-      setMascotCellSize(px) { calls.push(['set', px]); return px; },
-      resetMascotCellSize() { calls.push(['reset']); return 8; }
-    }
-  };
-  sandbox.TP = sandbox.window.TP;
-  const pagehide = [];
-  sandbox.window.addEventListener = (type, handler) => { if (type === 'pagehide') pagehide.push(handler); };
-  sandbox.window.removeEventListener = () => {};
+test('the penguin outline is lighter and readable on the dark stage', () => {
+  const fallback = css.slice(css.indexOf('.penguin-fallback {'), css.indexOf('}', css.indexOf('.penguin-fallback {')));
+  // A light text color plus a white/mint halo instead of the old flat green glow.
+  assert.match(fallback, /color:\s*#E9FFF6/, 'the typos are drawn in a light ink');
+  includesAll(fallback, [
+    'text-shadow:',
+    'rgba(255, 255, 255, 0.9)',
+    'rgba(180, 255, 220, 0.5)'
+  ]);
+  assert.doesNotMatch(fallback, /color:\s*var\(--green\)/, 'the flat dark green ink was replaced');
 
-  vm.createContext(sandbox);
-  vm.runInContext(penguinFont, sandbox);
-
-  assert.equal(sandbox.TP.penguinFont.init(), true);
-  assert.equal(sandbox.TP.penguinFont.config.temporary, true);
-  assert.equal(stage.styles['--penguin-font-px'], '10px', 'the declared default is applied at boot');
-  assert.equal(stage.attrs['data-font-override'], 'true');
-  assert.equal(output.textContent, '10px');
-  assert.deepEqual(calls, [['set', 10]], 'the mascot receives the same size while mounted');
-
-  // Slider moves reach both renders live.
-  input.value = '16';
-  input.fire('input');
-  assert.equal(stage.styles['--penguin-font-px'], '16px');
-  assert.equal(output.textContent, '16px');
-  assert.equal(input.attrs['aria-valuetext'], '16px');
-  assert.deepEqual(calls[calls.length - 1], ['set', 16]);
-
-  // Out-of-range and fractional values are clamped to the declared window.
-  sandbox.TP.penguinFont.setPixels(99);
-  assert.equal(sandbox.TP.penguinFont.getPixels(), 20);
-  sandbox.TP.penguinFont.setPixels(1);
-  assert.equal(sandbox.TP.penguinFont.getPixels(), 4);
-  sandbox.TP.penguinFont.setPixels(7.26);
-  assert.equal(sandbox.TP.penguinFont.getPixels(), 7.5);
-
-  // Reset restores the default size and the mascot's mounted density.
-  input.value = '18';
-  input.fire('input');
-  resetButton.fire('click');
-  assert.equal(stage.styles['--penguin-font-px'], '10px');
-  assert.equal(input.value, '10');
-  assert.equal(output.textContent, '10px');
-  assert.deepEqual(calls[calls.length - 1], ['reset']);
-
-  // When the mascot finishes mounting, the chosen size is pushed to it again.
-  input.value = '14';
-  input.fire('input');
-  calls.length = 0;
-  stage.fire('tp:scene-mode', { mode: 'engine' });
-  assert.deepEqual(calls, [['set', 14]], 'the mounted mascot receives the current size');
-
-  // pagehide removes the listeners: nothing keeps running after the tab goes away.
-  assert.ok(pagehide.length >= 1);
-  pagehide.forEach((handler) => handler({ type: 'pagehide' }));
-  input.value = '19';
-  input.fire('input');
-  assert.equal(sandbox.TP.penguinFont.getPixels(), 14, 'no listener survives pagehide');
+  // The live mascot gets the same light halo through CSS only (shaders untouched).
+  const halo = css.slice(css.indexOf('#penguin-stage canvas {'), css.indexOf('}', css.indexOf('#penguin-stage canvas {')));
+  includesAll(halo, ['filter: drop-shadow(', 'rgba(255, 255, 255, 0.55)', 'rgba(150, 255, 205, 0.22)']);
+  // Rotation and lifecycle stay owned by the engine adapter.
+  includesAll(adapter, ["getObjectByName('TuxMascotRoot')", 'startMascotSpin']);
 });
 
-test('the mascot density hook is additive and never touches the main scene contract', () => {
-  includesAll(adapter, [
-    'function setMascotCellSize(px)',
-    'function resetMascotCellSize()',
-    'if (!isMascot) return null;',
-    'setMascotCellSize: setMascotCellSize,',
-    'resetMascotCellSize: resetMascotCellSize,',
-    'setMascotCellSize: function (px) {',
-    'resetMascotCellSize: function () {'
-  ]);
-  // The public scene contract is untouched.
+test('the removed mascot hooks leave the public scene contract intact', () => {
+  // The slider-only hooks are gone.
+  assert.ok(!adapter.includes('MascotCellSize'), 'no mascot density hook survives');
   includesAll(adapter, [
     'create: function (container, options)',
     'mount: function (container, options)',

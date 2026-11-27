@@ -27,18 +27,24 @@ EN = json.loads((ROOT / "assets" / "i18n" / "en.json").read_text(encoding="utf-8
 DIALOG_IDS = (
     "captcha-dialog",
     "captcha-form",
-    "captcha-provider",
-    "captcha-site-key",
-    "captcha-portal-link",
+    "captcha-image",
+    "captcha-prompt",
     "captcha-expires",
-    "captcha-detail",
-    "captcha-instructions",
     "captcha-token",
-    "captcha-session",
     "captcha-error",
     "captcha-submit",
     "captcha-cancel",
     "captcha-close",
+)
+
+# Ids of the old, heavy dialog: the popup is compact by contract.
+REMOVED_DIALOG_IDS = (
+    "captcha-provider",
+    "captcha-site-key",
+    "captcha-portal-link",
+    "captcha-detail",
+    "captcha-instructions",
+    "captcha-session",
 )
 
 # Fields the connectors are allowed to put in the 422 body; the client must consume them.
@@ -52,17 +58,17 @@ CHALLENGE_FIELDS = (
     "expires_at",
     "challenge_id",
     "provider",
+    "image_url",
+    "image_data_url",
+    "challenge_text",
 )
 
 GENERIC_FIELDS = {"status", "code", "detail", "data", "problem", "title", "type", "ok"}
-# `raw.trim` is a String method on the sanitized input, not a backend field.
-NON_FIELDS = {"trim"}
+# `raw.trim` is a String method on the sanitized input, not a backend field; `raw.text`
+# and `raw.image` are the camelCase mirrors that keep sanitizeChallenge() idempotent.
+NON_FIELDS = {"trim", "text", "image"}
 # Product names and literal placeholders are intentionally identical in both languages.
-UNTRANSLATED_OK = {
-    "captcha.sessionPlaceholder",
-    "captcha.providerHcaptcha",
-    "captcha.providerRecaptcha",
-}
+UNTRANSLATED_OK: set[str] = set()
 
 
 def dialog_markup() -> str:
@@ -77,12 +83,25 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         for element_id in DIALOG_IDS:
             self.assertIn(f'id="{element_id}"', markup, f"#{element_id} missing from the dialog")
         self.assertIn("novalidate", markup)
-        # No remote frame is ever embedded: the portal opens in a new tab instead.
+        # No remote frame is ever embedded and the portal page is never rendered.
         for tag in ("<iframe", "<frame", "<object", "<embed", "<script"):
             self.assertNotIn(tag, markup)
         self.assertIn('autocomplete="off"', markup)
-        self.assertIn('type="password"', markup, "session cookies are masked")
         self.assertIn('role="alert"', markup)
+        # Compact: one field, the challenge image and the two actions only.
+        self.assertEqual(markup.count("<input"), 1, "the popup has a single answer field")
+        for removed in REMOVED_DIALOG_IDS:
+            self.assertNotIn(f'id="{removed}"', markup, f"#{removed} must not come back")
+        for heavy in ("<dl", "<ol", "<table"):
+            self.assertNotIn(heavy, markup, "no metadata/instructions blocks in the popup")
+        self.assertIn('id="captcha-image"', markup)
+        self.assertIn('referrerpolicy="no-referrer"', markup)
+        markup_pixel = re.search(r'id="captcha-image"[^>]*src="(data:image/gif;base64,[^"]+)"', markup)
+        self.assertIsNotNone(markup_pixel, "inert placeholder pixel in the markup")
+        client_pixel = re.search(r"IMAGE_PLACEHOLDER = '([^']+)'", CLIENT)
+        self.assertIsNotNone(client_pixel, "the module knows the inert placeholder")
+        self.assertEqual(client_pixel.group(1), markup_pixel.group(1), "both use the same inert 1x1 pixel")
+        self.assertIn('data-sensitive="true"', markup)
 
     def test_module_loads_after_i18n_and_before_main(self) -> None:
         i18n_at = HTML.index("assets/js/i18n.js")
@@ -137,13 +156,27 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         self.assertTrue("parsed.protocol !== 'https:'" in CLIENT, "https is enforced")
         self.assertTrue("parsed.username || parsed.password" in CLIENT, "credentials in URLs are rejected")
         self.assertNotIn("http://", CLIENT, "the popup must never accept plain http URLs")
+        # The challenge bitmap: strict base64 data URL or https on the TJPR hosts only.
+        self.assertIn("function safeImageSource(raw)", CLIENT)
+        self.assertIn("IMAGE_DATA_PATTERN", CLIENT)
+        self.assertIn("var IMAGE_HOSTS = ['consulta.tjpr.jus.br', 'www.tjpr.jus.br', 'tjpr.jus.br'];", CLIENT)
+        self.assertNotIn("image/svg", CLIENT, "scriptable SVG payloads are refused")
+        # CSP parity: the dialog can only load images from those hosts (plus data:'self).
+        csp = re.search(r'Content-Security-Policy" content="([^"]+)"', HTML)
+        self.assertIsNotNone(csp)
+        self.assertIn("img-src 'self' data:", csp.group(1))
+        for host in ("consulta.tjpr.jus.br", "www.tjpr.jus.br", "tjpr.jus.br"):
+            self.assertIn(f"https://{host}", csp.group(1))
+        self.assertIn("frame-src 'none'", csp.group(1))
         allowlist = re.search(r"var ALLOWED_HOSTS = \[([\s\S]*?)\];", CLIENT)
         self.assertIsNotNone(allowlist)
         hosts = re.findall(r"'([^']+)'", allowlist.group(1))
         self.assertIn("consulta.tjpr.jus.br", hosts)
         self.assertIn("www.google.com", hosts)
         self.assertTrue(all("*" not in host for host in hosts), "no wildcard hosts in the allowlist")
-        self.assertTrue("noopener noreferrer" in CLIENT, "portal links are opened safely")
+        # There is no outbound link in the compact popup at all: nothing navigates away.
+        self.assertNotIn("<a ", dialog_markup(), "the popup renders no anchor")
+        self.assertNotIn("setAttribute('href'", CLIENT, "the module never builds a link")
 
     def test_no_html_injection_sink_and_state_is_wiped(self) -> None:
         for sink in (".innerHTML", "insertAdjacentHTML", "outerHTML", "document.write", "eval("):
@@ -169,7 +202,7 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
 
     def test_copy_is_translated_in_both_locales(self) -> None:
         keys = {key for key in PT if key.startswith("captcha.")}
-        self.assertGreaterEqual(len(keys), 20)
+        self.assertGreaterEqual(len(keys), 15)
         self.assertEqual(keys, {key for key in EN if key.startswith("captcha.")})
         for key in keys:
             self.assertTrue(PT[key].strip(), f"{key} is empty in pt-br")
@@ -182,6 +215,14 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         ):
             self.assertIn(key, PT, f"missing pt-br key {key}")
             self.assertIn(key, EN, f"missing en key {key}")
+
+    def test_temporary_penguin_slider_is_fully_removed(self) -> None:
+        for leftover in ("penguin-font", "penguinFont"):
+            self.assertNotIn(leftover, HTML, f"{leftover} was removed from the page")
+            self.assertNotIn(leftover, CLIENT + MAIN, f"{leftover} was removed from the scripts")
+        self.assertFalse(any(key.startswith("penguinFont.") for key in PT), "dictionary pruned")
+        self.assertFalse(any(key.startswith("penguinFont.") for key in EN), "dictionary pruned")
+        self.assertTrue((ROOT / "assets" / "js" / "penguin-font.js").exists() is False, "module deleted")
 
     def test_static_text_matches_the_portuguese_dictionary(self) -> None:
         pairs = re.findall(r'data-i18n="(captcha\.[^"]+)"[^>]*>([^<]*)<', dialog_markup())
