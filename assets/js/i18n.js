@@ -136,6 +136,11 @@ window.TP = window.TP || {};
     "pipeline.doc.reference": "Referência completa: docs/ci-cd-pipeline.md",
     "gateway.title": "[ API GATEWAY // INTEGRAÇÕES ]",
     "scene.title": "[ CENA 3D INTERATIVA ]",
+    "scene.fontGroupAria": "Controle de tamanho da fonte ASCII",
+    "scene.fontSizeLabel": "Fonte / célula",
+    "scene.fontSizeAria": "Tamanho da fonte e célula ASCII em pixels",
+    "scene.fontReset": "[ restaurar ]",
+    "scene.fontResetAria": "Restaurar tamanho inicial da fonte ASCII",
     "workflow.tokenHygiene": "// a chave fica apenas na memória desta aba e é apagada ao sair",
     "etl.cpfNote": "// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta."
   },
@@ -269,6 +274,11 @@ window.TP = window.TP || {};
     "pipeline.doc.reference": "Full reference: docs/ci-cd-pipeline.md",
     "gateway.title": "[ API GATEWAY // INTEGRATIONS ]",
     "scene.title": "[ INTERACTIVE SCENE 3D ]",
+    "scene.fontGroupAria": "ASCII font size control",
+    "scene.fontSizeLabel": "Font / cell",
+    "scene.fontSizeAria": "ASCII font and cell size in pixels",
+    "scene.fontReset": "[ reset ]",
+    "scene.fontResetAria": "Reset ASCII font size to initial value",
     "workflow.tokenHygiene": "// the key lives only in this tab memory and is wiped on exit",
     "etl.cpfNote": "// CPF validated server-side (mod-11) and masked: never stored in the browser or echoed in the response."
   }

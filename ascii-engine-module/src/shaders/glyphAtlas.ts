@@ -42,7 +42,7 @@ export function createGlyphAtlas(
     characterRamp.length >= 2
       ? characterRamp
       : " .'`^,:;Il!i><~+_-?][1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
-  const safeStructural = structuralChars.length >= 4 ? structuralChars : '/\\|_[]';
+  const safeStructural = structuralChars.length >= 4 ? structuralChars : '|/\\-+';
   const blockCount = 4;
   const textGlyphCount = safeRamp.length + safeStructural.length;
   const totalGlyphs = textGlyphCount + blockCount;
@@ -51,8 +51,8 @@ export function createGlyphAtlas(
   const tileHeight = Math.max(48, Math.min(128, Math.round(tileSize / 8) * 8));
   const tileWidth = Math.round(tileHeight * 0.625);
 
-  const rampFontPx = Math.round(tileHeight * 0.84);
-  const structFontPx = Math.round(tileHeight * 0.92);
+  const rampFontPx = Math.round(tileHeight * 0.86);
+  const structFontPx = Math.round(tileHeight * 0.94);
 
   const canvas = document.createElement('canvas');
   canvas.width = tileWidth * totalGlyphs;
@@ -61,6 +61,13 @@ export function createGlyphAtlas(
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) {
     throw new Error('[AsciiSceneEngine] Unable to create 2D Canvas context for glyph atlas.');
+  }
+
+  if ('imageSmoothingEnabled' in ctx) {
+    ctx.imageSmoothingEnabled = true;
+  }
+  if ('imageSmoothingQuality' in ctx) {
+    ctx.imageSmoothingQuality = 'high';
   }
 
   ctx.fillStyle = '#000000';
@@ -79,11 +86,11 @@ export function createGlyphAtlas(
     const isStructural = i >= safeRamp.length;
     ctx.font = `${isStructural ? 700 : 600} ${isStructural ? structFontPx : rampFontPx}px ${family}`;
 
-    // Clip drawing strictly to this glyph's rectangular tile so wide strokes never bleed into adjacent tiles
+    // Clip drawing strictly inside a 2px-inset tile box so strokes never bleed across tile boundaries even under micro-cell RGSS filtering
     if (typeof ctx.save === 'function' && typeof ctx.beginPath === 'function' && typeof ctx.clip === 'function') {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(i * tileWidth + 1, 0, tileWidth - 2, tileHeight);
+      ctx.rect(i * tileWidth + 2, 1, Math.max(1, tileWidth - 4), Math.max(1, tileHeight - 2));
       ctx.clip();
       ctx.fillText(ch, i * tileWidth + tileWidth * 0.5, tileHeight * 0.52);
       ctx.restore();

@@ -491,18 +491,27 @@ export class AsciiEngineCore {
       this.scene.background.set(this.config.palette.background);
     }
 
-    if (this.builtUrbanStage) {
-      UrbanGlbSceneBuilder.applyAtmosphere(
-        this.builtUrbanStage,
-        this.config,
-        this.ecsWorld ?? undefined
-      );
-      this.renderer.shadowMap.needsUpdate = true;
-    } else if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.set(this.config.palette.background);
-    }
+    const atmosphereOrLightChanged =
+      partialConfig.atmosphere !== undefined ||
+      partialConfig.palette !== undefined ||
+      prevShadows !== this.config.enableShadows ||
+      partialConfig.windStrength !== undefined ||
+      partialConfig.cursorLightIntensity !== undefined;
 
-    this.vfx?.applyConfig(this.config);
+    if (atmosphereOrLightChanged) {
+      if (this.builtUrbanStage) {
+        UrbanGlbSceneBuilder.applyAtmosphere(
+          this.builtUrbanStage,
+          this.config,
+          this.ecsWorld ?? undefined
+        );
+        this.renderer.shadowMap.needsUpdate = true;
+      } else if (this.scene.fog instanceof THREE.FogExp2) {
+        this.scene.fog.color.set(this.config.palette.background);
+      }
+
+      this.vfx?.applyConfig(this.config);
+    }
 
     const rebuildAtlas =
       prevRamp !== this.config.characterRamp ||

@@ -45,6 +45,10 @@ scene.mount()            // Promise<boolean>; false means fallback
 scene.setPaused(bool)
 scene.setPreset('day')   // only 'day' | 'night' | 'rain'
 scene.setAutoOrbit(true) // synthetic pointer movement drives camera rotation
+scene.getCellSizeRange() // { min: 2, max: mountedCellPx, current, stops }
+scene.setCellSize(2.5)   // fine 0.25px (<6px) / 0.5px (>6px) stops up to mounted max
+scene.resetCellSize()    // restores initial mounted cell size & density config
+scene.getScene()         // active THREE.Scene or null
 scene.destroy()
 ```
 
@@ -69,8 +73,12 @@ its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):
   `Walking` and `Casting` (`THREE.LoopOnce` triggered by `E`);
 - `Carro_Grupo`: moving light-source vehicle on the left lateral avenue driven
   by `TrafficFlowSystem` on a continuous **30-second** cycle (**8s** straight-line
-  pass with attached `SpotLight`s and `PointLight` illuminating asphalt and
-  building facades, followed by **22s** hidden out of frame with `visible = false`).
+  pass along `+Z` with `CarroHeadlightEmitterRig` — two front HDR emissive
+  projector lenses, two additive optical halos, two volumetric beam cones, and
+  two asphalt specular pools marked `skipNormalPass` — plus two front
+  `SpotLight`s with `target`s parented to `Carro_Grupo` aimed onto the asphalt
+  ahead and a forward `PointLight` throw, followed by **22s** hidden out of
+  frame with `visible = false` and intensities zeroed).
 
 A 45°-counter-clockwise elevated 3/4 camera (`CameraFollowSystem`, `fov: 58°`,
 `offset: (10.3, 11.3, 10.3)`, inclined top-to-ground and pulled back to widen
@@ -101,13 +109,22 @@ by dark breathing shadows. The full-screen ASCII post-processing shader
 directional light vectors (`uKeyLightViewDir`, `uRimLightViewDir`) and true
 world-up (`uWorldUpViewDir`) each frame to drive normal-mapped directional
 incidence (`N·L`, back-facing planar self-shadowing, Blinn-Phong `N·H` specular
-glints, and Fresnel rim lighting), sub-cell integrated luminance, dark-breathing
-shadow gating (`DEFAULT_ASCII_RAMP` leading spaces + `shadowFloor`), grounded 3D
-shaded tonal underlayers (`smoothBackdrop` + `tonedUnderlayer`), foreground
-depth-silhouette separation moats (`silhouetteOuterMoat` /
-`silhouetteInnerRim`), orientation-coherent glyph clusters (`glyphVarietyHash`),
+glints, and Fresnel rim lighting), internal 3D offscreen supersampling
+(`sceneTarget`, `normalTarget`, and `depthTexture` at `~1.5x–2.0x` within safe
+`4096px` / `8.29 MP` GPU budgets) with full `effectiveDpr` sharpness up to `2.0`,
+2x2 sub-quadrant multi-point filtered downsampling (`sampleCellIntegrated`,
+`nSubIntegrated`, `subDepthPeak`), calibrated high-definition typographic cell
+density (`~6.0px–6.8px` desktop, `~5.5px–6.2px` HD/UHD), rebalanced architectural
+mass continuity (`structuralMassFloor` + gentle `farFade`), geometrically-aligned
+directional structural contours (`|`, `/`, `\`, `-`, `+`), graduated surface
+glyph ramps (`DEFAULT_ASCII_RAMP`), curated `*` and `o` highlight accents on
+light halos, wet reflections and rain particles (`uHighlightGlyphs`), grounded 3D
+shaded tonal underlayers (`smoothBackdrop` + `tonedUnderlayer`), foreground-scoped
+depth-silhouette separation moats (`silhouetteOuterMoat` / `silhouetteInnerRim`),
 normal-perturbed vertical rippled ground reflections (`sampleGroundReflection`),
-and contained typographic light halos without blown-out blocks or noisy static.
+and smooth damped mouse scroll-wheel zoom (`minDistance: 8.2m`, `maxDistance:
+31.5m`, baseline `~19.65m`) along the 3rd-person camera sightline without
+interfering with `WASD` or `setAutoOrbit`.
 The adapter maps the three UI buttons (`day`, `night`, `rain`) to lighting, fog,
 car headlights, pavement wetness, normal-map relief scale, and 3D rain particles.
 [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier

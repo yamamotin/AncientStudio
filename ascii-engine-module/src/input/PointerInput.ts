@@ -38,6 +38,8 @@ export interface PointerTap {
 export interface PointerInputOptions {
   /** Also listen to window pointermove for mascot look-at across adjacent section cards (default: false) */
   trackWindowHover?: boolean;
+  /** Enable smooth mouse scroll-wheel zoom in/out on the 3D stage container (default: true) */
+  enableWheelZoom?: boolean;
 }
 
 const MAX_TAP_TRAVEL_PX_SQ = 14 * 14;
@@ -46,11 +48,13 @@ const TAP_DEDUP_WINDOW_MS = 320;
 export class PointerInput {
   private readonly container: HTMLElement;
   private readonly trackWindowHover: boolean;
+  private readonly enableWheelZoom: boolean;
 
   private normX = 0;
   private normY = 0;
   private dragYaw = 0;
   private dragPitch = 0;
+  private wheelDelta = 0;
   private active = false;
   private isDown = false;
   private isTouch = false;
@@ -80,10 +84,12 @@ export class PointerInput {
   private readonly onTouchEndBound: (ev: TouchEvent) => void;
   private readonly onTouchCancelBound: (ev: TouchEvent) => void;
   private readonly onClickBound: (ev: MouseEvent) => void;
+  private readonly onWheelBound: (ev: WheelEvent) => void;
 
   constructor(container: HTMLElement, options?: PointerInputOptions) {
     this.container = container;
     this.trackWindowHover = Boolean(options?.trackWindowHover);
+    this.enableWheelZoom = options?.enableWheelZoom !== false;
 
     this.onPointerDownBound = this.handlePointerDown.bind(this);
     this.onPointerMoveBound = this.handleContainerPointerMove.bind(this);
@@ -96,6 +102,7 @@ export class PointerInput {
     this.onTouchEndBound = this.handleTouchEnd.bind(this);
     this.onTouchCancelBound = this.handleTouchCancel.bind(this);
     this.onClickBound = this.handleClick.bind(this);
+    this.onWheelBound = this.handleWheel.bind(this);
   }
 
   public attach(): void {
@@ -113,6 +120,9 @@ export class PointerInput {
     this.container.addEventListener('pointercancel', this.onPointerCancelBound, { passive: true });
     this.container.addEventListener('pointerleave', this.onPointerLeaveBound, { passive: true });
     this.container.addEventListener('click', this.onClickBound, { passive: true });
+    if (this.enableWheelZoom) {
+      this.container.addEventListener('wheel', this.onWheelBound, { passive: false });
+    }
 
     // Explicit passive touch listeners guarantee smooth mobile interaction across iOS Safari, Android WebView & touch laptops
     this.container.addEventListener('touchstart', this.onTouchStartBound, { passive: true });
@@ -131,6 +141,7 @@ export class PointerInput {
     this.attached = false;
     this.hasPendingTap = false;
     this.gestureActive = false;
+    this.wheelDelta = 0;
 
     this.container.removeEventListener('pointerdown', this.onPointerDownBound);
     this.container.removeEventListener('pointermove', this.onPointerMoveBound);
@@ -138,6 +149,7 @@ export class PointerInput {
     this.container.removeEventListener('pointercancel', this.onPointerCancelBound);
     this.container.removeEventListener('pointerleave', this.onPointerLeaveBound);
     this.container.removeEventListener('click', this.onClickBound);
+    this.container.removeEventListener('wheel', this.onWheelBound);
 
     this.container.removeEventListener('touchstart', this.onTouchStartBound);
     this.container.removeEventListener('touchmove', this.onTouchMoveBound);
@@ -148,6 +160,10 @@ export class PointerInput {
       window.removeEventListener('pointermove', this.onWindowPointerMoveBound);
       window.removeEventListener('pointerup', this.onPointerUpBound);
     }
+  }
+
+  public isAttached(): boolean {
+    return this.attached;
   }
 
   /**
@@ -211,6 +227,38 @@ export class PointerInput {
     if (!this.hasPendingTap) return null;
     this.hasPendingTap = false;
     return this.pendingTap;
+  }
+
+  /**
+   * Programmatic or DOM-driven wheel delta injection (`deltaY < 0` = zoom in, `deltaY > 0` = zoom out).
+   */
+  public triggerWheel(deltaY: number, deltaMode = 0): void {
+    if (!this.enableWheelZoom || !Number.isFinite(deltaY) || deltaY === 0) return;
+    const modeScale = deltaMode === 1 ? 32 : deltaMode === 2 ? 320 : 1;
+    const clampedPx = Math.max(-180, Math.min(180, deltaY * modeScale));
+    this.wheelDelta = Math.max(-6, Math.min(6, this.wheelDelta + clampedPx / 100));
+  }
+
+  /**
+   * Consumes accumulated normalized wheel notches (`< 0` = zoom in, `> 0` = zoom out).
+   */
+  public consumeWheelDelta(): number {
+    const delta = this.wheelDelta;
+    this.wheelDelta = 0;
+    return delta;
+  }
+
+  private handleWheel(ev: WheelEvent): void {
+    if (!this.attached || !this.enableWheelZoom) return;
+    if (!Number.isFinite(ev.deltaY) || ev.deltaY === 0) return;
+
+    if (ev.cancelable) {
+      ev.preventDefault();
+    }
+    if (ev.isTrusted) {
+      this.lastInteractionMs = Date.now();
+    }
+    this.triggerWheel(ev.deltaY, ev.deltaMode);
   }
 
   private recordTapFromClient(clientX: number, clientY: number): void {

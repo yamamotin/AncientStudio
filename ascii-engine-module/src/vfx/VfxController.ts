@@ -21,6 +21,7 @@ export class VfxController {
   private readonly baseCam = new THREE.Vector3();
   private readonly baseLookAt = new THREE.Vector3();
   private readonly currentLookAt = new THREE.Vector3();
+  private readonly tempCamDir = new THREE.Vector3();
 
   private readonly cursorLight: THREE.PointLight;
   private rainPoints: THREE.Points | null = null;
@@ -28,9 +29,9 @@ export class VfxController {
   private rainSpeeds: Float32Array | null = null;
   private rainActive = false;
 
-  private static readonly RAIN_COUNT = 620;
-  private static readonly RAIN_SPAN_X = 46;
-  private static readonly RAIN_SPAN_Z = 44;
+  private static readonly RAIN_COUNT = 780;
+  private static readonly RAIN_SPAN_X = 48;
+  private static readonly RAIN_SPAN_Z = 46;
   private static readonly RAIN_TOP_Y = 17.5;
   private static readonly RAIN_BOTTOM_Y = -0.35;
 
@@ -97,12 +98,12 @@ export class VfxController {
 
       const mat = new THREE.PointsMaterial({
         color: new THREE.Color(this.config.palette.coolAmbient).lerp(
-          new THREE.Color('#AFC2D2'),
-          0.45
+          new THREE.Color('#D4E6F5'),
+          0.62
         ),
-        size: 0.14,
+        size: 0.23,
         transparent: true,
-        opacity: 0.62,
+        opacity: 0.86,
         depthWrite: false,
       });
 
@@ -120,8 +121,24 @@ export class VfxController {
       this.rainPoints.visible = shouldRain;
       (this.rainPoints.material as THREE.PointsMaterial).color
         .set(this.config.palette.coolAmbient)
-        .lerp(new THREE.Color('#AFC2D2'), 0.45);
+        .lerp(new THREE.Color('#D4E6F5'), 0.62);
     }
+  }
+
+  private resolveGroundFocus(camera: THREE.PerspectiveCamera): { x: number; z: number } {
+    camera.getWorldDirection(this.tempCamDir);
+    if (this.tempCamDir.y < -0.05) {
+      const t = -camera.position.y / this.tempCamDir.y;
+      const clampedT = Math.max(2.0, Math.min(45.0, t));
+      return {
+        x: camera.position.x + this.tempCamDir.x * clampedT,
+        z: camera.position.z + this.tempCamDir.z * clampedT,
+      };
+    }
+    return {
+      x: camera.position.x - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX,
+      z: camera.position.z - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ,
+    };
   }
 
   public update(
@@ -141,13 +158,14 @@ export class VfxController {
       camera.lookAt(this.currentLookAt);
     }
 
-    // 2. Subtle interactive cursor light relative to 45-degree camera focus in playground mode
+    // 2. Subtle interactive cursor light relative to camera ground focus (zoom-invariant)
+    const groundFocus =
+      this.config.mode === 'playground' ? this.resolveGroundFocus(camera) : { x: 0, z: 0 };
+
     if (this.config.mode === 'playground') {
-      const anchorX = camera.position.x - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX;
-      const anchorZ = camera.position.z - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ;
-      const targetLightX = anchorX + pointer.normX * 7.5;
+      const targetLightX = groundFocus.x + pointer.normX * 7.5;
       const targetLightY = 1.85 + pointer.normY * 1.4;
-      const targetLightZ = anchorZ - pointer.normY * 5.4;
+      const targetLightZ = groundFocus.z - pointer.normY * 5.4;
 
       const lightLerp = 1 - Math.exp(-8.5 * dt);
       this.cursorLight.position.x += (targetLightX - this.cursorLight.position.x) * lightLerp;
@@ -158,13 +176,13 @@ export class VfxController {
       this.cursorLight.intensity = this.config.cursorLightIntensity * 2.2 * activeBoost;
     }
 
-    // 3. Storm rain particle advection anchored around 45-degree camera focus so rain wraps the whole view
+    // 3. Storm rain particle advection anchored around ground focus so rain wraps the view at any zoom
     if (this.rainActive && this.rainPoints && this.rainPositions && this.rainSpeeds && dt > 0) {
       const pos = this.rainPositions;
       const speeds = this.rainSpeeds;
       const count = speeds.length;
-      const centerX = camera.position.x - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX;
-      const centerZ = camera.position.z - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ;
+      const centerX = groundFocus.x;
+      const centerZ = groundFocus.z;
       const halfX = VfxController.RAIN_SPAN_X * 0.5;
       const halfZ = VfxController.RAIN_SPAN_Z * 0.5;
       const windDriftX = -2.2 * this.config.windStrength;

@@ -157,10 +157,20 @@ export interface TrafficCycleComponent {
   headlightRight?: THREE.SpotLight;
   streetThrowLight?: THREE.PointLight;
   taillightGlow?: THREE.PointLight;
+  /** Attached visual headlight emitter group (lenses, optical halos, beam cones & asphalt specular glaze) */
+  headlightEmitterGroup?: THREE.Group;
+  headlightLensMaterial?: THREE.MeshStandardMaterial;
+  headlightHaloMaterial?: THREE.MeshBasicMaterial;
+  headlightConeMaterial?: THREE.MeshBasicMaterial;
+  headlightRoadPoolMaterial?: THREE.MeshBasicMaterial;
   /** Atmosphere-calibrated peak intensities for the active pass */
   baseSpotIntensity: number;
   basePointIntensity: number;
   baseTailIntensity: number;
+  baseLensEmissive?: number;
+  baseHaloOpacity?: number;
+  baseConeOpacity?: number;
+  baseRoadPoolOpacity?: number;
   /** Optional headlight cover materials pulsed while active */
   headlightMaterials?: THREE.MeshStandardMaterial[];
 }
@@ -240,6 +250,14 @@ export interface CameraFollowComponent {
   autoOrbit: boolean;
   orbitAngle: number;
   orbitSpeed: number;
+  /** Safe 3D distance bounds (meters) from look-at target for mouse scroll-wheel zoom */
+  minDistance?: number;
+  maxDistance?: number;
+  targetDistance?: number;
+  currentDistance?: number;
+  /** Exponential damping rate (1/s) and meters-per-wheel-notch step for smooth zoom */
+  zoomSmoothing?: number;
+  zoomSpeed?: number;
   /** Smoothed look-at state & initial snap flag */
   currentLookX?: number;
   currentLookY?: number;
@@ -412,6 +430,9 @@ export class World {
         if (typeof light.dispose === 'function') {
           light.dispose();
         }
+      }
+      if (traffic.headlightEmitterGroup && disposeGpu) {
+        LifecycleManager.disposeObject3D(traffic.headlightEmitterGroup);
       }
     }
 

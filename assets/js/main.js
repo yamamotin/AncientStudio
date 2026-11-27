@@ -435,6 +435,9 @@ window.TP = window.TP || {};
     var badge = document.getElementById('scene-mode');
     var toggle = document.getElementById('scene-toggle');
     var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-scene-mode]'));
+    var cellSlider = document.getElementById('scene-cell-size');
+    var cellOutput = document.getElementById('scene-cell-value');
+    var cellReset = document.getElementById('scene-cell-reset');
     var help = document.querySelector('.scene-help');
     var activeMode = 'night';
 
@@ -448,16 +451,110 @@ window.TP = window.TP || {};
         })
       : null;
 
-    stage.addEventListener('tp:scene-mode', function (event) {
+    function formatCellPx(px) {
+      var num = Number(px);
+      if (!Number.isFinite(num)) return '8px';
+      return Number(num.toFixed(2)) + 'px';
+    }
+
+    function syncCellReadout(px, minPx, maxPx) {
+      if (!cellSlider) return;
+      var formatted = formatCellPx(px);
+      cellSlider.value = String(px);
+      cellSlider.setAttribute('aria-valuenow', String(px));
+      cellSlider.setAttribute('aria-valuetext', formatted);
+      if (minPx !== undefined) cellSlider.setAttribute('aria-valuemin', String(minPx));
+      if (maxPx !== undefined) cellSlider.setAttribute('aria-valuemax', String(maxPx));
+      if (cellOutput) cellOutput.textContent = formatted;
+    }
+
+    function syncCellControlFromEngine() {
+      if (!cellSlider || typeof scene.getCellSizeRange !== 'function') return;
+      var range = scene.getCellSizeRange();
+      cellSlider.min = String(range.min);
+      cellSlider.max = String(range.max);
+      syncCellReadout(range.current, range.min, range.max);
+    }
+
+    function onSceneMode(event) {
       var engineReady = event.detail.mode === 'engine';
       if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
-      [toggle].concat(modeButtons).forEach(function (control) {
+      [toggle, cellSlider, cellReset].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
+      if (engineReady) syncCellControlFromEngine();
       if (help) {
         help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
       }
-    });
+    }
+
+    function onCellInput() {
+      if (!cellSlider || typeof scene.setCellSize !== 'function') return;
+      var applied = scene.setCellSize(Number(cellSlider.value));
+      var range = typeof scene.getCellSizeRange === 'function' ? scene.getCellSizeRange() : null;
+      syncCellReadout(applied, range ? range.min : undefined, range ? range.max : undefined);
+    }
+
+    function onCellKeyDown(event) {
+      if (!cellSlider || typeof scene.getCellSizeRange !== 'function' || typeof scene.setCellSize !== 'function') return;
+      var key = event.key;
+      if (key !== 'ArrowLeft' && key !== 'ArrowDown' && key !== 'ArrowRight' && key !== 'ArrowUp' && key !== 'Home' && key !== 'End') {
+        return;
+      }
+      var range = scene.getCellSizeRange();
+      var stops = range.stops || [];
+      if (!stops.length) return;
+      event.preventDefault();
+
+      var current = Number(cellSlider.value);
+      var idx = 0;
+      var bestDist = Infinity;
+      for (var i = 0; i < stops.length; i += 1) {
+        var dist = Math.abs(stops[i] - current);
+        if (dist < bestDist) {
+          bestDist = dist;
+          idx = i;
+        }
+      }
+
+      var nextIdx = idx;
+      if (key === 'ArrowLeft' || key === 'ArrowDown') nextIdx = Math.max(0, idx - 1);
+      else if (key === 'ArrowRight' || key === 'ArrowUp') nextIdx = Math.min(stops.length - 1, idx + 1);
+      else if (key === 'Home') nextIdx = 0;
+      else if (key === 'End') nextIdx = stops.length - 1;
+
+      var applied = nextIdx === stops.length - 1 && typeof scene.resetCellSize === 'function'
+        ? scene.resetCellSize()
+        : scene.setCellSize(stops[nextIdx]);
+      syncCellReadout(applied, range.min, range.max);
+    }
+
+    function onCellReset() {
+      if (typeof scene.resetCellSize !== 'function') return;
+      var restored = scene.resetCellSize();
+      var range = typeof scene.getCellSizeRange === 'function' ? scene.getCellSizeRange() : null;
+      syncCellReadout(restored, range ? range.min : undefined, range ? range.max : undefined);
+    }
+
+    function cleanupSceneUiListeners() {
+      stage.removeEventListener('tp:scene-mode', onSceneMode);
+      if (cellSlider) {
+        cellSlider.removeEventListener('input', onCellInput);
+        cellSlider.removeEventListener('keydown', onCellKeyDown);
+      }
+      if (cellReset) cellReset.removeEventListener('click', onCellReset);
+      window.removeEventListener('pagehide', cleanupSceneUiListeners);
+    }
+
+    stage.addEventListener('tp:scene-mode', onSceneMode);
+    if (cellSlider) {
+      cellSlider.addEventListener('input', onCellInput);
+      cellSlider.addEventListener('keydown', onCellKeyDown);
+    }
+    if (cellReset) {
+      cellReset.addEventListener('click', onCellReset);
+    }
+    window.addEventListener('pagehide', cleanupSceneUiListeners);
 
     if (toggle) {
       toggle.addEventListener('click', function () {

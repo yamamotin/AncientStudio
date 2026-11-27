@@ -36,6 +36,10 @@ export interface ResolutionProfile {
   effectiveDpr: number;
   physicalWidth: number;
   physicalHeight: number;
+  /** Internal 3D offscreen supersampling factor (~1.5x–2.0x within safe GPU renderbuffer limits) */
+  supersampleScale: number;
+  renderTargetWidth: number;
+  renderTargetHeight: number;
   activeCellSize: number;
   cellPhysW: number;
   cellPhysH: number;

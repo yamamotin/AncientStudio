@@ -98,8 +98,29 @@ export class InputSystem implements EcsSystem {
   public update(world: World, { dt }: SystemContext): void {
     const ptr = this.pointer.sample(dt);
     const tap = this.pointer.consumeTap();
+    const wheelDelta = this.pointer.consumeWheelDelta();
     const keys = this.keyboard.sampleAxes();
     const hasKeyMove = Math.abs(keys.moveX) > 0.01 || Math.abs(keys.moveZ) > 0.01;
+
+    if (wheelDelta !== 0) {
+      const camEntities = world.query('CameraFollow');
+      for (const camId of camEntities) {
+        const follow = world.getComponent(camId, 'CameraFollow')!;
+        const baseDx = follow.offsetX - follow.lookAtOffsetX;
+        const baseDy = follow.offsetY - follow.lookAtOffsetY;
+        const baseDz = follow.offsetZ - follow.lookAtOffsetZ;
+        const baseDist = Math.hypot(baseDx, baseDy, baseDz) || 19.65;
+        const minDist = follow.minDistance ?? 8.2;
+        const maxDist = follow.maxDistance ?? 31.5;
+        const stepSpeed = follow.zoomSpeed ?? 2.15;
+        const prevTarget = follow.targetDistance ?? baseDist;
+        follow.targetDistance = THREE.MathUtils.clamp(
+          prevTarget + wheelDelta * stepSpeed,
+          minDist,
+          maxDist
+        );
+      }
+    }
 
     if (tap && !hasKeyMove) {
       const navEntities = world.query('Transform', 'NavigationTarget');
@@ -247,9 +268,28 @@ export class TrafficFlowSystem implements EcsSystem {
           cycle.taillightGlow.visible = true;
           cycle.taillightGlow.intensity = cycle.baseTailIntensity * envelope;
         }
+        if (cycle.headlightEmitterGroup) {
+          cycle.headlightEmitterGroup.visible = true;
+        }
+        if (cycle.headlightLensMaterial) {
+          cycle.headlightLensMaterial.emissiveIntensity =
+            (cycle.baseLensEmissive ?? 3.8) * envelope;
+        }
+        if (cycle.headlightHaloMaterial) {
+          cycle.headlightHaloMaterial.opacity = (cycle.baseHaloOpacity ?? 0.62) * envelope;
+        }
+        if (cycle.headlightConeMaterial) {
+          cycle.headlightConeMaterial.opacity = (cycle.baseConeOpacity ?? 0.22) * envelope;
+        }
+        if (cycle.headlightRoadPoolMaterial) {
+          // Fade road-surface specular glaze smoothly before the avenue roadbed ends near z = 20m
+          const roadBedKeep = 1.0 - THREE.MathUtils.smoothstep(currentZ, 12.5, 19.2);
+          cycle.headlightRoadPoolMaterial.opacity =
+            (cycle.baseRoadPoolOpacity ?? 0.34) * envelope * roadBedKeep;
+        }
         if (cycle.headlightMaterials) {
           for (const mat of cycle.headlightMaterials) {
-            mat.emissiveIntensity = 0.85 * envelope;
+            mat.emissiveIntensity = (cycle.baseLensEmissive ?? 3.8) * 0.42 * envelope;
           }
         }
       } else {
@@ -274,6 +314,21 @@ export class TrafficFlowSystem implements EcsSystem {
         if (cycle.taillightGlow) {
           cycle.taillightGlow.visible = false;
           cycle.taillightGlow.intensity = 0;
+        }
+        if (cycle.headlightEmitterGroup) {
+          cycle.headlightEmitterGroup.visible = false;
+        }
+        if (cycle.headlightLensMaterial) {
+          cycle.headlightLensMaterial.emissiveIntensity = 0;
+        }
+        if (cycle.headlightHaloMaterial) {
+          cycle.headlightHaloMaterial.opacity = 0;
+        }
+        if (cycle.headlightConeMaterial) {
+          cycle.headlightConeMaterial.opacity = 0;
+        }
+        if (cycle.headlightRoadPoolMaterial) {
+          cycle.headlightRoadPoolMaterial.opacity = 0;
         }
         if (cycle.headlightMaterials) {
           for (const mat of cycle.headlightMaterials) {
@@ -535,13 +590,39 @@ export class CameraFollowSystem implements EcsSystem {
       if (Math.abs(follow.orbitAngle) < 0.001) follow.orbitAngle = 0;
     }
 
-    const desiredX = transform.x + offX;
-    const desiredY = transform.y + follow.offsetY;
-    const desiredZ = transform.z + offZ;
-
     const targetLookX = transform.x + follow.lookAtOffsetX;
     const targetLookY = transform.y + follow.lookAtOffsetY;
     const targetLookZ = transform.z + follow.lookAtOffsetZ;
+
+    // Resolve view ray from look-at target to camera (composes cleanly with both WASD & autoOrbit)
+    const viewVecX = offX - follow.lookAtOffsetX;
+    const viewVecY = follow.offsetY - follow.lookAtOffsetY;
+    const viewVecZ = offZ - follow.lookAtOffsetZ;
+    const baseDist = Math.hypot(viewVecX, viewVecY, viewVecZ) || 1;
+    const minDist = follow.minDistance ?? 8.2;
+    const maxDist = follow.maxDistance ?? 31.5;
+    const clampedTargetDist = THREE.MathUtils.clamp(
+      follow.targetDistance ?? baseDist,
+      minDist,
+      maxDist
+    );
+    follow.targetDistance = clampedTargetDist;
+
+    if (!follow.initialized || dt <= 0) {
+      follow.currentDistance = clampedTargetDist;
+    } else {
+      const zoomAlpha = 1 - Math.exp(-(follow.zoomSmoothing ?? 10.5) * dt);
+      follow.currentDistance = THREE.MathUtils.lerp(
+        follow.currentDistance ?? baseDist,
+        clampedTargetDist,
+        zoomAlpha
+      );
+    }
+
+    const distScale = (follow.currentDistance ?? baseDist) / baseDist;
+    const desiredX = targetLookX + viewVecX * distScale;
+    const desiredY = targetLookY + viewVecY * distScale;
+    const desiredZ = targetLookZ + viewVecZ * distScale;
 
     if (!follow.initialized || dt <= 0) {
       this.camera.position.set(desiredX, desiredY, desiredZ);

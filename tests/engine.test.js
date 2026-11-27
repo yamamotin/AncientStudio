@@ -606,12 +606,36 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
     );
     assert.equal(carTraffic.headlightLeft.intensity, 0, 'Headlights off while Carro_Grupo is hidden');
     assert.equal(carTraffic.streetThrowLight.intensity, 0);
+    assert.equal(carTraffic.headlightEmitterGroup.visible, false, 'Headlight emitter meshes hidden while inactive');
+    assert.equal(carTraffic.headlightLensMaterial.emissiveIntensity, 0, 'Headlight lens emissive zeroed while inactive');
+    assert.equal(carTraffic.headlightHaloMaterial.opacity, 0, 'Headlight halo opacity zeroed while inactive');
+    assert.equal(carTraffic.headlightRoadPoolMaterial.opacity, 0, 'Headlight road pool zeroed while inactive');
   }
 
-  // Cycle restart at t = 30.5s
+  // Cycle restart at t = 30.5s: verify visible emitters + forward SpotLight targets on Carro_Grupo
   runner.run(ecsWorld, { dt: 0.016, elapsed: 30.5 });
   assert.equal(carRenderable.object3D.visible, true, 'Carro_Grupo reappears cleanly when 30s cycle restarts');
   assert.ok(carTraffic.headlightRight.intensity > 0, 'Headlights reactivate on cycle restart');
+  assert.equal(carTraffic.headlightEmitterGroup.visible, true, 'Headlight emitter group visible on active pass');
+  assert.ok(carTraffic.headlightLensMaterial.emissiveIntensity > 1.5, 'Headlight lenses emit bright HDR glow');
+  assert.ok(carTraffic.headlightHaloMaterial.opacity > 0.2, 'Headlight optical halos active');
+  assert.ok(carTraffic.headlightRoadPoolMaterial.opacity > 0.1, 'Headlight asphalt specular pool active');
+
+  const lensLeft = carTraffic.headlightEmitterGroup.getObjectByName('HeadlightLensLeft');
+  const lensRight = carTraffic.headlightEmitterGroup.getObjectByName('HeadlightLensRight');
+  const haloLeft = carTraffic.headlightEmitterGroup.getObjectByName('HeadlightHaloLeft');
+  const haloRight = carTraffic.headlightEmitterGroup.getObjectByName('HeadlightHaloRight');
+  assert.ok(lensLeft && lensRight && haloLeft && haloRight, 'Both left & right front headlight lenses and halos exist');
+  assert.ok(lensLeft.position.x < lensRight.position.x, 'Left and right front headlight emitters sit symmetrically on front fascia');
+  assert.equal(lensLeft.userData.skipNormalPass, true, 'Headlight emitter meshes skip Pass 2 normal render');
+  assert.equal(haloLeft.userData.skipNormalPass, true, 'Headlight halo meshes skip Pass 2 normal render');
+  assert.equal(carTraffic.headlightLeft.target.parent, carRenderable.object3D, 'Left SpotLight target is parented to Carro_Grupo');
+  assert.equal(carTraffic.headlightRight.target.parent, carRenderable.object3D, 'Right SpotLight target is parented to Carro_Grupo');
+  assert.ok(
+    carTraffic.headlightLeft.target.position.z > carTraffic.headlightLeft.position.z &&
+      carTraffic.headlightLeft.target.position.y < carTraffic.headlightLeft.position.y,
+    'Front SpotLights point forward (+Z) and downward onto the asphalt ahead of Carro_Grupo'
+  );
 
   // 7. Verify UI Preset Integration (`day`, `night`, `rain`) + VfxController rain particles
   const vfx = new pkg.VfxController({
@@ -699,6 +723,13 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     'normalTilt',
     'macroViewN',
     'sampleCellIntegrated',
+    'qBL',
+    'qBR',
+    'qTL',
+    'qTR',
+    'nSubIntegrated',
+    'subDepthPeak',
+    'uSceneTexelSize',
     'uSubCellSpread',
     'uAtlasTileSize',
     'floor(uResolution * 0.5)',
@@ -745,7 +776,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(atlas.tileWidth, 40);
   atlas.texture.dispose();
 
-  // 3. Adaptive resolution & smooth fullscreen transition controller
+  // 3. Adaptive resolution, 3D supersampling & calibrated high-definition typographic grid
   const mobileRes = pkg.computeAdaptiveResolution({
     cssWidth: 360,
     cssHeight: 300,
@@ -755,6 +786,56 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   });
   assert.equal(mobileRes.tier, 'mobile');
   assert.ok(mobileRes.effectiveDpr <= 1.5);
+  assert.ok(mobileRes.supersampleScale >= 1.3 && mobileRes.renderTargetWidth > mobileRes.physicalWidth);
+
+  const desktopRes = pkg.computeAdaptiveResolution({
+    cssWidth: 840,
+    cssHeight: 500,
+    devicePixelRatio: 2.0,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.equal(desktopRes.tier, 'desktop');
+  assert.equal(desktopRes.effectiveDpr, 2.0, 'Desktop operates at full DPR 2.0 sharpness');
+  assert.ok(
+    desktopRes.activeCellSize >= 6.0 && desktopRes.activeCellSize <= 6.8,
+    `Desktop cell density calibrated in [6.0, 6.8]px (got ${desktopRes.activeCellSize})`
+  );
+  assert.ok(
+    desktopRes.supersampleScale >= 1.5 && desktopRes.supersampleScale <= 2.0,
+    `Desktop 3D supersampling in [1.5, 2.0]x (got ${desktopRes.supersampleScale})`
+  );
+
+  const hdRes = pkg.computeAdaptiveResolution({
+    cssWidth: 1280,
+    cssHeight: 720,
+    devicePixelRatio: 2.0,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.equal(hdRes.tier, 'hd');
+  assert.equal(hdRes.effectiveDpr, 2.0, 'HD operates at full DPR 2.0 sharpness');
+  assert.ok(
+    hdRes.activeCellSize >= 5.5 && hdRes.activeCellSize <= 6.2,
+    `HD cell density calibrated in [5.5, 6.2]px (got ${hdRes.activeCellSize})`
+  );
+  assert.ok(
+    hdRes.supersampleScale >= 1.45 && hdRes.renderTargetWidth <= 4096 && hdRes.renderTargetHeight <= 4096,
+    'HD 3D supersampling stays within safe GPU limits (<= 4096)'
+  );
+
+  const uhdRes = pkg.computeAdaptiveResolution({
+    cssWidth: 1600,
+    cssHeight: 900,
+    devicePixelRatio: 1.5,
+    config: pkg.DEFAULT_ENGINE_CONFIG,
+    isCoarsePointer: false
+  });
+  assert.equal(uhdRes.tier, 'uhd');
+  assert.ok(
+    uhdRes.activeCellSize >= 5.5 && uhdRes.activeCellSize <= 6.2,
+    `UHD cell density calibrated in [5.5, 6.2]px (got ${uhdRes.activeCellSize})`
+  );
 
   const extreme4k = pkg.computeAdaptiveResolution({
     cssWidth: 3840,
@@ -763,7 +844,8 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     config: pkg.DEFAULT_ENGINE_CONFIG,
     isCoarsePointer: false
   });
-  assert.ok(extreme4k.columns <= 190);
+  assert.ok(extreme4k.columns <= 680);
+  assert.ok(extreme4k.renderTargetWidth <= 4096 && extreme4k.renderTargetHeight <= 4096);
 
   const transition = new pkg.ResolutionTransitionController(14.0);
   transition.setTarget(mobileRes, true);
@@ -842,4 +924,383 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   passCache.dispose();
   normalSet.dispose();
   pkg.LifecycleManager.disposeObject3D(passScene);
+
+  // 6. Directional structural glyphs ('|/\-+') & highlight accents ('*', 'o')
+  assert.equal(pkg.DEFAULT_ENGINE_CONFIG.structuralChars, '|/\\-+');
+  const fullAtlas = pkg.createGlyphAtlas(
+    pkg.DEFAULT_ASCII_RAMP,
+    pkg.DEFAULT_ENGINE_CONFIG.structuralChars,
+    'monospace',
+    48
+  );
+  assert.equal(fullAtlas.structuralCount, 5);
+  fullAtlas.texture.dispose();
+  includesAll(asciiShaderSrc, [
+    'uHighlightGlyphs',
+    'structuralMassFloor',
+    'atan(domGrad.x, -domGrad.y)',
+    'isSparkleHighlight'
+  ]);
 });
+
+test('Mouse scroll-wheel zoom: smooth damping, safe min/max bounds, WASD & autoOrbit coexistence, and destroy() cleanup', () => {
+  const addedListeners = new Map();
+  const removedListeners = new Set();
+  const mockContainer = {
+    style: { touchAction: '' },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 500 }),
+    addEventListener(type, fn, opts) {
+      addedListeners.set(type, { fn, opts });
+    },
+    removeEventListener(type, fn) {
+      const entry = addedListeners.get(type);
+      if (entry && entry.fn === fn) {
+        removedListeners.add(type);
+        addedListeners.delete(type);
+      }
+    }
+  };
+
+  const sandbox = createBundleSandbox({
+    window: {
+      addEventListener() {},
+      removeEventListener() {},
+      devicePixelRatio: 1
+    }
+  });
+
+  const pkg = sandbox.ASCIIRealms;
+  const pointer = new pkg.PointerInput(mockContainer, { enableWheelZoom: true });
+  const keyboard = new pkg.KeyboardInput();
+  pointer.attach();
+
+  assert.ok(addedListeners.has('wheel'), 'PointerInput attaches wheel listener on playground container');
+  assert.equal(addedListeners.get('wheel').opts.passive, false, 'wheel listener uses passive: false to prevent page jump');
+  assert.equal(addedListeners.get('pointermove').opts.passive, true, 'pointermove listener stays passive: true');
+
+  const world = new pkg.World();
+  const camera = new pkg.THREE.PerspectiveCamera(58, 16 / 9, 0.1, 140);
+  const inputSys = new pkg.InputSystem(pointer, keyboard, camera);
+  const navSys = new pkg.MovementRotationSystem();
+  const camFollowSys = new pkg.CameraFollowSystem(camera);
+
+  const playerId = world.createEntity();
+  world
+    .addComponent(playerId, 'Transform', {
+      x: -4.2, y: 0, z: -2.4,
+      rotX: 0, rotY: 0, rotZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1
+    })
+    .addComponent(playerId, 'Velocity', {
+      vx: 0, vy: 0, vz: 0,
+      angularVx: 0, angularVy: 0, angularVz: 0,
+      damping: 12
+    })
+    .addComponent(playerId, 'InputState', {
+      pointerX: 0, pointerY: 0, pointerActive: false, isDragging: false,
+      moveX: 0, moveZ: 0, yawSensitivity: 0.6, pitchSensitivity: 0.25,
+      moveSpeed: 3.6, boundsRadius: 0
+    })
+    .addComponent(playerId, 'SidewalkBounds', {
+      ...pkg.DEFAULT_URBAN_SIDEWALK_BOUNDS,
+      obstacles: pkg.DEFAULT_URBAN_SIDEWALK_BOUNDS.obstacles.map((o) => ({ ...o }))
+    })
+    .addComponent(playerId, 'CameraFollow', {
+      ...pkg.URBAN_CAMERA_FOLLOW_DEFAULTS,
+      autoOrbit: false,
+      orbitAngle: 0,
+      orbitSpeed: 0.42,
+      initialized: false
+    });
+
+  // Initial snap matches baseline 3rd-person offset
+  camFollowSys.update(world, { dt: 0, elapsed: 0 });
+  const follow = world.getComponent(playerId, 'CameraFollow');
+  const getDistToLook = () => {
+    const t = world.getComponent(playerId, 'Transform');
+    const lx = t.x + follow.lookAtOffsetX;
+    const ly = t.y + follow.lookAtOffsetY;
+    const lz = t.z + follow.lookAtOffsetZ;
+    return Math.hypot(camera.position.x - lx, camera.position.y - ly, camera.position.z - lz);
+  };
+  const initialDist = getDistToLook();
+  assert.ok(initialDist > 19.0 && initialDist < 20.5, `Initial camera distance ~19.65m (got ${initialDist})`);
+
+  // Dispatch wheel zoom-in (deltaY < 0) via real listener and verify preventDefault() + smooth damping
+  let prevented = false;
+  addedListeners.get('wheel').fn({
+    deltaY: -120,
+    deltaMode: 0,
+    cancelable: true,
+    isTrusted: true,
+    preventDefault() {
+      prevented = true;
+    }
+  });
+  assert.equal(prevented, true, 'Cancelable wheel event calls preventDefault() inside 3D viewport');
+
+  inputSys.update(world, { dt: 0.016, elapsed: 0.016 });
+  assert.ok(follow.targetDistance < initialDist, 'Scroll up reduces targetDistance (zoom in)');
+
+  camFollowSys.update(world, { dt: 0.016, elapsed: 0.016 });
+  const afterOneFrameDist = getDistToLook();
+  assert.ok(
+    afterOneFrameDist < initialDist && afterOneFrameDist > follow.targetDistance,
+    'Camera distance interpolates smoothly with damping rather than snapping instantaneously'
+  );
+
+  // Extreme zoom-in burst clamps strictly at minDistance (never clips inside Player_Rig)
+  for (let i = 0; i < 40; i++) {
+    pointer.triggerWheel(-180, 0);
+    inputSys.update(world, { dt: 0.05, elapsed: 0.1 + i * 0.05 });
+    camFollowSys.update(world, { dt: 0.05, elapsed: 0.1 + i * 0.05 });
+  }
+  const minClampedDist = getDistToLook();
+  assert.ok(
+    Math.abs(minClampedDist - follow.minDistance) < 0.05,
+    `Zoom-in clamps cleanly at minDistance=${follow.minDistance}m (got ${minClampedDist})`
+  );
+
+  // Coexistence with WASD movement + setAutoOrbit(true) during extreme zoom-out burst
+  follow.autoOrbit = true;
+  const inputComp = world.getComponent(playerId, 'InputState');
+  for (let i = 0; i < 50; i++) {
+    pointer.triggerWheel(180, 0);
+    inputSys.update(world, { dt: 0.05, elapsed: 3.0 + i * 0.05 });
+    inputComp.moveZ = -1; // Simulate holding 'W' while zooming & auto-orbiting
+    navSys.update(world, { dt: 0.05, elapsed: 3.0 + i * 0.05 });
+    camFollowSys.update(world, { dt: 0.05, elapsed: 3.0 + i * 0.05 });
+  }
+  const maxClampedDist = getDistToLook();
+  const movedTransform = world.getComponent(playerId, 'Transform');
+  assert.ok(movedTransform.z < -2.4, 'WASD movement continues unimpeded while zooming & auto-orbiting');
+  assert.ok(follow.orbitAngle > 0, 'setAutoOrbit sweep continues unimpeded while zooming');
+  assert.ok(
+    Math.abs(maxClampedDist - follow.maxDistance) < 0.15,
+    `Zoom-out clamps cleanly at maxDistance=${follow.maxDistance}m (got ${maxClampedDist})`
+  );
+
+  // Mascot mode isolation: enableWheelZoom=false attaches zero wheel listener
+  const mascotListeners = new Map();
+  const mascotPointer = new pkg.PointerInput(
+    {
+      style: {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 300, height: 300 }),
+      addEventListener(type, fn, opts) { mascotListeners.set(type, { fn, opts }); },
+      removeEventListener(type) { mascotListeners.delete(type); }
+    },
+    { enableWheelZoom: false }
+  );
+  mascotPointer.attach();
+  assert.equal(mascotListeners.has('wheel'), false, 'enableWheelZoom:false attaches no wheel listener');
+  mascotPointer.detach();
+
+  // Deterministic cleanup on detach() / destroy()
+  pointer.detach();
+  assert.equal(pointer.isAttached(), false);
+  assert.equal(addedListeners.size, 0, 'All container listeners (including wheel) removed on detach()');
+  assert.ok(removedListeners.has('wheel'), 'wheel listener explicitly removed via removeEventListener');
+});
+
+test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px low-end steps, reset, RGSS shader & bilingual i18n', async () => {
+  const htmlSrc = readFileSync(path.join(root, 'index.html'), 'utf8');
+  const mainSrc = readFileSync(path.join(root, 'assets/js/main.js'), 'utf8');
+  const adapterSrc = readFileSync(path.join(root, 'assets/js/engine-adapter.js'), 'utf8');
+  const shaderSrc = readFileSync(path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'), 'utf8');
+  const ptJson = JSON.parse(readFileSync(path.join(root, 'assets/i18n/pt-br.json'), 'utf8'));
+  const enJson = JSON.parse(readFileSync(path.join(root, 'assets/i18n/en.json'), 'utf8'));
+
+  // 1. Control bar positioned directly below #scene-title and above #ascii-scene with pt-br & en i18n
+  const titlePos = htmlSrc.indexOf('id="scene-title"');
+  const toolbarPos = htmlSrc.indexOf('class="scene-toolbar"');
+  const sliderPos = htmlSrc.indexOf('id="scene-cell-size"');
+  const resetPos = htmlSrc.indexOf('id="scene-cell-reset"');
+  const stagePos = htmlSrc.indexOf('id="ascii-scene"');
+  assert.ok(titlePos > 0 && toolbarPos > titlePos && toolbarPos < stagePos, 'Toolbar sits directly below scene title and above 3D stage');
+  assert.ok(sliderPos > toolbarPos && resetPos > sliderPos && resetPos < stagePos, 'Slider and Reset button sit inside scene toolbar');
+
+  for (const key of ['scene.fontGroupAria', 'scene.fontSizeLabel', 'scene.fontSizeAria', 'scene.fontReset', 'scene.fontResetAria']) {
+    assert.ok(ptJson[key] && enJson[key], `Missing translation for ${key}`);
+  }
+  includesAll(mainSrc, ['scene-cell-size', 'scene-cell-value', 'scene-cell-reset', 'resetCellSize', 'setCellSize', 'cleanupSceneUiListeners']);
+
+  // 2. Micro cell stop table: min=2.0px, 0.25px steps in [2.0..6.0], 0.50px in (6.0..max], capped at mount max
+  const sandbox = createBundleSandbox({
+    document: {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          fillRect() {},
+          fillText() {},
+          save() {},
+          beginPath() {},
+          rect() {},
+          clip() {},
+          restore() {},
+          imageSmoothingEnabled: true,
+          imageSmoothingQuality: 'high',
+          font: '',
+          textAlign: '',
+          textBaseline: '',
+          fillStyle: ''
+        })
+      })
+    }
+  });
+  const pkg = sandbox.ASCIIRealms;
+  assert.equal(pkg.MIN_MICRO_CELL_SIZE, 2.0);
+
+  const stops65 = pkg.buildMicroCellStops(6.5, 2.0);
+  assert.equal(stops65[0], 2.0, 'Minimum cell size starts at 2.0px');
+  assert.equal(stops65[stops65.length - 1], 6.5, 'Maximum cell size locks strictly to mounted value (6.5px)');
+  includesAll(stops65.map(String).join(','), ['2', '2.25', '2.5', '2.75', '3', '4.25', '5.75', '6', '6.5']);
+  assert.equal(pkg.snapToMicroCellStop(99, 6.5, 2.0), 6.5, 'Values above mount ceiling clamp strictly to max');
+  assert.equal(pkg.snapToMicroCellStop(0.5, 6.5, 2.0), 2.0, 'Values below min clamp strictly to 2.0px');
+  assert.equal(pkg.snapToMicroCellStop(2.36, 6.5, 2.0), 2.25, 'Snaps to nearest 0.25px low-end step');
+  assert.ok(
+    pkg.mapNormalizedToMicroCell(0.5, 8.0, 2.0) < 5.0,
+    'Curved normalized helper concentrates slider midpoint below linear midpoint (<5.0px)'
+  );
+
+  // 3. Monotonic grid resolution down to 2.0px at 0.25px increments on both DPR=1 and DPR=2 without rebuilding atlas
+  for (const dpr of [1.0, 2.0]) {
+    let prevCols = 0;
+    let prevCell = Infinity;
+    for (const px of [6.0, 5.0, 4.0, 3.0, 2.75, 2.5, 2.25, 2.0]) {
+      const prof = pkg.computeAdaptiveResolution({
+        cssWidth: 1000,
+        cssHeight: 560,
+        devicePixelRatio: dpr,
+        config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: px, autoResponsiveDensity: false },
+        isCoarsePointer: false
+      });
+      assert.equal(prof.activeCellSize, px, `DPR=${dpr}: activeCellSize matches ${px}px`);
+      assert.ok(prof.cellPhysH < prevCell, `DPR=${dpr}: cellPhysH decreases monotonically at ${px}px`);
+      assert.ok(prof.columns >= prevCols, `DPR=${dpr}: columns increase monotonically at ${px}px`);
+      prevCell = prof.cellPhysH;
+      prevCols = prof.columns;
+    }
+  }
+
+  // Verify AsciiPostProcessor updates uCellPixelSize down to 2.0px without recreating atlas texture after mount sizing
+  const post = new pkg.AsciiPostProcessor(pkg.DEFAULT_ENGINE_CONFIG);
+  post.applyConfig(pkg.DEFAULT_ENGINE_CONFIG, false, 1200, 680, 2.0, false);
+  const mountedAtlasTex = post.compositeMaterial.uniforms.tGlyphAtlas.value;
+  const microProf = post.applyConfig(
+    { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 2.25, autoResponsiveDensity: false },
+    false,
+    1200,
+    680,
+    2.0,
+    false
+  );
+  assert.equal(microProf.activeCellSize, 2.25);
+  assert.equal(
+    post.compositeMaterial.uniforms.tGlyphAtlas.value,
+    mountedAtlasTex,
+    'Glyph atlas CanvasTexture is reused without reallocation when adjusting cell size'
+  );
+  post.dispose();
+
+  // Verify shader micro-cell RGSS anti-aliasing & lowered vec2(1.25, 2.0) cell floor
+  includesAll(shaderSrc, [
+    'max(uCellPixelSize, vec2(1.25, 2.0))',
+    'microCellFactor',
+    'uSceneTexelSize * 1.15'
+  ]);
+
+  // 4. Verify engine-adapter locks max to mounted activeCellSize, updates live without remount, and resets cleanly
+  let updateCalls = [];
+  let mountCount = 0;
+  const adapterSandbox = {
+    console,
+    Date,
+    Math,
+    Number,
+    Boolean,
+    String,
+    Object,
+    CustomEvent: function (type, init) { this.type = type; this.detail = init && init.detail; },
+    Event: function (type) { this.type = type; },
+    PointerEvent: function () {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    setInterval() { return 1; },
+    clearInterval() {}
+  };
+  adapterSandbox.document = {
+    readyState: 'complete',
+    createElement: () => ({
+      getContext: () => ({
+        getExtension: () => null,
+        getParameter: () => 'NVIDIA GeForce RTX'
+      }),
+      setAttribute() {},
+      addEventListener() {}
+    }),
+    querySelector: () => null,
+    getElementById: () => null,
+    head: { appendChild() {} },
+    addEventListener() {},
+    removeEventListener() {}
+  };
+  adapterSandbox.window = {
+    TP: {},
+    ASCIIRealms: {
+      buildMicroCellStops: pkg.buildMicroCellStops,
+      snapToMicroCellStop: pkg.snapToMicroCellStop,
+      AsciiSceneEngine: function (el, cfg) {
+        this._cfg = { ...cfg };
+        this.mount = () => { mountCount += 1; };
+        this.getState = () => 'running';
+        this.getConfig = () => ({ ...this._cfg });
+        this.getStats = () => ({ activeCellSize: 6.25, gridColumns: 192, gridRows: 108, fps: 60 });
+        this.getScene = () => ({ isScene: true });
+        this.updateConfig = (partial) => {
+          updateCalls.push(partial);
+          Object.assign(this._cfg, partial);
+        };
+        this.pause = () => {};
+        this.resume = () => {};
+        this.destroy = () => {};
+      }
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() {},
+    requestAnimationFrame() { return 1; },
+    cancelAnimationFrame() {}
+  };
+  adapterSandbox.TP = adapterSandbox.window.TP;
+  vm.createContext(adapterSandbox);
+  vm.runInContext(adapterSrc, adapterSandbox);
+
+  const stageContainer = {
+    setAttribute() {},
+    removeAttribute() {},
+    dispatchEvent() {},
+    addEventListener() {},
+    removeEventListener() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 675 })
+  };
+  const ctrl = adapterSandbox.TP.scene.create(stageContainer, { preset: 'night' });
+  const mounted = await ctrl.mount();
+  assert.equal(mounted, true);
+  assert.equal(mountCount, 1);
+
+  const range = ctrl.getCellSizeRange();
+  assert.equal(range.min, 2.0, 'Adapter min cell size is 2.0px');
+  assert.equal(range.max, 6.25, 'Adapter max cell size locks to mounted activeCellSize (6.25px)');
+  assert.equal(ctrl.setCellSize(12), 6.25, 'Cannot exceed mounted max cell size');
+  assert.equal(ctrl.setCellSize(2.25), 2.25, 'Applies 2.25px micro cell size');
+  assert.equal(mountCount, 1, 'WebGL engine is never remounted when changing cell size');
+  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 2.25, autoResponsiveDensity: false });
+
+  assert.equal(ctrl.resetCellSize(), 6.25, 'Reset restores mounted cell size');
+  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 8, autoResponsiveDensity: true });
+  assert.ok(ctrl.getScene().isScene, 'Public getScene() contract preserved');
+  ctrl.destroy();
+});
+
+

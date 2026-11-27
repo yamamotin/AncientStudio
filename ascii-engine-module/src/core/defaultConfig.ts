@@ -21,7 +21,7 @@ export const DEFAULT_PALETTE: ThemePalette = {
  * leading dark-breathing empty space (`' '`) and quiet punctuation before midtone/highlight glyphs.
  */
 export const DEFAULT_ASCII_RAMP =
-  "      .,'-~_:;^+=*!?rcvusaoenxz<>kpqdbwm0OQCJL8$&#%@";
+  "    .,'-~_:;^+=*o!?rcvusaez<>kpqdbwm0OQCJL8$&#%@";
 
 export const DEFAULT_SCENE_MODEL_URL = './assets/models/cena_completa.glb';
 export const DEFAULT_DRACO_DECODER_PATH = './assets/draco/';
@@ -39,7 +39,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   cellSize: 8,
   autoResponsiveDensity: true,
   characterRamp: DEFAULT_ASCII_RAMP,
-  structuralChars: '/\\|_[]',
+  structuralChars: '|/\\-+',
   edgeStrength: 0.96,
   blockBlendWeight: 0.06,
   windStrength: 1.0,

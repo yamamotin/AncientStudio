@@ -28,6 +28,102 @@ export interface ResolutionInput {
 const MONOSPACE_ASPECT = 0.625;
 
 /**
+ * Safe offscreen WebGL2 renderbuffer / depth-texture hardware ceilings so 1.5x–2.0x
+ * 3D supersampling stays fast and crash-free across integrated, mobile, and 4K GPUs.
+ */
+const MAX_SAFE_SUPERSAMPLE_DIM = 4096;
+const MAX_SAFE_SUPERSAMPLE_PIXELS = 3840 * 2160; // ~8.29 MP (4K UHD ceiling)
+
+/**
+ * Tiny/microscopic ASCII cell & font size bounds and fine-step constants:
+ * - `MIN_MICRO_CELL_SIZE`: 2.0px minimum CSS cell height
+ * - `[2.0px .. 6.0px]`: 0.25px fine steps for detailed micro-typography control
+ * - `(6.0px .. maxMountCell]`: 0.50px steps capped strictly at the mounted scene ceiling
+ */
+export const MIN_MICRO_CELL_SIZE = 2.0;
+export const MICRO_FINE_STEP_THRESHOLD = 6.0;
+export const MICRO_FINE_STEP = 0.25;
+export const MICRO_COARSE_STEP = 0.5;
+
+/**
+ * Builds the deterministic sorted stop table `[minCellSize .. maxCellSize]` with 0.25px steps
+ * up to 6.0px and 0.50px steps above 6.0px, capped strictly at `maxCellSize` (never above mount).
+ */
+export function buildMicroCellStops(
+  maxCellSize: number,
+  minCellSize = MIN_MICRO_CELL_SIZE
+): number[] {
+  const safeMin = Math.max(1.5, Number(minCellSize.toFixed(2)));
+  const safeMax = Math.max(safeMin, Number(maxCellSize.toFixed(2)));
+  const stops: number[] = [];
+
+  const fineCeiling = Math.min(safeMax, MICRO_FINE_STEP_THRESHOLD);
+  const fineSteps = Math.floor((fineCeiling - safeMin + 1e-6) / MICRO_FINE_STEP);
+  for (let i = 0; i <= fineSteps; i++) {
+    const v = Number((safeMin + i * MICRO_FINE_STEP).toFixed(2));
+    if (v <= safeMax + 1e-6) {
+      stops.push(Math.min(v, safeMax));
+    }
+  }
+
+  if (safeMax > MICRO_FINE_STEP_THRESHOLD + 1e-6) {
+    let cursor = MICRO_FINE_STEP_THRESHOLD + MICRO_COARSE_STEP;
+    while (cursor < safeMax - 1e-6) {
+      stops.push(Number(cursor.toFixed(2)));
+      cursor += MICRO_COARSE_STEP;
+    }
+  }
+
+  const last = stops[stops.length - 1];
+  if (last === undefined || Math.abs(last - safeMax) > 0.005) {
+    stops.push(safeMax);
+  }
+
+  return stops;
+}
+
+/**
+ * Snaps any raw pixel input to the nearest valid stop in `[minCellSize .. maxCellSize]`.
+ */
+export function snapToMicroCellStop(
+  value: number,
+  maxCellSize: number,
+  minCellSize = MIN_MICRO_CELL_SIZE
+): number {
+  const stops = buildMicroCellStops(maxCellSize, minCellSize);
+  if (!Number.isFinite(value)) return stops[stops.length - 1]!;
+
+  const clamped = Math.max(stops[0]!, Math.min(stops[stops.length - 1]!, value));
+  let best = stops[0]!;
+  let bestDist = Math.abs(clamped - best);
+  for (let i = 1; i < stops.length; i++) {
+    const candidate = stops[i]!;
+    const dist = Math.abs(clamped - candidate);
+    if (dist < bestDist - 1e-6) {
+      best = candidate;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+/**
+ * Maps a normalized `[0 .. 1]` slider ratio through a low-end-weighted power curve (`t^1.35`)
+ * and snaps to the micro-cell stop table, dedicating extra travel resolution to tiny sizes.
+ */
+export function mapNormalizedToMicroCell(
+  normalizedT: number,
+  maxCellSize: number,
+  minCellSize = MIN_MICRO_CELL_SIZE
+): number {
+  const t = Number.isFinite(normalizedT) ? Math.max(0, Math.min(1, normalizedT)) : 1;
+  const safeMin = Math.max(1.5, minCellSize);
+  const safeMax = Math.max(safeMin, maxCellSize);
+  const curved = safeMin + (safeMax - safeMin) * Math.pow(t, 1.35);
+  return snapToMicroCellStop(curved, safeMax, safeMin);
+}
+
+/**
  * Classifies the container + device into a deterministic resolution tier.
  */
 export function detectResolutionTier(
@@ -43,26 +139,28 @@ export function detectResolutionTier(
   if (cssWidth < 460 || minDim < 280) {
     return cssWidth < 380 && isCoarsePointer ? 'mobile' : 'compact';
   }
-  if (cssWidth >= 1440 && minDim >= 520 && !isCoarsePointer) {
+  if (cssWidth >= 1440 && minDim >= 480 && !isCoarsePointer) {
     return 'uhd';
   }
-  if (cssWidth >= 960 && minDim >= 400 && !isCoarsePointer) {
+  if (cssWidth >= 960 && minDim >= 360 && !isCoarsePointer) {
     return 'hd';
   }
   return cssWidth < 720 ? 'compact' : 'desktop';
 }
 
 /**
- * Computes an integer-aligned physical render budget and ASCII cell grid.
+ * Computes an integer-aligned physical render budget, supersampled 3D render-target size,
+ * and calibrated high-definition ASCII cell grid.
  *
  * Key invariants:
- * 1. `effectiveDpr` is capped to `[1, config.maxPixelRatio]` (and further capped on mobile to `1.5`
- *    to protect fill-rate and battery while keeping glyphs sharp).
- * 2. `activeCellSize` adapts smoothly by tier, fullscreen state & mode (`playground` vs `mascot`),
- *    bounded by minimum physical glyph dimensions (`>= 6px` wide, `>= 8px` tall) and bounded by
- *    maximum column caps (`190` cols in playground, `78` cols in mascot) so individual ASCII
- *    characters remain unmistakable even in fullscreen 4K!
- * 3. Multi-sample sub-cell anti-aliasing (`subCellSampleSpread`) scales up when `cellPhysH >= 12`.
+ * 1. `effectiveDpr` operates at full sharpness up to `2.0` (`config.maxPixelRatio`), capped on
+ *    coarse-pointer mobile devices to `1.5` to protect battery and fill-rate.
+ * 2. Offscreen 3D passes (`sceneTarget`, `normalTarget`, `depthTexture`) run at an internal
+ *    supersampling factor of `~1.5x–1.85x` (up to `2.0x` on compact stages) within safe GPU
+ *    dimension (`<= 4096`) and pixel (`<= 8.29 MP`) budgets.
+ * 3. `activeCellSize` is calibrated for high spatial definition (`~6.0px–6.8px` on desktop and
+ *    `~5.5px–6.2px` on HD/UHD), bounded by column guardrails (`390` cols in playground, `88` in
+ *    mascot) so architecture, `Player_Rig`, and `Carro_Grupo` stay crisp without turning into dust.
  */
 export function computeAdaptiveResolution(input: ResolutionInput): ResolutionProfile {
   const cssW = Math.max(1, Math.floor(input.cssWidth));
@@ -75,74 +173,160 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
   const coarse = Boolean(input.isCoarsePointer);
   const tier = detectResolutionTier(cssW, cssH, coarse);
 
-  // 1. Cap DPR per device profile (max 2.0 on desktop/retina, max 1.5 on mobile coarse-pointer)
-  const tierMaxDpr =
-    tier === 'mobile' ? Math.min(1.5, input.config.maxPixelRatio) : input.config.maxPixelRatio;
-  const effectiveDpr = Math.max(1, Math.min(rawDpr, Math.max(1, tierMaxDpr)));
+  // 1. Crisp final canvas DPR up to 2.0 on desktop/HD/UHD, max 1.5 on coarse-pointer mobile
+  const requestedMaxDpr = Math.min(2.0, Math.max(1, input.config.maxPixelRatio));
+  const tierMaxDpr = tier === 'mobile' ? Math.min(1.5, requestedMaxDpr) : requestedMaxDpr;
+  const effectiveDpr = Math.max(1, Math.min(rawDpr, tierMaxDpr));
 
   const physicalWidth = Math.max(2, Math.floor(cssW * effectiveDpr));
   const physicalHeight = Math.max(2, Math.floor(cssH * effectiveDpr));
 
-  // 2. Adaptive CSS cell size preserving legibility & silhouette density across container sizes
-  const baseCell = Math.max(5, Math.min(28, input.config.cellSize));
+  // 2. Internal 3D RenderTarget supersampling (~1.5x–2.0x within safe WebGL2 GPU budgets)
+  let desiredSupersample = 1.65;
+  if (tier === 'mobile') {
+    desiredSupersample = 1.4;
+  } else if (tier === 'compact') {
+    desiredSupersample = effectiveDpr < 1.5 ? 1.9 : 1.6;
+  } else if (tier === 'desktop') {
+    desiredSupersample = effectiveDpr < 1.5 ? 1.85 : 1.6;
+  } else if (tier === 'hd') {
+    desiredSupersample = effectiveDpr < 1.5 ? 1.75 : 1.55;
+  } else {
+    desiredSupersample = effectiveDpr < 1.5 ? 1.65 : 1.5;
+  }
+
+  const maxPhysDim = Math.max(physicalWidth, physicalHeight, 1);
+  const physArea = Math.max(1, physicalWidth * physicalHeight);
+  const dimScaleCap = MAX_SAFE_SUPERSAMPLE_DIM / maxPhysDim;
+  const areaScaleCap = Math.sqrt(MAX_SAFE_SUPERSAMPLE_PIXELS / physArea);
+  const minSafeScale = Math.min(1.0, dimScaleCap);
+  const appliedSupersample = Math.max(
+    minSafeScale,
+    Math.min(desiredSupersample, dimScaleCap, areaScaleCap)
+  );
+
+  const renderTargetWidth = Math.min(
+    MAX_SAFE_SUPERSAMPLE_DIM,
+    Math.max(2, Math.round(physicalWidth * appliedSupersample))
+  );
+  const renderTargetHeight = Math.min(
+    MAX_SAFE_SUPERSAMPLE_DIM,
+    Math.max(2, Math.round(physicalHeight * appliedSupersample))
+  );
+  const supersampleScale = Number(
+    (renderTargetWidth / Math.max(1, physicalWidth)).toFixed(2)
+  );
+
+  // 3. Calibrated typographic grid density:
+  //    - Default mount (`cellSize = 8`, `autoResponsiveDensity = true`):
+  //      Desktop (720–959px): ~6.0px–6.8px; HD / UHD (>= 960px): ~5.5px–6.2px
+  //    - Micro / explicit cell sizes (`2.0px .. < 7.5px` or `autoResponsiveDensity = false`):
+  //      Unlocks fine 0.25px–0.50px resolution down to 2.0px without subpixel blur or 6px clamping
+  const baseCell = Math.max(MIN_MICRO_CELL_SIZE, Math.min(28, input.config.cellSize));
+  const userCellRatio = baseCell / 8.0;
+  const isMicroOrManualCell =
+    input.config.mode !== 'mascot' &&
+    (!input.config.autoResponsiveDensity || baseCell < 7.5);
   let cellCss = baseCell;
 
   if (input.config.autoResponsiveDensity) {
     if (input.config.mode === 'mascot') {
       if (tier === 'mobile') {
-        cellCss = Math.max(baseCell, 8.5);
+        cellCss = Math.max(baseCell, 8.2);
       } else if (tier === 'compact') {
-        cellCss = Math.max(6.5, baseCell * 0.92);
+        cellCss = Math.max(6.2, baseCell * 0.9);
       } else if (tier === 'hd' || tier === 'uhd') {
-        cellCss = Math.max(6.5, baseCell * 0.85);
+        cellCss = Math.max(6.0, baseCell * 0.82);
       }
+    } else if (baseCell < 7.5) {
+      // Proportional micro scaling when autoResponsiveDensity is kept on with reduced cellSize
+      const tierBase =
+        tier === 'mobile'
+          ? 8.2
+          : tier === 'compact'
+            ? 7.0
+            : tier === 'desktop'
+              ? 6.45
+              : 5.95;
+      cellCss = Math.max(
+        MIN_MICRO_CELL_SIZE,
+        Number((tierBase * userCellRatio).toFixed(2))
+      );
     } else {
-      // Continuous container-proportional ramp calibrated so individual glyphs stay crisp & readable
-      // while preserving recognizable silhouettes on Player_Rig, Carro_Grupo, and facades.
-      const widthNorm = Math.max(0, Math.min(1, (cssW - 360) / 1240));
-      const continuousScale = 1.22 - widthNorm * 0.32; // smoothly spans 1.22x -> 0.90x
       if (tier === 'mobile') {
-        cellCss = Math.max(10.5, Math.round(baseCell * Math.max(1.34, continuousScale)));
+        cellCss = Math.max(7.6, Math.min(9.2, Number((8.2 * userCellRatio).toFixed(2))));
       } else if (tier === 'compact') {
-        cellCss = Math.max(8.8, Number((baseCell * Math.max(1.08, continuousScale)).toFixed(2)));
+        const t = Math.max(0, Math.min(1, (cssW - 460) / 260));
+        const target = 7.2 - t * 0.45; // 7.20px -> 6.75px
+        cellCss = Math.max(6.4, Math.min(7.8, Number((target * userCellRatio).toFixed(2))));
+      } else if (tier === 'desktop') {
+        const t = Math.max(0, Math.min(1, (cssW - 720) / 240));
+        const target = 6.65 - t * 0.45; // 6.65px -> 6.20px (strictly within 6.0px–6.8px)
+        cellCss = Math.max(6.0, Math.min(6.8, Number((target * userCellRatio).toFixed(2))));
       } else if (tier === 'hd') {
-        cellCss = Math.max(7.4, Number((baseCell * Math.min(0.95, continuousScale)).toFixed(2)));
-      } else if (tier === 'uhd') {
-        cellCss = Math.max(6.9, Number((baseCell * Math.min(0.88, continuousScale)).toFixed(2)));
+        const t = Math.max(0, Math.min(1, (cssW - 960) / 480));
+        const target = 6.12 - t * 0.34; // 6.12px -> 5.78px (strictly within 5.5px–6.2px)
+        cellCss = Math.max(5.5, Math.min(6.2, Number((target * userCellRatio).toFixed(2))));
       } else {
-        cellCss = Math.max(8.0, Number((baseCell * continuousScale).toFixed(2)));
+        // 'uhd' (>= 1440px)
+        const t = Math.max(0, Math.min(1, (cssW - 1440) / 1120));
+        const target = 5.82 - t * 0.28; // 5.82px -> 5.54px (strictly within 5.5px–6.2px)
+        cellCss = Math.max(5.5, Math.min(6.2, Number((target * userCellRatio).toFixed(2))));
       }
 
       if (input.isFullscreen && tier !== 'mobile') {
-        cellCss = Math.max(6.5, Number((cellCss * 0.93).toFixed(2)));
+        const floorPx = tier === 'hd' || tier === 'uhd' ? 5.5 : 6.0;
+        cellCss = Math.max(floorPx, Number((cellCss * 0.96).toFixed(2)));
       }
     }
   }
 
-  // 3. Convert to integer physical pixel cell dimensions (prevents moiré / uneven glyph stems!)
-  let cellPhysH = Math.max(8, Math.round(cellCss * effectiveDpr));
-  let cellPhysW = Math.max(6, Math.round(cellPhysH * MONOSPACE_ASPECT));
+  // 4. Physical pixel cell dimensions:
+  //    - Standard automatic mode (>= 6px): integer physical pixels
+  //    - Micro / manual mode (down to 2.0px): 0.25-pixel precision so every 0.25px step responds smoothly
+  let cellPhysH: number;
+  let cellPhysW: number;
+  if (isMicroOrManualCell) {
+    cellPhysH = Math.max(2.0, Math.round(cellCss * effectiveDpr * 4) / 4);
+    cellPhysW = Math.max(1.25, Math.round(cellPhysH * MONOSPACE_ASPECT * 4) / 4);
+  } else {
+    cellPhysH = Math.max(6, Math.round(cellCss * effectiveDpr));
+    cellPhysW = Math.max(4, Math.round(cellPhysH * MONOSPACE_ASPECT));
+  }
 
-  // 4. Enforce maximum column/row guardrails so ultra-wide/fullscreen 4K never turns ASCII into dust
-  const maxCols = input.config.mode === 'mascot' ? 78 : 190;
-  const minCols = input.config.mode === 'mascot' ? 24 : 36;
+  // 5. Enforce column guardrails:
+  //    - Default auto mode caps 4K+ at 680 cols; micro/manual mode expands safely to 2400 cols
+  //      (Pass 4 composite fragment cost is O(physicalWidth * physicalHeight), independent of columns)
+  const maxCols =
+    input.config.mode === 'mascot' ? 88 : isMicroOrManualCell ? 2400 : 680;
+  const minCols = input.config.mode === 'mascot' ? 24 : 42;
 
   const tentativeCols = Math.floor(physicalWidth / cellPhysW);
   if (tentativeCols > maxCols) {
-    cellPhysW = Math.max(6, Math.ceil(physicalWidth / maxCols));
-    cellPhysH = Math.max(8, Math.round(cellPhysW / MONOSPACE_ASPECT));
-  } else if (tentativeCols < minCols && physicalWidth >= minCols * 6) {
-    cellPhysW = Math.max(6, Math.floor(physicalWidth / minCols));
-    cellPhysH = Math.max(8, Math.round(cellPhysW / MONOSPACE_ASPECT));
+    if (isMicroOrManualCell) {
+      cellPhysW = Math.max(1.25, Math.ceil((physicalWidth / maxCols) * 4) / 4);
+      cellPhysH = Math.max(2.0, Math.round((cellPhysW / MONOSPACE_ASPECT) * 4) / 4);
+    } else {
+      cellPhysW = Math.max(4, Math.ceil(physicalWidth / maxCols));
+      cellPhysH = Math.max(6, Math.round(cellPhysW / MONOSPACE_ASPECT));
+    }
+  } else if (tentativeCols < minCols && physicalWidth >= minCols * 4) {
+    cellPhysW = Math.max(4, Math.floor(physicalWidth / minCols));
+    cellPhysH = Math.max(6, Math.round(cellPhysW / MONOSPACE_ASPECT));
   }
 
   const columns = Math.max(1, Math.floor(physicalWidth / cellPhysW));
   const rows = Math.max(1, Math.floor(physicalHeight / cellPhysH));
   const activeCellSize = Number((cellPhysH / effectiveDpr).toFixed(2));
 
-  // 5. Atlas tile resolution & sub-cell supersampling spread
-  const atlasTileSize = effectiveDpr >= 1.5 || cellPhysH >= 14 ? 96 : 64;
-  const subCellSampleSpread = cellPhysH >= 12 ? 0.26 : 0.18;
+  // 6. Crisp HiDPI glyph atlas tile size (up to DPR 2.0) & exact 2x2 sub-quadrant spread (0.25)
+  const atlasTileSize =
+    effectiveDpr >= 1.75
+      ? 112
+      : effectiveDpr >= 1.25 || tier === 'hd' || tier === 'uhd'
+        ? 96
+        : 80;
+  const subCellSampleSpread = 0.25;
   const bloomDownsample = tier === 'mobile' ? 4 : 3;
 
   return {
@@ -152,6 +336,9 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
     effectiveDpr: Number(effectiveDpr.toFixed(2)),
     physicalWidth,
     physicalHeight,
+    supersampleScale,
+    renderTargetWidth,
+    renderTargetHeight,
     activeCellSize,
     cellPhysW,
     cellPhysH,
