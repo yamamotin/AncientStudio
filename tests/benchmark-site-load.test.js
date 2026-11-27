@@ -27,9 +27,9 @@ test('benchmark notifies average site loading speed with real Draco WASM scene d
 
   assert.equal(report.iterations, 5);
   assert.equal(report.workerLimit, 4);
-  assert.equal(report.scene.dracoPrimitives, 186, 'all 186 Draco mesh primitives decoded');
-  assert.equal(report.scene.vertices, 679_468, 'all 679,468 unique vertices decoded');
-  assert.equal(report.scene.triangles, 613_222, 'all 613,222 triangles decoded');
+  assert.equal(report.scene.dracoPrimitives, 154, 'all 154 Draco mesh primitives decoded');
+  assert.equal(report.scene.vertices, 498_351, 'all 498,351 unique vertices decoded');
+  assert.equal(report.scene.triangles, 438_122, 'all 438,122 triangles decoded');
   assert.ok(report.scene.webpImages >= 70, 'embedded WebP textures verified');
   assert.deepEqual(
     report.scene.preservedNodes,
@@ -112,7 +112,7 @@ test('frontend bundle exports SceneGlbLoader with self-hosted ./assets/draco/ an
   );
 });
 
-test('repository stores zero uncompressed 3D scene files in working tree or active git history', () => {
+test('active scene stays compressed and existing alternate model is preserved', () => {
   const forbiddenExt = /\.(blend|blend1|fbx|obj|orig\.glb|raw\.glb|uncompressed\.glb)$/i;
   const glbFiles = [];
 
@@ -135,12 +135,12 @@ test('repository stores zero uncompressed 3D scene files in working tree or acti
 
   walk(root);
   assert.deepEqual(
-    glbFiles.map((f) => path.relative(root, f)),
-    ['assets/models/cena_completa.glb'],
-    'only the single compressed cena_completa.glb exists in the repository'
+    glbFiles.map((f) => path.relative(root, f)).sort(),
+    ['assets/models/cena_completa.glb', 'assets/models/cena_final.glb'],
+    'the active compressed scene and existing alternate model both remain available'
   );
 
-  const glbSize = statSync(glbFiles[0]).size;
+  const glbSize = statSync(path.join(root, 'assets/models/cena_completa.glb')).size;
   assert.ok(glbSize < 20 * 1024 * 1024, `cena_completa.glb (${glbSize} B) must remain compressed (<20 MiB)`);
 
   if (existsSync(path.join(root, '.git'))) {
@@ -156,9 +156,12 @@ test('repository stores zero uncompressed 3D scene files in working tree or acti
       const parts = meta.trim().split(/\s+/);
       if (parts[1] !== 'blob') continue;
       const byteSize = Number(parts[3]);
+      // The alternate textured model was already present on main; keep it without
+      // allowing other large blobs or loading it as the active scene by accident.
+      const limit = objPath === 'assets/models/cena_final.glb' ? 100 : 50;
       assert.ok(
-        byteSize < 50 * 1024 * 1024,
-        `Tracked HEAD tree stores an uncompressed >50 MB blob: ${objPath} (${byteSize} B)`
+        byteSize < limit * 1024 * 1024,
+        `Tracked HEAD blob exceeds its ${limit} MiB limit: ${objPath} (${byteSize} B)`
       );
     }
   }

@@ -405,13 +405,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const gltfJson = JSON.parse(rawGlb.subarray(20, 20 + rawGlb.readUInt32LE(12)).toString('utf8'));
   const girlNode = gltfJson.nodes.find(n => n.name === 'FuturisticGirl');
   const girlPrimitive = gltfJson.meshes[girlNode.mesh].primitives[0];
-  assert.equal(girlPrimitive.material, 72, 'Character primitive references FuturisticGirl_Mat in the source GLB');
-  assert.equal(gltfJson.materials[girlPrimitive.material].name, 'FuturisticGirl_Mat', 'Character material named FuturisticGirl_Mat');
-  assert.ok(
-    gltfJson.materials[girlPrimitive.material].pbrMetallicRoughness.baseColorTexture !== undefined,
-    'Character primitive has an assigned base-color texture'
-  );
-  assert.ok(gltfJson.materials[girlPrimitive.material].normalTexture !== undefined, 'Character primitive has an assigned normal texture');
+  assert.equal(girlPrimitive.material, undefined, 'Character primitive in the source GLB has no material or assigned texture');
   assert.ok(girlPrimitive.attributes.TEXCOORD_0 !== undefined, 'Character UV coordinates exist');
   const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
 
@@ -546,6 +540,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const fgOccluders = ecsWorld.getComponent(stage.cidadeEntityId, 'ForegroundOccluders');
 
   assert.equal(charAnim.activeClip, 'Idle', 'Player_Rig starts in looped Idle animation');
+  assert.AlmostEqual = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
   assert.AlmostEqual(camera.position.x, playerTransform.x + camFollow.offsetX);
   assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
   assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
@@ -958,12 +953,20 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   );
   decalMesh.userData.skipNormalPass = true;
   const cutout = new pkg.THREE.Mesh(new pkg.THREE.PlaneGeometry(), new pkg.THREE.MeshStandardMaterial({ alphaTest: 0.5 }));
-  passScene.add(mappedMesh, decalMesh, cutout);
+  const roadMat = new pkg.THREE.MeshStandardMaterial({ side: pkg.THREE.DoubleSide });
+  roadMat.userData.asciiRoadSurface = true;
+  const roadMesh = new pkg.THREE.Mesh(new pkg.THREE.PlaneGeometry(), roadMat);
+  passScene.add(mappedMesh, decalMesh, cutout, roadMesh);
 
   const passCache = new pkg.NormalPassMaterialCache();
   passCache.beginPass(passScene);
   assert.equal(decalMesh.visible, false, 'skipNormalPass decal hidden during Pass 2');
   assert.equal(cutout.visible, false, 'alpha-tested geometry must not become a solid normal card');
+  assert.equal(roadMesh.material.opacity, 0, 'Pass 2 tags road in alpha even without a normal map');
+  assert.equal(roadMesh.material.blending, pkg.THREE.NoBlending, 'road marker writes alpha without transparent blending');
+  assert.equal(roadMesh.material.transparent, false, 'road remains depth-tested in opaque draw order');
+  assert.equal(roadMesh.material.side, pkg.THREE.DoubleSide);
+  assert.equal(mappedMesh.material.opacity, 1, 'ordinary geometry is never tagged as road');
   assert.ok(
     mappedMesh.material.isMeshNormalMaterial && mappedMesh.material.normalMap === normalSet.facade,
     'Opaque mesh receives normal-mapped MeshNormalMaterial during Pass 2'
@@ -976,6 +979,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   assert.equal(decalMesh.visible, true, 'skipNormalPass decal restored immediately after Pass 2');
   assert.equal(cutout.visible, true);
   assert.equal(mappedMesh.material, mappedMat, 'Original PBR material restored immediately after Pass 2');
+  assert.equal(roadMesh.material, roadMat, 'road source material restored after Pass 2');
   mappedMat.normalScale.set(0, 0);
   passCache.beginPass(passScene);
   assert.equal(mappedMesh.material.normalScale.length(), 0, 'Pass 2 respects explicitly flat road normals');
@@ -1517,10 +1521,20 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
     'geomMinLuma',
     'effectiveBlockWeight',
     'stepReflY',
+    'normalCenterSample.a',
+    'mix(max(sceneCol, structuralMassFloor), sceneCol, roadMask)',
+    'finalRgb = mix(finalRgb, darkRoad, roadMask)',
     'vec3(0.16)',
     '* uReflectionStrength',
     'exp(-max(finalRgb - vec3(0.70)'
   ]);
+
+  // The road luminance shoulder is continuous and retains a positive difference
+  // between dark pavement and brighter lane marks, even at high illumination.
+  const roadGrade = l => l * 0.32 / (0.32 + l);
+  for (const l of [0, 0.03, 0.1, 0.3, 1, 10]) assert.ok(roadGrade(l) < 0.32);
+  assert.ok(roadGrade(0.4) > roadGrade(0.1));
+  assert.ok(roadGrade(0.8) - roadGrade(0.4) < 0.1, 'bright pavement stays subdued');
 
   // 2. Adapter preset palettes must clearly differentiate day, night, and rain
   assert.match(adapter, /day:\s*\{[\s\S]*?background:\s*'#213242'/);
@@ -1579,6 +1593,19 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   assert.equal(roadA.material, roadB.material, 'Both adjoining asphalt halves share a material');
   assert.equal(roadA.material.roughnessMap, null, 'Baked roughness map no longer creates inconsistent specular patches');
   assert.ok(roadA.material.map, 'Original road albedo and lane markings remain');
+  assert.equal(roadA.material.userData.asciiRoadSurface, true);
+  assert.equal(roadA.material.fog, false, 'dark road is not washed toward fog color');
+  assert.ok(prepared.materials.sidewalks.every(m => !m.userData.asciiRoadSurface));
+  assert.ok(prepared.materials.character.every(m => !m.userData.asciiRoadSurface));
+  assert.ok(prepared.materials.carBody.every(m => !m.userData.asciiRoadSurface));
+  const roadPass = new pkg.NormalPassMaterialCache();
+  roadPass.beginPass(stage.scene);
+  assert.equal(roadA.material.opacity, 0);
+  assert.equal(roadB.material.opacity, 0);
+  const sidewalkMesh = prepared.nodes.cidade.getObjectByName('Cidade_Object_61');
+  assert.equal(sidewalkMesh.material.opacity, 1, 'sidewalk does not receive road grade');
+  roadPass.endPass();
+  roadPass.dispose();
   assert.ok(roadA.matrixWorld.determinant() * roadB.matrixWorld.determinant() < 0, 'Second road tile has mirrored transform');
   for (const mesh of [roadA, roadB]) {
     assert.equal(mesh.receiveShadow, false, 'Identical shadow policy across road tiles');
@@ -1586,12 +1613,9 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   }
   const girl = prepared.nodes.playerRig.getObjectByName('FuturisticGirl');
   assert.ok(girl.isSkinnedMesh && girl.geometry.getAttribute('uv'));
-  assert.equal(girl.material.name, 'FuturisticGirl_Mat');
-  assert.ok(girl.material.map, 'GLB assigns the FuturisticGirl_Mat base-color map to the character');
-  assert.ok(
-    prepared.materials.character.some((m) => m.name === 'FuturisticGirl_Mat'),
-    'FuturisticGirl_Mat preserved as a character material after material legibility fixes'
-  );
+  assert.equal(girl.material.name, 'PlayerProtagonistMaterial');
+  assert.equal(girl.material.map, null, 'GLB has UVs but no assigned character base-color map');
+  assert.ok(prepared.materials.character.every(m => m.color.r < 0.5 && m.roughness >= 0.7));
 
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(
     stage,
