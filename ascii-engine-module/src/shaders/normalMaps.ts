@@ -182,7 +182,7 @@ export class NormalPassMaterialCache {
   private readonly fallbackMaterial = new THREE.MeshNormalMaterial();
   private readonly bySourceUuid = new Map<
     string,
-    { normalMat: THREE.MeshNormalMaterial; sourceMap: THREE.Texture }
+    { normalMat: THREE.MeshNormalMaterial; sourceMap: THREE.Texture | null }
   >();
   private readonly swappedMeshes: SavedMeshMaterialEntry[] = [];
   private readonly hiddenObjects: THREE.Object3D[] = [];
@@ -251,8 +251,9 @@ export class NormalPassMaterialCache {
     if (!source) return this.fallbackMaterial;
 
     const candidate = source as THREE.MeshStandardMaterial;
-    const normalMap = candidate.normalMap;
-    if (!normalMap || !normalMap.isTexture) {
+    const normalMap = candidate.normalMap?.isTexture ? candidate.normalMap : null;
+    const isRoad = source.userData.asciiRoadSurface === true;
+    if (!normalMap && !isRoad) {
       return this.fallbackMaterial;
     }
 
@@ -266,6 +267,7 @@ export class NormalPassMaterialCache {
     if (existing && existing.sourceMap === normalMap) {
       existing.normalMat.normalScale.set(macroScaleX, macroScaleY);
       existing.normalMat.side = source.side;
+      existing.normalMat.opacity = isRoad ? 0 : 1;
       return existing.normalMat;
     }
 
@@ -279,6 +281,10 @@ export class NormalPassMaterialCache {
       normalScale: new THREE.Vector2(macroScaleX, macroScaleY),
       flatShading: candidate.flatShading === true,
       side: source.side,
+      // No blending keeps depth-tested, opaque ordering while allowing the
+      // normal buffer alpha to carry a material ID (Three's OPAQUE is disabled).
+      blending: THREE.NoBlending,
+      opacity: isRoad ? 0 : 1,
     });
     this.bySourceUuid.set(source.uuid, { normalMat, sourceMap: normalMap });
     return normalMat;

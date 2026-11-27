@@ -348,7 +348,11 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       smoothstep(0.016, 0.062, maxNeighborDepth - centerLinDepth) *
       (1.0 - smoothstep(0.55, 0.88, centerLinDepth));
 
-    vec3 nCenterEnc = texture2D(tNormal, cellCenterUv).xyz;
+    vec4 normalCenterSample = texture2D(tNormal, cellCenterUv);
+    vec3 nCenterEnc = normalCenterSample.xyz;
+    // Road is tagged in Pass 2 alpha; no screen-position or normal heuristic,
+    // so sidewalks, the character, and car retain their own tonal response.
+    float roadMask = (1.0 - smoothstep(0.15, 0.85, normalCenterSample.a)) * isGeometry * uVolumeWrapStrength;
     vec3 nSubBL = texture2D(tNormal, clamp(cellCenterUv + vec2(-subQuadOffset.x, -subQuadOffset.y), 0.001, 0.999)).xyz;
     vec3 nSubBR = texture2D(tNormal, clamp(cellCenterUv + vec2( subQuadOffset.x, -subQuadOffset.y), 0.001, 0.999)).xyz;
     vec3 nSubTL = texture2D(tNormal, clamp(cellCenterUv + vec2(-subQuadOffset.x,  subQuadOffset.y), 0.001, 0.999)).xyz;
@@ -420,7 +424,9 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       (0.60 + 0.40 * clamp(worldUpY * 0.5 + 0.5, 0.0, 1.0)) *
       isGeometry *
       uVolumeWrapStrength;
-    vec3 baseGeomCol = max(sceneCol, structuralMassFloor);
+    // The generic structural floor otherwise lifts dark asphalt toward concrete.
+    // Retain the textured road signal (including lane markings) instead.
+    vec3 baseGeomCol = mix(max(sceneCol, structuralMassFloor), sceneCol, roadMask);
 
     // Contained typographic light halo: bloom lifts nearby character indices into crisp bright glyphs
     vec3 haloLift = bloomCol * (uBloomIntensity * 0.45);
@@ -688,6 +694,12 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       finalRgb = min(finalRgb, vec3(0.70)) + vec3(0.24) * (vec3(1.0) - exp(-max(finalRgb - vec3(0.70), vec3(0.0)) / 0.24));
     }
 
+    // Bound only road radiance after glyph ink, bloom and reflections have been
+    // combined. A smooth luminance shoulder keeps markings/glints visible while
+    // preventing local lamps from making foreground asphalt sidewalk-gray.
+    float roadLuma = getLuma(finalRgb);
+    vec3 darkRoad = finalRgb * (0.32 / (0.32 + roadLuma));
+    finalRgb = mix(finalRgb, darkRoad, roadMask);
     gl_FragColor = vec4(finalRgb, 1.0);
   }
 `;
