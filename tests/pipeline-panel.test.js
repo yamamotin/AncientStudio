@@ -91,6 +91,18 @@ test('client hardening: no credentials, abortable requests and DOM-safe renderin
   // Manual refresh cannot flood the public API.
   includesAll(pipelineCode, ['REFRESH_COOLDOWN', 'state.loading', "setAttribute('aria-busy'", 'removeAttribute']);
 
+  // Dynamic labels must never paint raw i18n keys: i18n is in the deferred chain
+  // before the UI modules that render them.
+  assert.ok(
+    html.indexOf('assets/js/i18n.js') < html.indexOf('assets/js/main.js'),
+    'i18n.js loads before main.js'
+  );
+  assert.match(html, /<script src="assets\/js\/i18n\.js" defer data-i18n-js><\/script>/);
+  assert.ok(
+    html.indexOf('assets/js/i18n.js') < html.indexOf('assets/js/pipeline.js'),
+    'i18n.js loads before pipeline.js'
+  );
+
   // Every fetch in the frontend is time-boxed with AbortController.
   for (const [name, source] of [['api-client.js', apiClient], ['main.js', main], ['i18n.js', i18n], ['api.js', legacyApi]]) {
     includesAll(source, ['AbortController', 'abort()', 'signal'], `${name} request timeout`);

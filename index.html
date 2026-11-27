@@ -19,6 +19,11 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0%200%2064%2064'%3E%3Crect width='64' height='64' rx='8' fill='%230D1117'/%3E%3Ctext x='8' y='44' font-family='monospace' font-size='34' font-weight='bold' fill='%2300FF41'%3E%3E_%3C/text%3E%3C/svg%3E">
   <link rel="preload" href="assets/fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/css/style.css">
+  <!-- i18n ships with the embedded pt-br dictionary, so it must be ready
+       before the UI modules that render dynamic labels (pipeline panel, scene,
+       console) run their first pass. Keeping it as a deferred same-origin script
+       costs no extra request for pt-br and avoids painting raw i18n keys. -->
+  <script src="assets/js/i18n.js" defer data-i18n-js></script>
   <script src="assets/js/core.js" defer></script>
   <script src="assets/js/api.js" defer></script>
   <script src="assets/js/pipeline.js" defer></script>
