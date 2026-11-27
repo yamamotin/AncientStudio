@@ -10,36 +10,52 @@ import {
 
 const ATMOSPHERE_PRESETS: Record<
   AtmosphereMode,
-  { palette: ThemePalette; windStrength: number; bloomIntensity: number }
+  {
+    palette: ThemePalette;
+    windStrength: number;
+    bloomIntensity: number;
+    blockBlendWeight: number;
+  }
 > = {
   night: {
-    palette: { ...DEFAULT_PALETTE },
+    palette: {
+      ...DEFAULT_PALETTE,
+      background: '#0E161F',
+      warmLight: '#5C8E92',
+      warmCore: '#9DB0BF',
+      coolAmbient: '#7D92A6',
+      foliageAccent: '#2E404E',
+      cursorLight: '#7D92A6',
+    },
     windStrength: 0.62,
-    bloomIntensity: 0.24,
+    bloomIntensity: 0.3,
+    blockBlendWeight: 0.14,
   },
   day: {
     palette: {
-      background: '#162029',
-      warmLight: '#4A7C7E',
-      warmCore: '#8A99A6',
-      coolAmbient: '#7A8894',
-      foliageAccent: '#2A3540',
-      cursorLight: '#8A99A6',
+      background: '#213242',
+      warmLight: '#C9A86A',
+      warmCore: '#E6EEF5',
+      coolAmbient: '#9EB4C8',
+      foliageAccent: '#3D5E4C',
+      cursorLight: '#B8CCE0',
     },
     windStrength: 0.42,
     bloomIntensity: 0.16,
+    blockBlendWeight: 0.16,
   },
   rain: {
     palette: {
-      background: '#0A0F14',
-      warmLight: '#4A7C7E',
-      warmCore: '#8A99A6',
-      coolAmbient: '#5E6C78',
-      foliageAccent: '#2A3540',
-      cursorLight: '#6E7B87',
+      background: '#111C27',
+      warmLight: '#5A909C',
+      warmCore: '#A2B6C6',
+      coolAmbient: '#7890A6',
+      foliageAccent: '#2C424E',
+      cursorLight: '#7E98AE',
     },
     windStrength: 1.45,
-    bloomIntensity: 0.28,
+    bloomIntensity: 0.34,
+    blockBlendWeight: 0.16,
   },
 };
 
@@ -113,6 +129,7 @@ function currentControlsToConfig(): PartialEngineConfig {
     atmosphere: activePresetKey,
     palette: preset.palette,
     windStrength: preset.windStrength,
+    blockBlendWeight: preset.blockBlendWeight,
     cellSize: Number(inputCell.value),
     bloomIntensity: Number(inputBloom.value),
     edgeStrength: Number(inputEdge.value),
@@ -269,6 +286,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((chip) => 
       palette: preset.palette,
       windStrength: preset.windStrength,
       bloomIntensity: preset.bloomIntensity,
+      blockBlendWeight: preset.blockBlendWeight,
     });
     appendLog(`updateConfig({ atmosphere: "${key}" }) aplicado no cenário único`);
   });

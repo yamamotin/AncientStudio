@@ -209,6 +209,14 @@ export class NormalPassMaterialCache {
       if (!(obj as THREE.Mesh).isMesh) return;
       const mesh = obj as THREE.Mesh;
       const orig = mesh.material;
+      // MeshNormalMaterial does not implement alpha-test chunks. Avoid painting
+      // opaque rectangles over cutout cards; mixed-material meshes are skipped
+      // as a whole until a cutout-aware normal shader is available.
+      const materials = Array.isArray(orig) ? orig : [orig];
+      if (materials.some((material) => material && material.alphaTest > 0)) {
+        this.hiddenObjects.push(mesh);
+        return;
+      }
       this.swappedMeshes.push({ mesh, originalMaterial: orig });
 
       if (Array.isArray(orig)) {

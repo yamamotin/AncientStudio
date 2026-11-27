@@ -274,7 +274,7 @@ export function extractAndPrepareGlbNodes(
     }
 
     const matLabel = mats.map((m) => m?.name ?? '').join(' ').toLowerCase();
-    const isFoliage = /grass|leav|material\.005|material\.009/i.test(matLabel);
+    const isFoliage = /grass|leav|material\.00[569]/i.test(matLabel);
     const hasTransparentBlend = mats.some((m) => Boolean(m && m.transparent));
 
     // Exclude alpha-blended billboard decals/cards (`grass_medium_01`, `leavesfall`, `leavsp`,
@@ -294,23 +294,25 @@ export function extractAndPrepareGlbNodes(
 
       const name = (mat.name || '').toLowerCase();
 
-      // Fix baked `metalness = 1` palette materials when rendering without an HDRI environment map
-      // so lampposts, railings, and trims retain readable diffuse shading instead of turning black.
-      if (/palettematerial00[1-5]|material\.034/i.test(name) && mat.metalness >= 0.85) {
+      // Detach baked ORM blue-channel `metalnessMap` (`B ≈ 1.0` in Sketchfab exports) while keeping
+      // `roughnessMap` intact so rendering without an HDRI `scene.environment` preserves full diffuse albedo.
+      if (mat.metalnessMap) {
         mat.metalnessMap = null;
-        mat.metalness = 0.32;
-        mat.roughness = Math.min(0.56, Math.max(0.28, mat.roughness));
+      }
+      if (/palettematerial00[1-7]|material\.034/i.test(name) || mat.metalness >= 0.35) {
+        mat.metalness = Math.min(0.18, mat.metalness);
+        mat.roughness = Math.min(0.62, Math.max(0.28, mat.roughness));
       }
 
       if (/real_road|road|asphalt/i.test(name)) {
         ensureSurfaceNormalMap(mat, proceduralNormals.asphalt, 0.78, 0.85);
         roads.push(mat);
-      } else if (/concrete_pavement|tiles/i.test(name)) {
+      } else if (/concrete_pavement|tiles|material\.010/i.test(name)) {
         ensureSurfaceNormalMap(mat, proceduralNormals.pavement, 0.68, 0.82);
         sidewalks.push(mat);
       } else if (/window|wiind/i.test(name)) {
         windows.push(mat);
-      } else if (/grass|leav|material\.005|material\.009/i.test(name)) {
+      } else if (/grass|leav|material\.00[569]/i.test(name)) {
         foliage.push(mat);
       } else if (/palettematerial005|material\.033/i.test(name)) {
         kioskGlass.push(mat);
@@ -320,9 +322,10 @@ export function extractAndPrepareGlbNodes(
         mat.emissive &&
         (mat.emissive.r + mat.emissive.g + mat.emissive.b > 0.25)
       ) {
+        mat.metalness = Math.min(0.12, mat.metalness);
         streetLamps.push(mat);
       } else if (
-        /wall|hous|roof|rust|metal|material\.0(01|03|07|08|10|11|12|14|16|17|20|21|24|28|29|30|31|32)/i.test(
+        /^material$|wall|hous|roof|rust|metal|palettematerial00[1347]|bollard|utility_box|material\.0(01|03|04|07|08|11|12|14|16|17|20|21|24|28|29|30|31|32|34)/i.test(
           name
         )
       ) {
@@ -330,6 +333,7 @@ export function extractAndPrepareGlbNodes(
         walls.push(mat);
       } else if (!hasTransparentBlend) {
         ensureSurfaceNormalMap(mat, proceduralNormals.facade, 0.42, 0.60);
+        walls.push(mat);
       }
     }
   });
