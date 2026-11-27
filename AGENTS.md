@@ -10,9 +10,9 @@ de conflito, **estas regras de fluxo de trabalho vêm primeiro**.
 2. `git fetch --all --prune` e sincronizar com a `main` **antes de ler ou alterar código**:
    - `git pull` (ou `git merge --ff-only origin/main`) na branch ativa;
    - se a `main` avançou, incorporar as mudanças de outros agentes e **resolver conflitos
-     com segurança** (nunca descartar trabalho alheio, nunca `--force`).
+     com segurança** — nunca descartar alterações de outros agentes e nunca `--force`.
 3. Trabalhar **somente na branch ativa da sessão**. Não criar, renomear nem trocar de
-   branch; não abrir PR sem pedido explícito.
+   branch.
 
 ## 2. AO TERMINAR TODA TAREFA (obrigatório)
 
@@ -28,13 +28,21 @@ Executar, nesta ordem, sem perguntar se pode:
    - caminho rápido: `git fetch origin main` → `git merge-base --is-ancestor origin/main HEAD`
      → `git push origin HEAD:main` (fast-forward);
    - se a `main` já avançou: `git merge origin/main` na branch ativa, **resolver os
-     conflitos**, rodar a validação novamente e só então `git push origin HEAD:main`.
+     conflitos**, rodar a validação novamente e só então `git push origin HEAD:main`;
+   - se o repositório/ambiente exigir integração por pull request, abra o PR da branch de
+     trabalho e mescle-o (`gh pr merge <n> --merge|--squash`), confirmando o merge antes de
+     seguir. A regra é sempre **integrar na `main` ao final da tarefa**.
 5. **Apagar a working branch no remoto** — `git push origin --delete <branch-de-trabalho>`
-   depois que o merge na `main` estiver publicado. O clone local mantém a branch da sessão
-   (um checkout ativo não pode ser apagado); o que se remove é o ref remoto.
+   depois que o merge na `main` estiver publicado e confirmado. O clone local mantém a
+   branch da sessão (um checkout ativo não pode ser apagado); exclua também a branch local
+   apenas quando isso for permitido e seguro no ambiente da sessão.
 6. **Confirmar a entrega** — checar os workflows (`gh run list`) e o deploy (Pages/Vercel,
    produção `READY`/`PROMOTED` do commit publicado) e relatar: resultado do `git pull`,
    arquivos lidos/criados/modificados, cada alteração e os comandos com seus resultados.
+
+Se instruções explícitas mais recentes, regras do ambiente, falhas nas verificações ou
+proteções do repositório impedirem alguma etapa, **não contorne essas restrições**: informe
+o que ficou pendente e por quê.
 
 ### Proibições absolutas
 

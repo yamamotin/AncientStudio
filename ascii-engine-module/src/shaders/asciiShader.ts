@@ -217,7 +217,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 reflected = (reflAcc / max(weightSum, 0.001)) * rippleBand;
     // Limit screen-space reflection energy, which otherwise exaggerates the
     // hard visual transition where one road half samples bright facades.
-    return min(reflected, vec3(0.38)) * upwardMask * uWetness * uReflectionStrength;
+    return min(reflected, vec3(0.16)) * upwardMask * uWetness * uReflectionStrength;
   }
 
   /**
@@ -399,7 +399,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float rimNdotL = clamp(dot(viewN, uRimLightViewDir), 0.0, 1.0);
     vec3 halfVec = normalize(uKeyLightViewDir + vec3(0.0, 0.0, 1.0));
     float specPower = mix(22.0, 44.0, uWetness);
-    float normalSpec = pow(max(dot(viewN, halfVec), 0.0), specPower) * mix(0.075, 0.165, uWetness);
+    float normalSpec = pow(max(dot(viewN, halfVec), 0.0), specPower) * mix(0.035, 0.075, uWetness) * uReflectionStrength;
     float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.15) * (0.36 + 0.64 * rimNdotL) * 0.105;
     float hemiCatch = worldUpY * 0.038;
 
@@ -423,7 +423,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 baseGeomCol = max(sceneCol, structuralMassFloor);
 
     // Contained typographic light halo: bloom lifts nearby character indices into crisp bright glyphs
-    vec3 haloLift = bloomCol * (uBloomIntensity * 1.06);
+    vec3 haloLift = bloomCol * (uBloomIntensity * 0.45);
     vec3 combinedHdr = baseGeomCol + haloLift + groundRefl * mix(0.92, 1.12, uWetness);
 
     // Modulate scene radiance by directional surface orientation so 90-degree return walls separate cleanly
@@ -444,7 +444,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       vec3 workingHdr = isGeometry > 0.5
         ? combinedHdr
         : (max(sceneCol - uBgColor * 1.04, vec3(0.0)) + haloLift);
-      float exposureGain = mix(1.35, 1.15, uDaylight);
+      float exposureGain = mix(0.85, 0.65, uDaylight);
       vec3 exposedLinear = (workingHdr * exposureGain) / (vec3(1.0) + workingHdr * exposureGain);
       combinedSignal = linearToSrgb(exposedLinear);
     } else {
@@ -466,7 +466,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float directionalRelief =
       (keyNdotL * 0.072 - keyAway * 0.044 + hemiCatch + grazingRim * 1.15 + normalSpec) * uNormalReliefStrength;
     float volumeRelief =
-      (directionalRelief * litGate + silhouetteInnerRim * 0.12) *
+      (directionalRelief * litGate + silhouetteInnerRim * 0.045) *
       isGeometry *
       uVolumeWrapStrength;
 
@@ -477,9 +477,9 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float shapedLuma = clamp(getLuma(combinedSignal), 0.0, 1.0);
     if (uVolumeWrapStrength > 0.5) {
       if (isGeometry > 0.5) {
-        shapedLuma = pow(max(shapedLuma, 0.0001), mix(0.94, 0.86, uDaylight));
-        float geomMinLuma = mix(0.16, 0.28, uDaylight) + cellDensitySupport * 0.07;
-        shapedLuma = mix(geomMinLuma, 0.98, clamp((shapedLuma - 0.10) / 0.88, 0.0, 1.0));
+        shapedLuma = pow(max(shapedLuma, 0.0001), mix(1.02, 1.06, uDaylight));
+        float geomMinLuma = mix(0.13, 0.16, uDaylight) + cellDensitySupport * 0.04;
+        shapedLuma = mix(geomMinLuma, 0.84, clamp((shapedLuma - 0.10) / 0.88, 0.0, 1.0));
         float highlightProtect = smoothstep(0.54, 0.90, shapedLuma);
         float moatAtten = mix(0.80, 0.90, max(uDaylight, cellDensitySupport));
         shapedLuma *= mix(1.0, moatAtten, silhouetteOuterMoat * (1.0 - highlightProtect));
@@ -639,21 +639,21 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       charColor = mix(charColor, mix(charColor, mossInk, 0.52), foliageMask * (1.0 - warmAccentMask * 0.7));
 
       // Crisp ivory-white core on peak lights, '*' / 'o' sparkles & character silhouette rims
-      float sparkleLift = isSparkleHighlight ? 0.36 : 0.0;
-      float peakIvory = max(max(smoothstep(0.72, 0.96, luma) * 0.64, silhouetteInnerRim * 0.42), sparkleLift);
-      charColor = mix(charColor, vec3(1.06, 1.04, 0.98), clamp(peakIvory, 0.0, 0.78));
+      float sparkleLift = isSparkleHighlight ? 0.20 : 0.0;
+      float peakIvory = max(max(smoothstep(0.82, 0.98, luma) * 0.22, silhouetteInnerRim * 0.12), sparkleLift);
+      charColor = mix(charColor, vec3(0.94, 0.93, 0.90), clamp(peakIvory, 0.0, 0.30));
     }
 
     if (useStructuralEdge) {
       vec3 edgeInk = uVolumeWrapStrength > 0.5
-        ? mix(coolTintOut * 1.12, vec3(0.96, 0.98, 1.02), max(silhouetteInnerRim * 0.66, smoothstep(0.32, 0.84, luma) * 0.48))
+        ? mix(coolTintOut * 1.12, vec3(0.96, 0.98, 1.02), max(silhouetteInnerRim * 0.24, smoothstep(0.32, 0.84, luma) * 0.25))
         : warmTintOut * 1.16;
       charColor = mix(charColor, edgeInk, 0.34 * clamp(combinedEdge, 0.0, 1.0));
     }
 
     // Readable structural ink across shadowed streets/walls and bright sunlit/nocturnal focal planes
     float brightness = uVolumeWrapStrength > 0.5
-      ? mix(mix(0.46, 0.58, uDaylight), 1.32, smoothstep(0.08, 0.86, luma))
+      ? mix(mix(0.38, 0.43, uDaylight), 0.88, smoothstep(0.08, 0.86, luma))
       : mix(0.18, 1.24, smoothstep(0.02, 0.94, luma));
     vec3 litGlyph = charColor * brightness * compositeGlyphMask;
 
@@ -682,6 +682,11 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 bloomSrgb = uVolumeWrapStrength > 0.5 ? linearToSrgb(bloomCol * 0.85) : bloomCol;
     finalRgb += bloomSrgb * (uBloomIntensity * mix(0.26, 0.10, uDaylight) * (0.10 + 0.90 * compositeGlyphMask));
     finalRgb *= clamp(vignette, 0.86, 1.0);
+    // Reserve output headroom: prevent bloom and glyph ink from clipping to white.
+    if (uVolumeWrapStrength > 0.5) {
+      finalRgb = max(finalRgb, vec3(0.0));
+      finalRgb = min(finalRgb, vec3(0.70)) + vec3(0.24) * (vec3(1.0) - exp(-max(finalRgb - vec3(0.70), vec3(0.0)) / 0.24));
+    }
 
     gl_FragColor = vec4(finalRgb, 1.0);
   }
