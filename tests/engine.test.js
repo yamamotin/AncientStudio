@@ -8,6 +8,7 @@ const { Worker: NodeThreadWorker } = require('node:worker_threads');
 const { assert, includesAll } = require('./helpers/assert');
 
 const root = path.resolve(__dirname, '..');
+
 const adapter = readFileSync(path.join(root, 'assets/js/engine-adapter.js'), 'utf8');
 const core = readFileSync(path.join(root, 'ascii-engine-module/src/index.ts'), 'utf8');
 const engineCore = readFileSync(
@@ -405,8 +406,17 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const gltfJson = JSON.parse(rawGlb.subarray(20, 20 + rawGlb.readUInt32LE(12)).toString('utf8'));
   const girlNode = gltfJson.nodes.find(n => n.name === 'FuturisticGirl');
   const girlPrimitive = gltfJson.meshes[girlNode.mesh].primitives[0];
-  assert.equal(girlPrimitive.material, undefined, 'Character primitive in the source GLB has no material or assigned texture');
   assert.ok(girlPrimitive.attributes.TEXCOORD_0 !== undefined, 'Character UV coordinates exist');
+  // The protagonist ships her own PBR material (base-color + normal + metallicRoughness maps),
+  // so the loader keeps it instead of falling back to the procedural PlayerProtagonistMaterial.
+  assert.notEqual(girlPrimitive.material, undefined, 'Character primitive declares its own GLB material');
+  const girlSourceMaterial = gltfJson.materials[girlPrimitive.material];
+  assert.equal(girlSourceMaterial.name, 'FuturisticGirl_Mat');
+  assert.ok(
+    girlSourceMaterial.pbrMetallicRoughness && girlSourceMaterial.pbrMetallicRoughness.baseColorTexture,
+    'Character material ships a base-color texture'
+  );
+  assert.ok(girlSourceMaterial.normalTexture, 'Character material ships a normal map');
   const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
 
   const loader = new pkg.GlbSceneLoader();
@@ -540,7 +550,6 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   const fgOccluders = ecsWorld.getComponent(stage.cidadeEntityId, 'ForegroundOccluders');
 
   assert.equal(charAnim.activeClip, 'Idle', 'Player_Rig starts in looped Idle animation');
-  assert.AlmostEqual = (a, b, eps = 1e-3) => assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
   assert.AlmostEqual(camera.position.x, playerTransform.x + camFollow.offsetX);
   assert.AlmostEqual(camera.position.y, playerTransform.y + camFollow.offsetY);
   assert.AlmostEqual(camera.position.z, playerTransform.z + camFollow.offsetZ);
@@ -1501,7 +1510,7 @@ function assertsNoSceneCollapse(mainSrc) {
   assert.doesNotMatch(mainSrc, /TP\.collapse\.expand\(section\)/, 'fullscreen no longer expands a clamped scene');
 }
 
-test('day, night, and rain presets produce distinct legible 3D illumination, complete GLB material coverage, and 4px small-cell shader mass', async () => {
+test('day, night, and rain presets produce distinct legible 3D illumination, complete GLB material coverage, and 4px small-cell shader mass', async (t) => {
   const asciiShaderSrc = readFileSync(
     path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
     'utf8'
@@ -1554,6 +1563,14 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
   const loader = new pkg.GlbSceneLoader();
   const prepared = await loader.parseBuffer(glbBuffer, '');
+  // Dispose even if an assertion throws: a live DRACOLoader worker pool keeps the event
+  // loop busy and turns a clean test failure into a hung CI job.
+  let stageRef = null;
+  t.after(() => {
+    try { if (stageRef) pkg.LifecycleManager.disposeObject3D(stageRef.scene); } catch (_) { /* noop */ }
+    try { prepared.dispose(); } catch (_) { /* noop */ }
+    try { loader.dispose(); } catch (_) { /* noop */ }
+  });
 
   const classifiedUuids = new Set();
   for (const group of Object.values(prepared.materials)) {
@@ -1586,7 +1603,7 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
 
   const ecsWorld = new pkg.World();
   const baseCfg = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG);
-  const stage = pkg.UrbanGlbSceneBuilder.createStage(baseCfg, ecsWorld, prepared);
+  const stage = stageRef = pkg.UrbanGlbSceneBuilder.createStage(baseCfg, ecsWorld, prepared);
   assert.ok(stage.ambientFill && stage.ambientFill.isAmbientLight, 'Dedicated UrbanAmbientFillLight present');
   const roadA = prepared.nodes.cidade.getObjectByName('Cidade_Object_64');
   const roadB = prepared.nodes.cidade.getObjectByName('Cidade_Object_67');
@@ -1613,9 +1630,18 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   }
   const girl = prepared.nodes.playerRig.getObjectByName('FuturisticGirl');
   assert.ok(girl.isSkinnedMesh && girl.geometry.getAttribute('uv'));
-  assert.equal(girl.material.name, 'PlayerProtagonistMaterial');
-  assert.equal(girl.material.map, null, 'GLB has UVs but no assigned character base-color map');
-  assert.ok(prepared.materials.character.every(m => m.color.r < 0.5 && m.roughness >= 0.7));
+  assert.equal(girl.material.name, 'FuturisticGirl_Mat', 'Protagonist keeps her exported material');
+  assert.ok(girl.material.map && girl.material.map.isTexture, 'Character base-color texture is applied');
+  // applyAtmosphere() drives the protagonist to a dielectric, matte response for
+  // legibility on dark pavement: metalness <= 0.04 and roughness >= 0.7.
+  assert.ok(
+    girl.material.metalness <= 0.04 && girl.material.roughness >= 0.7,
+    `Protagonist PBR factors stay inside the legibility clamp (metalness=${girl.material.metalness}, roughness=${girl.material.roughness})`
+  );
+  assert.ok(
+    prepared.materials.character.every((m) => m.metalness <= 0.04 && m.roughness >= 0.7),
+    'Character materials stay within the dielectric/matte legibility clamp'
+  );
 
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(
     stage,

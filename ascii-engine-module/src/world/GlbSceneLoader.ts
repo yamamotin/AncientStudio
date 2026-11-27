@@ -375,9 +375,11 @@ export function extractAndPrepareGlbNodes(
     buildOccluderGroup('frontSign', 'Cidade_Plane052_053 (Foreground Hanging Sign)', frontSignMeshes),
   ].filter((g): g is ForegroundOccluderGroup => g !== null);
 
-  // 2. Configure `Player_Rig` SkinnedMesh shadows, culling & high-legibility sculpted material
-  // (`FuturisticGirl` in `cena_completa.glb` has `material: undefined`, which defaults in glTF 2.0
-  // to `metalness = 1.0, roughness = 1.0` -> zero diffuse albedo without an envMap!).
+  // 2. Configure `Player_Rig` SkinnedMesh shadows, culling & high-legibility material.
+  // `FuturisticGirl` in `cena_completa.glb` now ships her own `FuturisticGirl_Mat` (base-color,
+  // normal and metallicRoughness maps), so the authored material is kept as-is; the sculpted
+  // `PlayerProtagonistMaterial` below is only the fallback for meshes that arrive without a
+  // material or texture (a bare glTF 2.0 primitive defaults to metalness = 1.0 -> no albedo).
   const protagonistMaterial = new THREE.MeshStandardMaterial({
     name: 'PlayerProtagonistMaterial',
     color: new THREE.Color('#55778A'),

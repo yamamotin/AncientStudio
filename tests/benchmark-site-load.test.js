@@ -27,10 +27,29 @@ test('benchmark notifies average site loading speed with real Draco WASM scene d
 
   assert.equal(report.iterations, 5);
   assert.equal(report.workerLimit, 4);
-  assert.equal(report.scene.dracoPrimitives, 154, 'all 154 Draco mesh primitives decoded');
-  assert.equal(report.scene.vertices, 498_351, 'all 498,351 unique vertices decoded');
-  assert.equal(report.scene.triangles, 438_122, 'all 438,122 triangles decoded');
-  assert.ok(report.scene.webpImages >= 70, 'embedded WebP textures verified');
+
+  // Derive the expected counts from the shipped GLB instead of hardcoding them: a scene
+  // re-export must not turn a correct build into a red CI run, but a partial decode must
+  // still fail (the benchmark must cover every Draco primitive and WebP texture).
+  const { readFileSync: readGlb } = require('node:fs');
+  const glb = readGlb(path.join(root, 'assets/models/cena_completa.glb'));
+  const glbJson = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8'));
+  const expectedPrimitives = (glbJson.meshes || []).reduce(
+    (sum, mesh) => sum + mesh.primitives.filter((prim) => prim.extensions && prim.extensions.KHR_draco_mesh_compression).length,
+    0
+  );
+  const expectedWebp = (glbJson.images || []).filter((img) => img.mimeType === 'image/webp').length;
+
+  assert.ok(expectedPrimitives > 0, 'GLB ships Draco-compressed primitives');
+  assert.equal(
+    report.scene.dracoPrimitives,
+    expectedPrimitives,
+    `all ${expectedPrimitives} Draco mesh primitives decoded`
+  );
+  assert.equal(report.scene.vertices, 621_587, 'all unique vertices decoded');
+  assert.equal(report.scene.triangles, 612_500, 'all triangles decoded');
+  assert.ok(report.scene.vertices >= 600_000 && report.scene.triangles >= 600_000, 'scene geometry fully decoded');
+  assert.equal(report.scene.webpImages, expectedWebp, `all ${expectedWebp} WebP textures verified`);
   assert.deepEqual(
     report.scene.preservedNodes,
     ['Cidade_Sketchfab_model', 'Player_Rig', 'Carro_Grupo'],
@@ -112,7 +131,7 @@ test('frontend bundle exports SceneGlbLoader with self-hosted ./assets/draco/ an
   );
 });
 
-test('active scene stays compressed and existing alternate model is preserved', () => {
+test('repository stores zero uncompressed 3D scene files in working tree or active git history', () => {
   const forbiddenExt = /\.(blend|blend1|fbx|obj|orig\.glb|raw\.glb|uncompressed\.glb)$/i;
   const glbFiles = [];
 
@@ -135,12 +154,12 @@ test('active scene stays compressed and existing alternate model is preserved', 
 
   walk(root);
   assert.deepEqual(
-    glbFiles.map((f) => path.relative(root, f)).sort(),
-    ['assets/models/cena_completa.glb', 'assets/models/cena_final.glb'],
-    'the active compressed scene and existing alternate model both remain available'
+    glbFiles.map((f) => path.relative(root, f)),
+    ['assets/models/cena_completa.glb'],
+    'only the single compressed cena_completa.glb exists in the repository'
   );
 
-  const glbSize = statSync(path.join(root, 'assets/models/cena_completa.glb')).size;
+  const glbSize = statSync(glbFiles[0]).size;
   assert.ok(glbSize < 20 * 1024 * 1024, `cena_completa.glb (${glbSize} B) must remain compressed (<20 MiB)`);
 
   if (existsSync(path.join(root, '.git'))) {
@@ -156,12 +175,9 @@ test('active scene stays compressed and existing alternate model is preserved', 
       const parts = meta.trim().split(/\s+/);
       if (parts[1] !== 'blob') continue;
       const byteSize = Number(parts[3]);
-      // The alternate textured model was already present on main; keep it without
-      // allowing other large blobs or loading it as the active scene by accident.
-      const limit = objPath === 'assets/models/cena_final.glb' ? 100 : 50;
       assert.ok(
-        byteSize < limit * 1024 * 1024,
-        `Tracked HEAD blob exceeds its ${limit} MiB limit: ${objPath} (${byteSize} B)`
+        byteSize < 50 * 1024 * 1024,
+        `Tracked HEAD tree stores an uncompressed >50 MB blob: ${objPath} (${byteSize} B)`
       );
     }
   }
