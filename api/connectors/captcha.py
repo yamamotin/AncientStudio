@@ -41,7 +41,7 @@ from api.connectors.validators import clean_digits, mask_cnpj, mask_cpf
 
 DEFAULT_CHALLENGE_TTL_SECONDS = 300
 MAX_CAPTCHA_IMAGE_BYTES = 1_048_576
-MAX_POPUP_DATA_URL_CHARS = 400_000
+MAX_POPUP_DATA_URL_CHARS = 1_450_000
 DEFAULT_RECAPTCHA_FALLBACK_BASE = "https://www.google.com/recaptcha/api/fallback"
 
 _SITEKEY_JS_RE = re.compile(
