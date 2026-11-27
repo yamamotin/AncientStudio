@@ -125,8 +125,17 @@ normal-perturbed vertical rippled ground reflections (`sampleGroundReflection`),
 and smooth damped mouse scroll-wheel zoom (`minDistance: 8.2m`, `maxDistance:
 31.5m`, baseline `~19.65m`) along the 3rd-person camera sightline without
 interfering with `WASD` or `setAutoOrbit`.
-The adapter maps the three UI buttons (`day`, `night`, `rain`) to lighting, fog,
-car headlights, pavement wetness, normal-map relief scale, and 3D rain particles.
+The adapter maps the three UI buttons (`day`, `night`, `rain`) to genuinely
+differentiated lighting (`UrbanAmbientFillLight` + `HemisphereLight` +
+`KeyDirectionalLight` + `RimDirectionalLight` + broad smooth-decay storefront &
+streetlamp `PointLight` pools), calibrated linear material albedos (including
+compensating `real_road`'s `0.0084` linear WebP texture and detaching baked ORM
+blue-channel `metalnessMap`s while preserving `roughnessMap`), fog density,
+`Carro_Grupo` headlights, pavement wetness, normal-map relief scale, and 3D rain
+particles, while `asciiShader.ts` applies a perceptual linear-to-sRGB transfer
+(`linearToSrgb`) and DPR-invariant small-cell mass support (`uCellCssSize` /
+`cellDensitySupport`) so even at `4px` and `[2.0px..6.0px]` the 3D scene retains
+solid volumetric readability.
 [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier
 engine-side tools added on that date.
 
@@ -168,6 +177,16 @@ Frontend integration is intentionally pending after 2026-11-25.
   2. `SceneGlbLoader.load('./assets/models/cena_completa.glb')` downloads the `.glb` (`ArrayBuffer`) and calls `gltfLoader.parseAsync()`, dispatching all `154` Draco mesh primitives (`498,351` unique vertices, `438,122` triangles) via zero-copy `Transferable` `ArrayBuffer`s across the 4 WebAssembly Workers off the main UI thread while the browser decodes the `77` `EXT_texture_webp` textures asynchronously.
   3. On `TP.scene.destroy()` / `loader.dispose()`, all 4 Web Workers are terminated (`worker.terminate()`), the `blob:` URL is revoked (`URL.revokeObjectURL`), and GPU geometries/materials/textures are disposed via `LifecycleManager.disposeObject3D`.
 - End-to-end benchmark: `node scripts/benchmark-site-load.js` and `tests/benchmark-site-load.test.js`.
+
+## Render pipeline notes
+
+Configuration updates synchronize the fullscreen-aware resolution profile with all
+render targets and uniforms. The bloom extraction kernel uses the bloom target's
+pixel spacing. Outline shells and alpha-tested meshes are excluded from the normal
+pass: Three.js `MeshNormalMaterial` cannot reproduce alpha cutouts. This avoids
+solid rectangular normals, but cutout geometry has no normal detail in that pass;
+a cutout-aware normal shader would be needed for accurate silhouettes. Auto-orbit
+is driven by the engine camera, not synthetic pointer events.
 
 ## Rebuilding the bundle
 

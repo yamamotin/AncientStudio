@@ -163,9 +163,10 @@ export class VfxController {
       this.config.mode === 'playground' ? this.resolveGroundFocus(camera) : { x: 0, z: 0 };
 
     if (this.config.mode === 'playground') {
-      const targetLightX = groundFocus.x + pointer.normX * 7.5;
-      const targetLightY = 1.85 + pointer.normY * 1.4;
-      const targetLightZ = groundFocus.z - pointer.normY * 5.4;
+      const parallax = Math.max(0, this.config.parallaxIntensity) / 0.35;
+      const targetLightX = groundFocus.x + pointer.normX * 7.5 * parallax;
+      const targetLightY = 1.85 + pointer.normY * 1.4 * parallax;
+      const targetLightZ = groundFocus.z - pointer.normY * 5.4 * parallax;
 
       const lightLerp = 1 - Math.exp(-8.5 * dt);
       this.cursorLight.position.x += (targetLightX - this.cursorLight.position.x) * lightLerp;

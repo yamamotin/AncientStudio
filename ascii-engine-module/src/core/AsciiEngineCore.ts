@@ -229,6 +229,7 @@ export class AsciiEngineCore {
 
       // 5. Initial Resize (immediate snap) + Observers
       const rect = this.container.getBoundingClientRect();
+      this.postProcessor.applyConfig(this.config, false, Math.max(1, rect.width), Math.max(1, rect.height), typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, this.isCoarsePointerDevice(), true);
       this.applyResize(Math.max(1, rect.width), Math.max(1, rect.height), true);
 
       lifecycle.observeContainer(
@@ -457,7 +458,6 @@ export class AsciiEngineCore {
     const prevStruct = this.config.structuralChars;
     const prevFont = this.config.fontFamily;
     const prevShadows = this.config.enableShadows;
-    const prevMaxDpr = this.config.maxPixelRatio;
 
     this.config = mergeEngineConfig(this.config, partialConfig);
     if (this.config.mode !== 'mascot') {
@@ -518,24 +518,13 @@ export class AsciiEngineCore {
       prevStruct !== this.config.structuralChars ||
       prevFont !== this.config.fontFamily;
 
-    if (prevMaxDpr !== this.config.maxPixelRatio) {
-      this.applyResize(this.containerWidth, this.containerHeight, false);
-    } else {
-      const grid = this.postProcessor.applyConfig(
-        this.config,
-        rebuildAtlas,
-        this.containerWidth,
-        this.containerHeight,
-        typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
-        this.isCoarsePointerDevice()
-      );
-      this.lastResolutionProfile = grid;
-      this.activeCellSize = grid.activeCellSize;
-      this.gridColumns = grid.columns;
-      this.gridRows = grid.rows;
-      this.effectiveDpr = grid.effectiveDpr;
-      this.resolutionTier = grid.tier;
-    }
+    // Apply appearance uniforms, then the authoritative fullscreen-aware profile.
+    this.postProcessor.applyConfig(
+      this.config, rebuildAtlas, this.containerWidth, this.containerHeight,
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+      this.isCoarsePointerDevice(), true
+    );
+    this.applyResize(this.containerWidth, this.containerHeight, false, true);
 
     if (this.state === 'paused') {
       this.loop?.stepOnce(0);
@@ -822,7 +811,7 @@ export class AsciiEngineCore {
     }
   }
 
-  private applyResize(cssWidth: number, cssHeight: number, immediate = false): void {
+  private applyResize(cssWidth: number, cssHeight: number, immediate = false, force = false): void {
     if (!this.renderer || !this.camera || !this.postProcessor) return;
 
     const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -843,7 +832,7 @@ export class AsciiEngineCore {
     });
 
     if (
-      !immediate &&
+      !immediate && !force &&
       this.containerWidth === profile.cssWidth &&
       this.containerHeight === profile.cssHeight &&
       this.effectiveDpr === profile.effectiveDpr &&

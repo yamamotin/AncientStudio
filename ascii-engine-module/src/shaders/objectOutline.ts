@@ -255,6 +255,7 @@ function syncRecordShells(record: InternalOutlineRecord): void {
       shell = new THREE.Mesh(hostMesh.geometry, record.material);
       shell.name = OUTLINE_SHELL_NAME;
       shell.userData.__isAsciiOutlineShell = true;
+      shell.userData.skipNormalPass = true;
       shell.castShadow = false;
       shell.receiveShadow = false;
       shell.frustumCulled = hostMesh.frustumCulled;

@@ -69,49 +69,49 @@ window.TP = window.TP || {};
   var PRESETS = {
     night: {
       palette: {
-        background: '#0C1217',
-        warmLight: '#4A7C7E',
-        warmCore: '#8A99A6',
-        coolAmbient: '#6E7B87',
-        foliageAccent: '#2A3540',
-        cursorLight: '#6E7B87'
+        background: '#0E161F',
+        warmLight: '#5C8E92',
+        warmCore: '#9DB0BF',
+        coolAmbient: '#7D92A6',
+        foliageAccent: '#2E404E',
+        cursorLight: '#7D92A6'
       },
-      bloomIntensity: 0.28,
-      dofStrength: 0.20,
-      edgeStrength: 0.96,
-      blockBlendWeight: 0.06,
+      bloomIntensity: 0.30,
+      dofStrength: 0.16,
+      edgeStrength: 0.94,
+      blockBlendWeight: 0.14,
       windStrength: 0.62,
       parallaxIntensity: 0.35
     },
     day: {
       palette: {
-        background: '#162029',
-        warmLight: '#4A7C7E',
-        warmCore: '#8A99A6',
-        coolAmbient: '#7A8894',
-        foliageAccent: '#2A3540',
-        cursorLight: '#8A99A6'
+        background: '#213242',
+        warmLight: '#C9A86A',
+        warmCore: '#E6EEF5',
+        coolAmbient: '#9EB4C8',
+        foliageAccent: '#3D5E4C',
+        cursorLight: '#B8CCE0'
       },
-      bloomIntensity: 0.14,
-      dofStrength: 0.16,
-      edgeStrength: 0.94,
-      blockBlendWeight: 0.05,
+      bloomIntensity: 0.16,
+      dofStrength: 0.10,
+      edgeStrength: 0.92,
+      blockBlendWeight: 0.16,
       windStrength: 0.42,
       parallaxIntensity: 0.30
     },
     rain: {
       palette: {
-        background: '#0A0F14',
-        warmLight: '#4A7C7E',
-        warmCore: '#8A99A6',
-        coolAmbient: '#5E6C78',
-        foliageAccent: '#2A3540',
-        cursorLight: '#6E7B87'
+        background: '#111C27',
+        warmLight: '#5A909C',
+        warmCore: '#A2B6C6',
+        coolAmbient: '#7890A6',
+        foliageAccent: '#2C424E',
+        cursorLight: '#7E98AE'
       },
-      bloomIntensity: 0.32,
-      dofStrength: 0.22,
-      edgeStrength: 0.96,
-      blockBlendWeight: 0.08,
+      bloomIntensity: 0.34,
+      dofStrength: 0.18,
+      edgeStrength: 0.95,
+      blockBlendWeight: 0.16,
       windStrength: 1.45,
       parallaxIntensity: 0.40
     }
@@ -191,20 +191,18 @@ window.TP = window.TP || {};
         ? (options && options.preset)
         : DEFAULT_MODE,
       paused: false,
-      orbitTimer: null,
-      lastUserPointer: 0,
       mascotSpinGroup: null,
       mascotSpinLast: 0,
       telemetryRaf: null,
       observer: null,
       resizeRaf: null,
       fullscreenListener: null,
-      pointerListener: null,
       initialConfigCellSize: Number(options && options.config && options.config.cellSize) || 8,
       initialAutoResponsive: !(options && options.config && options.config.autoResponsiveDensity === false),
       mountCellSize: Number(options && options.config && options.config.cellSize) || 8,
       currentCellSize: Number(options && options.config && options.config.cellSize) || 8,
-      customCellActive: false
+      customCellActive: false,
+      measuredInitialSize: false
     };
 
     function emit(mode) {
@@ -281,29 +279,12 @@ window.TP = window.TP || {};
       state.telemetryRaf = window.requestAnimationFrame(stepMascotSpin);
     }
 
-    function stopOrbit() {
-      if (state.orbitTimer) window.clearInterval(state.orbitTimer);
-      state.orbitTimer = null;
-    }
-
     function setAutoOrbit(enabled) {
-      stopOrbit();
+      // CameraFollow owns orbit; synthetic PointerEvent motion would also
+      // perturb the cursor light and character animation.
       if (state.instance && typeof state.instance.setAutoOrbit === 'function' && !isMascot) {
         state.instance.setAutoOrbit(Boolean(enabled));
       }
-      if (!enabled || state.mode !== 'engine' || isMascot) return;
-
-      state.orbitTimer = window.setInterval(function () {
-        if (state.paused || Date.now() - state.lastUserPointer < 4500) return;
-        var rect = container.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        var angle = Date.now() / 2800;
-        var x = rect.left + rect.width * (0.5 + Math.cos(angle) * 0.38);
-        var y = rect.top + rect.height * (0.5 + Math.sin(angle) * 0.28);
-        container.dispatchEvent(new PointerEvent('pointermove', {
-          clientX: x, clientY: y, bubbles: true, pointerType: 'mouse'
-        }));
-      }, 75);
     }
 
     function setPaused(paused) {
@@ -334,6 +315,15 @@ window.TP = window.TP || {};
         state.resizeRaf = null;
         if (state.instance && typeof state.instance.resize === 'function') {
           state.instance.resize({ width: width, height: height }, false);
+          if (!state.measuredInitialSize && !state.customCellActive) {
+            var stats = typeof state.instance.getStats === 'function' ? state.instance.getStats() : null;
+            var active = stats && Number(stats.activeCellSize);
+            if (active > 0) {
+              state.mountCellSize = Math.max(MIN_CELL_PX, Math.min(state.initialConfigCellSize, Number(active.toFixed(2))));
+              state.currentCellSize = state.mountCellSize;
+              state.measuredInitialSize = true;
+            }
+          }
         }
       });
     }
@@ -445,7 +435,6 @@ window.TP = window.TP || {};
     }
 
     function destroy() {
-      stopOrbit();
       window.removeEventListener('pagehide', destroy);
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
@@ -464,33 +453,13 @@ window.TP = window.TP || {};
         document.removeEventListener('fullscreenchange', state.fullscreenListener);
         state.fullscreenListener = null;
       }
-      if (state.pointerListener) {
-        container.removeEventListener('pointermove', state.pointerListener);
-        container.removeEventListener('touchstart', state.pointerListener);
-        container.removeEventListener('touchmove', state.pointerListener);
-        container.removeEventListener('wheel', state.pointerListener);
-        state.pointerListener = null;
-      }
       if (state.instance && typeof state.instance.destroy === 'function') state.instance.destroy();
       state.instance = null;
       state.engine = null;
       emit('fallback');
     }
 
-    /* The mascot stage is pointer-inert via CSS (`pointer-events: none`), so no
-       mouse/touch event reaches the Tux entity. Only the scene stage keeps
-       pointer tracking; the marker below documents that contract. */
-    if (isMascot) {
-      container.setAttribute('data-pointer-locked', 'true');
-    } else {
-      state.pointerListener = function (event) {
-        if (event.isTrusted) state.lastUserPointer = Date.now();
-      };
-      container.addEventListener('pointermove', state.pointerListener, { passive: true });
-      container.addEventListener('touchstart', state.pointerListener, { passive: true });
-      container.addEventListener('touchmove', state.pointerListener, { passive: true });
-      container.addEventListener('wheel', state.pointerListener, { passive: true });
-    }
+    if (isMascot) container.setAttribute('data-pointer-locked', 'true');
 
     window.addEventListener('pagehide', destroy);
 

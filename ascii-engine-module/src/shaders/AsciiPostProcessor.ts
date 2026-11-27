@@ -133,6 +133,7 @@ export class AsciiPostProcessor {
         uResolution: { value: new THREE.Vector2(w, h) },
         uSceneTexelSize: { value: new THREE.Vector2(1 / w, 1 / h) },
         uCellPixelSize: { value: new THREE.Vector2(6, 10) },
+        uCellCssSize: { value: 6.5 },
         uAtlasTileSize: {
           value: new THREE.Vector2(this.atlas.tileWidth, this.atlas.tileHeight),
         },
@@ -179,8 +180,8 @@ export class AsciiPostProcessor {
   private static resolveWetness(config: EngineConfig): number {
     if (config.mode === 'mascot') return 0.0;
     if (config.atmosphere === 'rain') return 1.0;
-    if (config.atmosphere === 'day') return 0.22;
-    return 0.62;
+    if (config.atmosphere === 'day') return 0.08;
+    return 0.55;
   }
 
   private static resolveNormalRelief(config: EngineConfig): number {
@@ -253,13 +254,14 @@ export class AsciiPostProcessor {
     this.normalTarget.setSize(rtW, rtH);
     this.bloomTarget.setSize(bw, bh);
 
-    this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / rtW, 1 / rtH);
+    this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / bw, 1 / bh);
     this.compositeMaterial.uniforms.uSceneTexelSize!.value.set(1 / rtW, 1 / rtH);
     this.compositeMaterial.uniforms.uResolution!.value.set(canvasW, canvasH);
 
     this.transitionController.setTarget(profile, immediate);
     const stepped = this.transitionController.step(0);
     this.compositeMaterial.uniforms.uCellPixelSize!.value.set(stepped.cellW, stepped.cellH);
+    this.compositeMaterial.uniforms.uCellCssSize!.value = profile.activeCellSize;
     this.compositeMaterial.uniforms.uSubCellSpread!.value = stepped.subCellSpread;
 
     this.rebuildAtlasIfNeeded(config, profile.atlasTileSize, false);
@@ -271,7 +273,8 @@ export class AsciiPostProcessor {
     cssWidth = 640,
     cssHeight = 360,
     devicePixelRatio = 1,
-    isCoarsePointer = false
+    isCoarsePointer = false,
+    deferResolution = false
   ): ResolutionProfile {
     const profile = computeAdaptiveResolution({
       cssWidth,
@@ -282,12 +285,7 @@ export class AsciiPostProcessor {
     });
 
     this.rebuildAtlasIfNeeded(config, profile.atlasTileSize, forceAtlasRebuild);
-    this.transitionController.setTarget(profile, true);
-    this.compositeMaterial.uniforms.uCellPixelSize!.value.set(
-      profile.cellPhysW,
-      profile.cellPhysH
-    );
-    this.compositeMaterial.uniforms.uSubCellSpread!.value = profile.subCellSampleSpread;
+    if (!deferResolution) this.applyResolutionProfile(profile, config, true);
 
     this.bloomMaterial.uniforms.uThreshold!.value = config.bloomThreshold;
     this.compositeMaterial.uniforms.uEdgeStrength!.value = config.edgeStrength;
@@ -360,7 +358,6 @@ export class AsciiPostProcessor {
       const safeH = Math.max(2, Math.floor(this.sceneTarget.height * capScale));
       this.sceneTarget.setSize(safeW, safeH);
       this.normalTarget.setSize(safeW, safeH);
-      this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / safeW, 1 / safeH);
       this.compositeMaterial.uniforms.uSceneTexelSize!.value.set(1 / safeW, 1 / safeH);
     }
 

@@ -82,6 +82,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform vec2 uResolution;
   uniform vec2 uSceneTexelSize;
   uniform vec2 uCellPixelSize;
+  uniform float uCellCssSize;
   uniform vec2 uAtlasTileSize;
   uniform float uSubCellSpread;
   uniform float uRampCount;
@@ -112,6 +113,10 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
   float getLuma(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
+  }
+
+  vec3 linearToSrgb(vec3 c) {
+    return pow(max(c, vec3(0.0)), vec3(0.454545));
   }
 
   /**
@@ -186,14 +191,15 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 reflAcc = vec3(0.0);
     float weightSum = 0.0;
 
+    float stepReflY = max(cellUvSpan.y * 2.85, 0.022);
     for (int i = 1; i <= 6; i++) {
       float fi = float(i);
       float w = 1.0 / (0.70 + fi * 0.58);
-      float subWave = sin(wavePhase + fi * 0.82) * cellUvSpan.x * (0.24 + 0.52 * rainAnim);
+      float subWave = sin(wavePhase + fi * 0.82) * max(cellUvSpan.x, 0.004) * (0.24 + 0.52 * rainAnim);
       vec2 sampleUv = clamp(
         centerUv + vec2(
           normalRefractX + rippleX * 0.55 + subWave * 0.45,
-          fi * cellUvSpan.y * 2.85 + normalRefractY
+          fi * stepReflY + normalRefractY
         ),
         vec2(0.002),
         vec2(0.998)
@@ -201,9 +207,9 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       vec3 sCol = texture2D(tScene, sampleUv).rgb;
       vec3 bCol = texture2D(tBloom, sampleUv).rgb;
       float sLum = getLuma(sCol);
-      // High-pass specular gate: only reflect lit sources & silhouettes (never dull unlit walls)
-      float specGate = smoothstep(0.26, 0.82, sLum);
-      reflAcc += (sCol * specGate * 0.82 + bCol * 1.30) * w;
+      // Reflect warm storefronts, illuminated facades, neon trims & headlights on wet pavement
+      float specGate = smoothstep(0.12, 0.65, sLum);
+      reflAcc += (sCol * specGate * 0.92 + bCol * 1.38) * w;
       weightSum += w;
     }
 
@@ -247,6 +253,8 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   void main() {
     vec2 cellSize = max(uCellPixelSize, vec2(1.25, 2.0));
     float microCellFactor = 1.0 - smoothstep(3.5, 8.5, cellSize.y);
+    float smallFontFactor = uVolumeWrapStrength > 0.5 ? (1.0 - smoothstep(3.0, 6.0, max(uCellCssSize, 2.0))) : 0.0;
+    float cellDensitySupport = max(microCellFactor, smallFontFactor);
 
     // Anchor the ASCII character grid to viewport center so resizes expand symmetrically
     vec2 screenCenter = floor(uResolution * 0.5);
@@ -298,9 +306,9 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     // Gentle atmospheric depth haze that preserves background architecture & skyline continuity
     // instead of blacking out distant facades into disconnected floating blocks
     if (uVolumeWrapStrength > 0.5 && isGeometry > 0.5) {
-      float farFade = smoothstep(0.46, 0.94, centerLinDepth) * (1.0 - uDaylight * 0.65);
-      float emissiveKeep = smoothstep(0.42, 0.90, getLuma(sceneCol + bloomCol * 1.15));
-      sceneCol *= mix(1.0, 0.72, farFade * (1.0 - emissiveKeep));
+      float farFade = smoothstep(0.52, 0.96, centerLinDepth) * (1.0 - uDaylight * 0.85);
+      float emissiveKeep = smoothstep(0.32, 0.85, getLuma(sceneCol + bloomCol * 1.15));
+      sceneCol *= mix(1.0, 0.86, farFade * (1.0 - emissiveKeep));
     }
 
     // 3. Dual 3x3 Sobel Silhouette & Crease Detection + Balanced Foreground Silhouette Moat
@@ -399,63 +407,79 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     vec3 groundRefl = sampleGroundReflection(cellCenterUv, cellIndex, cellUvSpan, upwardSurfaceMask, normalTilt);
 
-    // Subtle cool moonlit structural floor on real 3D geometry so roofs/walls/avenues read as connected mass
+    // Calibrated linear structural floor on real 3D geometry so roofs/walls/streets read as connected 3D mass
     vec3 structuralMassFloor =
       uCoolTint *
-      mix(0.038, 0.065, uDaylight) *
-      (0.54 + 0.46 * clamp(worldUpY * 0.5 + 0.5, 0.0, 1.0)) *
+      mix(0.085, 0.22, uDaylight) *
+      (0.60 + 0.40 * clamp(worldUpY * 0.5 + 0.5, 0.0, 1.0)) *
       isGeometry *
       uVolumeWrapStrength;
     vec3 baseGeomCol = max(sceneCol, structuralMassFloor);
 
     // Contained typographic light halo: bloom lifts nearby character indices into crisp bright glyphs
-    vec3 haloLift = bloomCol * (uBloomIntensity * 1.04);
-    vec3 combinedHdr = baseGeomCol + haloLift + groundRefl * 0.88;
+    vec3 haloLift = bloomCol * (uBloomIntensity * 1.06);
+    vec3 combinedHdr = baseGeomCol + haloLift + groundRefl * mix(0.92, 1.12, uWetness);
 
     // Modulate scene radiance by directional surface orientation so 90-degree return walls separate cleanly
     if (uVolumeWrapStrength > 0.5 && isGeometry > 0.5) {
       float emissiveKeep = smoothstep(0.55, 0.96, getLuma(combinedHdr));
       float planarFactor = mix(
-        1.0 + (keyNdotL * 0.24 - keyAway * 0.20 + hemiCatch * 1.55) * uNormalReliefStrength,
+        1.0 + (keyNdotL * 0.26 - keyAway * 0.16 + hemiCatch * 1.65) * uNormalReliefStrength,
         1.0,
         emissiveKeep
       );
-      combinedHdr = combinedHdr * clamp(planarFactor, 0.74, 1.28) + vec3(normalSpec * 0.52 * uNormalReliefStrength);
+      combinedHdr = combinedHdr * clamp(planarFactor, 0.80, 1.32) + vec3(normalSpec * 0.56 * uNormalReliefStrength);
     }
 
-    // Soft-shoulder tone curve compresses bright lamp/headlight peaks smoothly without solid clipping
-    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.36)) * 1.28;
+    // Soft-shoulder tone curve in linear space + perceptual sRGB transfer for urban 3D offscreen target
+    // (Pass 1 renders linear radiance into HalfFloatType and Pass 4 writes directly to sRGB framebuffer)
+    vec3 combinedSignal;
+    if (uVolumeWrapStrength > 0.5) {
+      vec3 workingHdr = isGeometry > 0.5
+        ? combinedHdr
+        : (max(sceneCol - uBgColor * 1.04, vec3(0.0)) + haloLift);
+      float exposureGain = mix(1.55, 1.85, uDaylight);
+      vec3 exposedLinear = (workingHdr * exposureGain) / (vec3(1.0) + workingHdr * (0.38 * exposureGain));
+      combinedSignal = linearToSrgb(exposedLinear);
+    } else {
+      combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.36)) * 1.28;
+    }
 
-    // Selective chromatic discipline: dark desaturated stone/asphalt base with amber, cyan & moss accents
+    // Selective chromatic discipline: cohesive stone/asphalt base with amber, cyan & moss accents
     float rawLuma = getLuma(combinedSignal);
-    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.72, 0.0, 1.0);
-    float coolCyanMask = clamp((combinedHdr.b - combinedHdr.r) * 1.55, 0.0, 1.0);
-    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.90, combinedHdr.b * 0.94)) * 2.55, 0.0, 1.0);
-    float baseSatKeep = mix(0.56, 0.94, max(max(warmAccentMask, foliageMask), coolCyanMask * 0.86));
+    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.85, 0.0, 1.0);
+    float coolCyanMask = clamp((combinedHdr.b - combinedHdr.r) * 1.65, 0.0, 1.0);
+    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.90, combinedHdr.b * 0.94)) * 2.65, 0.0, 1.0);
+    float baseSatKeep = mix(mix(0.60, 0.76, uDaylight), 0.96, max(max(warmAccentMask, foliageMask), coolCyanMask * 0.86));
     if (uVolumeWrapStrength > 0.5) {
       combinedSignal = mix(vec3(rawLuma), combinedSignal, baseSatKeep);
     }
 
-    // Gate directional 3D normal relief so sky/deep shadows stay calm while 3D forms wrap with volume
-    float litGate = smoothstep(0.032, 0.22, rawLuma);
+    // Gate directional 3D normal relief so sky stays calm while 3D forms wrap with volume
+    float litGate = smoothstep(0.04, 0.24, rawLuma);
     float directionalRelief =
-      (keyNdotL * 0.068 - keyAway * 0.048 + hemiCatch + grazingRim * 1.15 + normalSpec) * uNormalReliefStrength;
+      (keyNdotL * 0.072 - keyAway * 0.044 + hemiCatch + grazingRim * 1.15 + normalSpec) * uNormalReliefStrength;
     float volumeRelief =
-      (directionalRelief * litGate + silhouetteInnerRim * 0.125) *
+      (directionalRelief * litGate + silhouetteInnerRim * 0.12) *
       isGeometry *
       uVolumeWrapStrength;
 
-    // Rebalanced value hierarchy:
-    // - Sky/void ('isGeometry == 0') stays dark & quiet
-    // - Architectural volumes keep continuous graduated tone instead of vanishing into black holes
-    // - Foreground focal subjects ('silhouetteOuterMoat') get a clean, non-destructive contrast cushion
+    // Perceptual value hierarchy across day / night / rain and micro-cells (down to 2px–4px):
+    // - Sky/void ('isGeometry == 0') stays clean unless crossed by bloom halos or rain streaks
+    // - Every 3D surface clears the 4 leading empty spaces of DEFAULT_ASCII_RAMP and preserves mass at 4px
+    // - Foreground focal subjects ('silhouetteOuterMoat') get a subtle, non-destructive contrast cushion
     float shapedLuma = clamp(getLuma(combinedSignal), 0.0, 1.0);
     if (uVolumeWrapStrength > 0.5) {
-      float shadowFloor = mix(0.022, 0.014, uDaylight);
-      shapedLuma = smoothstep(shadowFloor, 0.95, shapedLuma);
-      shapedLuma = pow(shapedLuma, mix(0.92, 0.86, uDaylight));
-      float highlightProtect = smoothstep(0.55, 0.90, shapedLuma);
-      shapedLuma *= mix(1.0, 0.48, silhouetteOuterMoat * (1.0 - highlightProtect));
+      if (isGeometry > 0.5) {
+        shapedLuma = pow(max(shapedLuma, 0.0001), mix(0.94, 0.86, uDaylight));
+        float geomMinLuma = mix(0.16, 0.28, uDaylight) + cellDensitySupport * 0.07;
+        shapedLuma = mix(geomMinLuma, 0.98, clamp((shapedLuma - 0.10) / 0.88, 0.0, 1.0));
+        float highlightProtect = smoothstep(0.54, 0.90, shapedLuma);
+        float moatAtten = mix(0.80, 0.90, max(uDaylight, cellDensitySupport));
+        shapedLuma *= mix(1.0, moatAtten, silhouetteOuterMoat * (1.0 - highlightProtect));
+      } else {
+        shapedLuma = smoothstep(0.05, 0.88, shapedLuma) * (1.0 - uDaylight * 0.35);
+      }
     } else {
       shapedLuma = pow(shapedLuma, 0.82);
     }
@@ -479,7 +503,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       float blendedHash = wordClusterHash * 0.84 + cellSubtleHash * 0.16;
       float wetRippleShift =
         upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 1.8 + normalTilt.x * 4.0) * 0.85;
-      varietyJitter = (blendedHash * 1.45 + wetRippleShift) * midtoneEnvelope * (1.0 - microCellFactor * 0.65);
+      varietyJitter = (blendedHash * 1.45 + wetRippleShift) * midtoneEnvelope * (1.0 - cellDensitySupport * 0.65);
     }
 
     float detailTileIndex = floor(luma * (uRampCount - 1.0) + 0.5 + varietyJitter);
@@ -488,7 +512,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     // Curated '*' and 'o' highlight accents on light halos, wet ground reflections & storm rain particles
     bool isSparkleHighlight = false;
     if (uVolumeWrapStrength > 0.5) {
-      float nocturnalBoost = mix(1.0, 0.28, uDaylight);
+      float nocturnalBoost = mix(1.0, 0.22, uDaylight);
       float bloomLuma = getLuma(bloomCol);
       float reflLuma = getLuma(groundRefl);
       float sparkleNoise = glyphVarietyHash(cellIndex + floor(uTime * 2.2) * vec2(0.0, uWetness > 0.85 ? 1.0 : 0.0));
@@ -497,18 +521,18 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       // Wet ground reflection glints ('*' on bright ripple crests, 'o' on soft wet shimmer)
       bool wetReflAccent =
         upwardSurfaceMask > 0.35 &&
-        reflLuma > 0.085 &&
-        luma > 0.20 &&
-        luma < 0.86 &&
-        staticSparkle > mix(0.30, 0.14, uWetness);
+        reflLuma > 0.065 &&
+        luma > 0.22 &&
+        luma < 0.88 &&
+        staticSparkle > mix(0.32, 0.14, uWetness);
 
       // Light-source halo & lamp/headlight aura points ('*' / 'o' around warm/cyan emitters at night/rain)
       bool haloAccent =
         nocturnalBoost > 0.5 &&
         bloomLuma > 0.075 &&
-        luma > 0.24 &&
-        luma < 0.82 &&
-        staticSparkle > 0.22;
+        luma > 0.26 &&
+        luma < 0.84 &&
+        staticSparkle > 0.24;
 
       // Falling rain particle & mist droplet glints in 'rain' mode
       bool rainParticleAccent =
@@ -519,22 +543,22 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
       if (wetReflAccent || haloAccent || rainParticleAccent) {
         bool pickStar =
-          (luma > 0.54 && staticSparkle > 0.28) ||
+          (luma > 0.56 && staticSparkle > 0.28) ||
           (rainParticleAccent && sparkleNoise > 0.30) ||
-          (reflLuma > 0.22);
+          (reflLuma > 0.18);
         detailTileIndex = clamp(pickStar ? uHighlightGlyphs.x : uHighlightGlyphs.y, 0.0, uRampCount - 1.0);
         isSparkleHighlight = true;
       }
     }
 
     // Geometrically-aligned directional structural contours ('|', '/', '\', '-', '+')
-    float edgeThresh = uVolumeWrapStrength > 0.5 ? 0.44 : 0.30;
+    float edgeThresh = uVolumeWrapStrength > 0.5 ? mix(0.44, 0.52, cellDensitySupport) : 0.30;
     bool isStrongSilhouette = (effectiveDepthEdge * uEdgeStrength) > 0.36;
     bool allowGroundCurbEdge = combinedEdge > 0.68;
     bool useStructuralEdge =
       (isStrongSilhouette || combinedEdge > edgeThresh) &&
-      (luma > 0.048 || silhouetteInnerRim > 0.28) &&
-      (silhouetteOuterMoat < 0.55) &&
+      (luma > 0.06 || silhouetteInnerRim > 0.28) &&
+      (silhouetteOuterMoat < 0.65) &&
       (uStructCount >= 4.0) &&
       (upwardSurfaceMask < 0.52 || allowGroundCurbEdge);
 
@@ -565,82 +589,93 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     float detailGlyphMask = sampleAtlasTile(detailTileIndex, glyphUv, cellSize);
 
-    // 6. GPU Lighten Stipple-Detail Blend (gated to active lit surfaces 'luma > 0.36', zero shadow dots)
+    // 6. GPU Lighten Stipple-Detail Blend (adaptive halftone support preserves solid surface mass at 4px)
     float compositeGlyphMask = detailGlyphMask;
-    float stippleGate = uVolumeWrapStrength > 0.5 ? 0.36 : 0.065;
-    if (uBlockCount >= 3.0 && uBlockBlendWeight > 0.001 && luma > stippleGate && !isSparkleHighlight) {
+    float stippleGate = uVolumeWrapStrength > 0.5 ? mix(0.24, 0.14, cellDensitySupport) : 0.065;
+    float effectiveBlockWeight = uVolumeWrapStrength > 0.5
+      ? clamp(uBlockBlendWeight + cellDensitySupport * 0.24, 0.0, 0.46)
+      : uBlockBlendWeight;
+    if (uBlockCount >= 3.0 && effectiveBlockWeight > 0.001 && luma > stippleGate && !isSparkleHighlight) {
       float blockTier = clamp(floor(smoothstep(stippleGate, 0.96, luma) * 3.0), 0.0, min(2.0, uBlockCount - 2.0));
       float blockTileIndex = uRampCount + uStructCount + blockTier;
-      float blockMask = sampleAtlasTile(blockTileIndex, glyphUv, cellSize) * uBlockBlendWeight;
+      float blockMask = sampleAtlasTile(blockTileIndex, glyphUv, cellSize) * effectiveBlockWeight;
       compositeGlyphMask = max(detailGlyphMask, blockMask);
     }
-    // Preserve stable micro-engraving luminance density when cell height approaches 2.0px–3.5px
-    if (microCellFactor > 0.01 && isGeometry > 0.5) {
-      float microDensityFloor = smoothstep(0.08, 0.88, luma) * (useStructuralEdge ? 0.82 : 0.58);
-      compositeGlyphMask = mix(compositeGlyphMask, max(compositeGlyphMask, microDensityFloor), microCellFactor * 0.52);
+    // Preserve stable micro-engraving luminance density when cell size enters the small range (2.0px–5.5px)
+    if (cellDensitySupport > 0.01 && isGeometry > 0.5) {
+      float microDensityFloor = smoothstep(0.10, 0.86, luma) * (useStructuralEdge ? 0.84 : 0.62);
+      compositeGlyphMask = mix(compositeGlyphMask, max(compositeGlyphMask, microDensityFloor), cellDensitySupport * 0.48);
     }
 
-    // 7. Calibrated Foreground Ink, Contained Amber/Emerald/Cyan Accents & Cohesive 3D Tonal Underlayer
-    vec3 normColor = combinedSignal / max(rawLuma, 0.055);
-    normColor = clamp(normColor, vec3(0.24), vec3(1.48));
+    // 7. Calibrated Perceptual Foreground Ink, Accents & Grounded 3D Tonal Underlayer
+    vec3 coolTintOut = uVolumeWrapStrength > 0.5 ? linearToSrgb(uCoolTint) : uCoolTint;
+    vec3 warmTintOut = uVolumeWrapStrength > 0.5 ? linearToSrgb(uWarmTint) : uWarmTint;
+    vec3 bgColorOut = uVolumeWrapStrength > 0.5 ? linearToSrgb(uBgColor) : uBgColor;
 
-    vec3 shadowGrade = mix(normColor, uCoolTint * 1.08, 0.34);
-    vec3 highlightGrade = mix(normColor, uWarmTint * 1.12, 0.16);
+    vec3 normColor = combinedSignal / max(rawLuma, 0.08);
+    normColor = clamp(normColor, vec3(0.32), vec3(1.42));
+
+    vec3 shadowGrade = mix(normColor, coolTintOut * 1.06, 0.34);
+    vec3 highlightGrade = mix(normColor, warmTintOut * 1.10, 0.18);
     vec3 charColor = mix(shadowGrade, highlightGrade, smoothstep(0.14, 0.82, luma));
 
     if (uVolumeWrapStrength > 0.5) {
       // Warm golden-amber ink on storefront lights, streetlamps & headlight halos
-      vec3 amberInk = vec3(1.06, 0.81, 0.46);
-      charColor = mix(charColor, mix(charColor, amberInk, 0.56), warmAccentMask * smoothstep(0.20, 0.82, luma));
+      vec3 amberInk = vec3(1.06, 0.82, 0.48);
+      charColor = mix(charColor, mix(charColor, amberInk, 0.54), warmAccentMask * smoothstep(0.18, 0.82, luma));
 
       // Contained cool cyber-slate/cyan accent on neon trim, rain streaks & wet reflections
-      vec3 cyanInk = vec3(0.60, 0.86, 0.96);
-      charColor = mix(charColor, mix(charColor, cyanInk, 0.42), coolCyanMask * smoothstep(0.18, 0.82, luma));
+      vec3 cyanInk = vec3(0.62, 0.87, 0.97);
+      charColor = mix(charColor, mix(charColor, cyanInk, 0.40), coolCyanMask * smoothstep(0.18, 0.82, luma));
 
-      // Contained dark-emerald / sage ink on foliage & grass planters
-      vec3 mossInk = vec3(0.30, 0.68, 0.44);
-      charColor = mix(charColor, mix(charColor, mossInk, 0.50), foliageMask * (1.0 - warmAccentMask * 0.7));
+      // Readable emerald / sage ink on tree canopies & grass planters
+      vec3 mossInk = mix(vec3(0.34, 0.72, 0.46), vec3(0.42, 0.78, 0.50), uDaylight);
+      charColor = mix(charColor, mix(charColor, mossInk, 0.52), foliageMask * (1.0 - warmAccentMask * 0.7));
 
       // Crisp ivory-white core on peak lights, '*' / 'o' sparkles & character silhouette rims
-      float sparkleLift = isSparkleHighlight ? 0.38 : 0.0;
-      float peakIvory = max(max(smoothstep(0.72, 0.96, luma) * 0.66, silhouetteInnerRim * 0.44), sparkleLift);
-      charColor = mix(charColor, vec3(1.08, 1.05, 0.98), clamp(peakIvory, 0.0, 0.80));
+      float sparkleLift = isSparkleHighlight ? 0.36 : 0.0;
+      float peakIvory = max(max(smoothstep(0.72, 0.96, luma) * 0.64, silhouetteInnerRim * 0.42), sparkleLift);
+      charColor = mix(charColor, vec3(1.06, 1.04, 0.98), clamp(peakIvory, 0.0, 0.78));
     }
 
     if (useStructuralEdge) {
       vec3 edgeInk = uVolumeWrapStrength > 0.5
-        ? mix(uCoolTint * 1.18, vec3(0.95, 0.98, 1.02), max(silhouetteInnerRim * 0.68, smoothstep(0.35, 0.85, luma) * 0.45))
-        : uWarmTint * 1.16;
+        ? mix(coolTintOut * 1.12, vec3(0.96, 0.98, 1.02), max(silhouetteInnerRim * 0.66, smoothstep(0.32, 0.84, luma) * 0.48))
+        : warmTintOut * 1.16;
       charColor = mix(charColor, edgeInk, 0.34 * clamp(combinedEdge, 0.0, 1.0));
     }
 
-    // Readable low-contrast structural ink on dark masonry/roads; crisp luminous ink on lit planes & contours
+    // Readable structural ink across shadowed streets/walls and bright sunlit/nocturnal focal planes
     float brightness = uVolumeWrapStrength > 0.5
-      ? mix(0.22, 1.28, smoothstep(0.05, 0.86, luma))
+      ? mix(mix(0.46, 0.58, uDaylight), 1.32, smoothstep(0.08, 0.86, luma))
       : mix(0.18, 1.24, smoothstep(0.02, 0.94, luma));
     vec3 litGlyph = charColor * brightness * compositeGlyphMask;
 
     // Grounded 3D Tonal Base Underneath Glyphs ('smoothBackdrop'):
-    // Gives solid continuous mass to buildings, sidewalks, vehicles & protagonist without washing out sky void
-    vec3 deepVoid = uVolumeWrapStrength > 0.5 ? uBgColor * mix(0.80, 0.94, uDaylight) : uBgColor;
+    // Gives solid continuous 3D mass to streets, sidewalks, facades, trees & characters even at 4px cell size
+    vec3 deepVoid = uVolumeWrapStrength > 0.5 ? bgColorOut * mix(0.92, 1.0, uDaylight) : bgColorOut;
     float formUnderlayerStrength = uVolumeWrapStrength > 0.5
-      ? mix(0.24, 0.30, uDaylight) * isGeometry * (1.0 - silhouetteOuterMoat * 0.65)
+      ? (mix(0.28, 0.44, uDaylight) + cellDensitySupport * 0.14) * isGeometry * (1.0 - silhouetteOuterMoat * 0.35)
       : mix(0.036, 0.095, uDaylight);
-    vec3 tonedUnderlayer = mix(vec3(getLuma(combinedSignal)), combinedSignal, 0.58) * formUnderlayerStrength;
+    vec3 perceptualBase = uVolumeWrapStrength > 0.5
+      ? mix(vec3(luma), normColor * luma, 0.58)
+      : mix(vec3(getLuma(combinedSignal)), combinedSignal, 0.58);
+    vec3 tonedUnderlayer = perceptualBase * formUnderlayerStrength;
     vec3 smoothBackdrop = mix(
       deepVoid,
-      deepVoid + tonedUnderlayer,
-      smoothstep(0.06, 0.68, luma)
+      deepVoid * (1.0 - formUnderlayerStrength * 0.45 * isGeometry) + tonedUnderlayer,
+      smoothstep(0.06, 0.64, luma)
     );
-    smoothBackdrop *= mix(1.0, 0.72, silhouetteOuterMoat);
+    smoothBackdrop *= mix(1.0, mix(0.84, 0.92, max(uDaylight, cellDensitySupport)), silhouetteOuterMoat);
 
     vec2 vigUv = vUv * 2.0 - 1.0;
-    float vignette = 1.0 - dot(vigUv, vigUv) * mix(0.16, 0.06, uDaylight);
+    float vignette = 1.0 - dot(vigUv, vigUv) * mix(0.09, 0.035, uDaylight);
 
     vec3 finalRgb = mix(smoothBackdrop, litGlyph, clamp(compositeGlyphMask, 0.0, 1.0));
-    // Glyph-locked halo aura (0.06 ambient + 0.94 glyph-masked so dark breathing areas never wash out!)
-    finalRgb += bloomCol * (uBloomIntensity * mix(0.22, 0.08, uDaylight) * (0.06 + 0.94 * compositeGlyphMask));
-    finalRgb *= clamp(vignette, 0.74, 1.0);
+    // Glyph-locked halo aura (subtle ambient + glyph-masked glow around streetlamps/headlights)
+    vec3 bloomSrgb = uVolumeWrapStrength > 0.5 ? linearToSrgb(bloomCol * 0.85) : bloomCol;
+    finalRgb += bloomSrgb * (uBloomIntensity * mix(0.26, 0.10, uDaylight) * (0.10 + 0.90 * compositeGlyphMask));
+    finalRgb *= clamp(vignette, 0.86, 1.0);
 
     gl_FragColor = vec4(finalRgb, 1.0);
   }
