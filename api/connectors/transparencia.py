@@ -25,12 +25,18 @@ import threading
 from typing import Any
 
 from api.connectors.cache import ConnectorTTLCache
+from api.connectors.captcha import CaptchaChallengeStore, ResolvedCaptchaInput
 from api.connectors.errors import (
     ConnectorNotFoundError,
     ConnectorValidationError,
     UpstreamConnectorError,
 )
-from api.connectors.http_client import HttpTransport, UrllibHttpTransport
+from api.connectors.http_client import (
+    HttpResponse,
+    HttpTransport,
+    UrllibHttpTransport,
+    merge_cookie_header,
+)
 from api.connectors.validators import clean_digits, normalize_search_text, validate_uf
 
 IBGE_MUNICIPIOS_UF_URL = (
@@ -470,12 +476,14 @@ class MunicipalTransparencyService:
         *,
         transport: HttpTransport | None = None,
         cache: ConnectorTTLCache | None = None,
+        captcha_store: CaptchaChallengeStore | None = None,
         timeout_seconds: float = 4.0,
         ttl_seconds: float = 3600.0,
         transparencia_api_key: str | None = None,
     ) -> None:
         self._transport = transport or UrllibHttpTransport(default_timeout_seconds=timeout_seconds)
         self._cache = cache or ConnectorTTLCache()
+        self._captcha_store = captcha_store or CaptchaChallengeStore(cache=self._cache)
         self._timeout = timeout_seconds
         self._ttl = ttl_seconds
         self._default_cgu_key = transparencia_api_key
@@ -486,18 +494,105 @@ class MunicipalTransparencyService:
             if message not in avisos:
                 avisos.append(message)
 
-    def _resolve_ibge_city(
-        self, norm_city: str, uf: str, avisos: list[str]
-    ) -> tuple[dict[str, str] | None, bool]:
-        ibge_cache_key = f"ibge:municipios:{uf}"
-        hit, municipios = self._cache.get(ibge_cache_key)
-        if not hit:
+    def _request_upstream_json(
+        self,
+        url: str,
+        *,
+        operation: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        request_ctx: dict[str, Any] | None = None,
+    ) -> Any:
+        ctx = request_ctx or {}
+        cookie_jar: dict[str, str] = ctx.get("cookie_jar") or {}
+        cookie_lock: threading.Lock | None = ctx.get("cookie_lock")
+        raw_cookie: str | None = ctx.get("session_cookie")
+        solution: str | None = ctx.get("solution")
+        consulta_payload: dict[str, Any] = ctx.get("consulta_payload") or {}
+        prefetched: dict[str, HttpResponse] = ctx.get("prefetched") or {}
+
+        if operation in prefetched:
+            resp = prefetched.pop(operation)
+        else:
+            req_headers = dict(headers or {})
+            if cookie_lock is not None:
+                with cookie_lock:
+                    jar_snapshot = dict(cookie_jar)
+            else:
+                jar_snapshot = dict(cookie_jar)
+            merged_cookie = merge_cookie_header(jar_snapshot, raw_cookie)
+            if merged_cookie:
+                req_headers["Cookie"] = merged_cookie
+            if solution:
+                req_headers.setdefault("X-Captcha-Response", solution)
+
             try:
                 resp = self._transport.request(
-                    IBGE_MUNICIPIOS_UF_URL.format(uf=uf),
+                    url,
+                    params=params,
+                    headers=req_headers or None,
                     timeout_seconds=self._timeout,
                 )
-                raw = resp.json()
+            except UpstreamConnectorError as exc:
+                self._captcha_store.inspect_upstream_error_for_captcha(
+                    exc,
+                    connector="transparencia",
+                    operation=operation,
+                    consulta_payload=consulta_payload,
+                    resume_endpoint="/api/v1/transparencia/municipio",
+                    resume_method="GET",
+                    portal_url=url,
+                    cookie_jar=jar_snapshot,
+                    raw_session_cookie=raw_cookie,
+                    transport=self._transport,
+                    timeout_seconds=self._timeout,
+                )
+                raise
+
+        resp_cookies = resp.cookies()
+        if resp_cookies:
+            if cookie_lock is not None:
+                with cookie_lock:
+                    cookie_jar.update(resp_cookies)
+                    jar_after = dict(cookie_jar)
+            else:
+                cookie_jar.update(resp_cookies)
+                jar_after = dict(cookie_jar)
+        else:
+            jar_after = dict(cookie_jar)
+
+        self._captcha_store.inspect_response_for_captcha(
+            resp,
+            connector="transparencia",
+            operation=operation,
+            consulta_payload=consulta_payload,
+            resume_endpoint="/api/v1/transparencia/municipio",
+            resume_method="GET",
+            portal_url=url,
+            cookie_jar=jar_after,
+            raw_session_cookie=raw_cookie,
+            transport=self._transport,
+            timeout_seconds=self._timeout,
+        )
+        return resp.json()
+
+    def _resolve_ibge_city(
+        self,
+        norm_city: str,
+        uf: str,
+        avisos: list[str],
+        request_ctx: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, str] | None, bool]:
+        ibge_cache_key = f"ibge:municipios:{uf}"
+        bypass = bool((request_ctx or {}).get("bypass_cache"))
+        hit, municipios = (False, None) if bypass else self._cache.get(ibge_cache_key)
+        if not hit:
+            try:
+                raw = self._request_upstream_json(
+                    IBGE_MUNICIPIOS_UF_URL.format(uf=uf),
+                    operation="ibge_localidades",
+                    request_ctx=request_ctx,
+                )
                 if not isinstance(raw, list):
                     raise UpstreamConnectorError("Resposta inesperada da API IBGE Localidades.")
                 municipios = [
@@ -528,6 +623,7 @@ class MunicipalTransparencyService:
         codigo_ibge: str,
         ref_profile: dict[str, Any] | None,
         avisos: list[str],
+        request_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Fetch Municipal GDP (SIDRA 5938) + per-capita GDP & realized budget (Pesquisas)."""
         pib_total_brl: float | None = None
@@ -537,11 +633,11 @@ class MunicipalTransparencyService:
 
         if codigo_ibge:
             try:
-                pib_resp = self._transport.request(
+                pib_json = self._request_upstream_json(
                     IBGE_PIB_AGREGADO_URL.format(codigo_ibge=codigo_ibge),
-                    timeout_seconds=self._timeout,
+                    operation="ibge_pib_5938",
+                    request_ctx=request_ctx,
                 )
-                pib_json = pib_resp.json()
                 if isinstance(pib_json, list) and pib_json:
                     resultados = (
                         pib_json[0].get("resultados")
@@ -559,11 +655,11 @@ class MunicipalTransparencyService:
                 self._add_aviso(avisos, f"IBGE Agregados PIB (5938): {exc.detail}")
 
             try:
-                pesq_resp = self._transport.request(
+                pesq_json = self._request_upstream_json(
                     IBGE_PESQUISAS_INDICADORES_URL.format(codigo_ibge=codigo_ibge),
-                    timeout_seconds=self._timeout,
+                    operation="ibge_pesquisas",
+                    request_ctx=request_ctx,
                 )
-                pesq_json = pesq_resp.json()
                 if isinstance(pesq_json, list):
                     for indicator_block in pesq_json:
                         if not isinstance(indicator_block, dict):
@@ -671,34 +767,37 @@ class MunicipalTransparencyService:
         codigo_ibge: str,
         ref_profile: dict[str, Any] | None,
         avisos: list[str],
+        request_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Query Secretaria do Tesouro Nacional (STN) Siconfi DCA Anexos I-C & I-D."""
         if codigo_ibge:
             for exercicio in (2025, 2024):
                 try:
-                    rec_resp = self._transport.request(
+                    rec_json = self._request_upstream_json(
                         SICONFI_DCA_URL,
+                        operation="siconfi_dca_ic",
                         params={
                             "an_exercicio": exercicio,
                             "no_anexo": "DCA-Anexo I-C",
                             "id_ente": codigo_ibge,
                         },
-                        timeout_seconds=self._timeout,
+                        request_ctx=request_ctx,
                     )
-                    rec_items = (rec_resp.json() or {}).get("items")
+                    rec_items = (rec_json or {}).get("items")
                     if not isinstance(rec_items, list) or not rec_items:
                         continue
 
-                    desp_resp = self._transport.request(
+                    desp_json = self._request_upstream_json(
                         SICONFI_DCA_URL,
+                        operation="siconfi_dca_id",
                         params={
                             "an_exercicio": exercicio,
                             "no_anexo": "DCA-Anexo I-D",
                             "id_ente": codigo_ibge,
                         },
-                        timeout_seconds=self._timeout,
+                        request_ctx=request_ctx,
                     )
-                    desp_items = (desp_resp.json() or {}).get("items") or []
+                    desp_items = (desp_json or {}).get("items") or []
 
                     instituicao = str(rec_items[0].get("instituicao") or "")
                     populacao = rec_items[0].get("populacao")
@@ -808,6 +907,7 @@ class MunicipalTransparencyService:
         *,
         cargo_code: str,
         fetch_campaign_accounts: bool = False,
+        request_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Fetch TSE ``candidatura/buscar`` (bens + gastoCampanha) & ``prestador/consulta``."""
         cand_id = candidate.get("id_candidato")
@@ -816,15 +916,15 @@ class MunicipalTransparencyService:
 
         enriched = dict(candidate)
         try:
-            det_resp = self._transport.request(
+            det = self._request_upstream_json(
                 TSE_CANDIDATO_DETALHE_URL.format(
                     codigo_tse=codigo_tse,
                     eleicao_id=ELEICAO_MUNICIPAL_2024_ID,
                     id_candidato=cand_id,
                 ),
-                timeout_seconds=self._timeout,
+                operation="tse_candidato_detalhe",
+                request_ctx=request_ctx,
             )
-            det = det_resp.json()
             if isinstance(det, dict):
                 total_bens = _safe_float(det.get("totalDeBens"))
                 bens_list = det.get("bens") if isinstance(det.get("bens"), list) else []
@@ -876,7 +976,7 @@ class MunicipalTransparencyService:
             nr_urna = enriched.get("numero_urna")
             if nr_partido and nr_urna:
                 try:
-                    prest_resp = self._transport.request(
+                    prest = self._request_upstream_json(
                         TSE_PRESTADOR_CONTAS_URL.format(
                             eleicao_id=ELEICAO_MUNICIPAL_2024_ID,
                             codigo_tse=codigo_tse,
@@ -885,9 +985,9 @@ class MunicipalTransparencyService:
                             nr_candidato=nr_urna,
                             id_candidato=cand_id,
                         ),
-                        timeout_seconds=self._timeout,
+                        operation="tse_prestador_contas",
+                        request_ctx=request_ctx,
                     )
-                    prest = prest_resp.json()
                     if isinstance(prest, dict):
                         consolidado = prest.get("dadosConsolidados") or {}
                         despesas = prest.get("despesas") or {}
@@ -917,14 +1017,18 @@ class MunicipalTransparencyService:
         return enriched
 
     def _fetch_tse_elected(
-        self, norm_city: str, uf: str, avisos: list[str]
+        self,
+        norm_city: str,
+        uf: str,
+        avisos: list[str],
+        request_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         try:
-            mun_resp = self._transport.request(
+            mun_json = self._request_upstream_json(
                 TSE_BUSCAR_MUNICIPIOS_URL.format(uf=uf, eleicao_id=ELEICAO_MUNICIPAL_2024_ID),
-                timeout_seconds=self._timeout,
+                operation="tse_buscar_municipios",
+                request_ctx=request_ctx,
             )
-            mun_json = mun_resp.json()
             mun_list = (
                 mun_json.get("municipios")
                 if isinstance(mun_json, dict)
@@ -959,15 +1063,15 @@ class MunicipalTransparencyService:
                 ("13", "Vereador"),
             ):
                 try:
-                    cand_resp = self._transport.request(
+                    cand_json = self._request_upstream_json(
                         TSE_CANDIDATOS_LISTAR_URL.format(
                             codigo_tse=codigo_tse,
                             eleicao_id=ELEICAO_MUNICIPAL_2024_ID,
                             cargo=cargo_code,
                         ),
-                        timeout_seconds=self._timeout,
+                        operation=f"tse_candidatos_cargo_{cargo_code}",
+                        request_ctx=request_ctx,
                     )
-                    cand_json = cand_resp.json()
                 except UpstreamConnectorError:
                     if cargo_code == "12":
                         continue
@@ -1007,6 +1111,7 @@ class MunicipalTransparencyService:
                     results["prefeito"],
                     cargo_code="11",
                     fetch_campaign_accounts=True,
+                    request_ctx=request_ctx,
                 )
                 vice_from_pref = pref_enriched.pop("_vice_extraido", None)
                 results["prefeito"] = pref_enriched
@@ -1019,6 +1124,7 @@ class MunicipalTransparencyService:
                     results["vice_prefeito"],
                     cargo_code="12",
                     fetch_campaign_accounts=False,
+                    request_ctx=request_ctx,
                 )
 
             vereadores_with_id = [
@@ -1035,6 +1141,7 @@ class MunicipalTransparencyService:
                                 cand,
                                 cargo_code="13",
                                 fetch_campaign_accounts=False,
+                                request_ctx=request_ctx,
                             ),
                             target_slice,
                         )
@@ -1124,6 +1231,7 @@ class MunicipalTransparencyService:
         api_key: str | None,
         siconfi_data: dict[str, Any],
         avisos: list[str],
+        request_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_key = (
             api_key
@@ -1153,13 +1261,13 @@ class MunicipalTransparencyService:
             }
 
         try:
-            resp = self._transport.request(
+            items = self._request_upstream_json(
                 CGU_TRANSFERENCIAS_URL,
+                operation="cgu_transferencias",
                 params={"codigoIbge": codigo_ibge, "mesAno": "202610", "pagina": 1},
                 headers={"chave-api-dados": resolved_key},
-                timeout_seconds=self._timeout,
+                request_ctx=request_ctx,
             )
-            items = resp.json()
             rows = items if isinstance(items, list) else []
             total_brl = round(
                 sum(
@@ -1194,13 +1302,43 @@ class MunicipalTransparencyService:
 
     def get_municipio(
         self,
-        cidade: str | None,
-        uf: str | None,
+        cidade: str | None = None,
+        uf: str | None = None,
         *,
         transparencia_api_key: str | None = None,
+        challenge_id: str | None = None,
+        captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return elected officials + official IBGE, TSE, Siconfi, and CGU monetary metrics."""
-        raw_city = str(cidade or "").strip()
+        explicit_lookup = dict(consulta_payload or {})
+        if cidade is not None and str(cidade).strip():
+            explicit_lookup["cidade"] = str(cidade).strip()
+        if uf is not None and str(uf).strip():
+            explicit_lookup["uf"] = str(uf).strip()
+
+        resolved: ResolvedCaptchaInput = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+
+        effective_city = (
+            cidade
+            if (cidade is not None and str(cidade).strip())
+            else resolved.consulta_payload.get("cidade")
+        )
+        effective_uf = (
+            uf
+            if (uf is not None and str(uf).strip())
+            else resolved.consulta_payload.get("uf")
+        )
+
+        raw_city = str(effective_city or "").strip()
         norm_city = normalize_search_text(raw_city)
         if len(norm_city) < 2:
             raise ConnectorValidationError(
@@ -1208,7 +1346,7 @@ class MunicipalTransparencyService:
                 extra={"field": "cidade"},
             )
 
-        clean_uf = validate_uf(uf)
+        clean_uf = validate_uf(effective_uf)
         if clean_uf == "DF":
             raise ConnectorValidationError(
                 "O Distrito Federal (DF) não possui eleições municipais para Prefeito/Vereadores "
@@ -1224,13 +1362,43 @@ class MunicipalTransparencyService:
                 or ""
             ).strip()
         )
+        resuming_captcha = bool(resolved.challenge_id or resolved.solution)
         cache_key = f"transparencia:mun:v2:{clean_uf}:{norm_city}:cgu={int(has_custom_cgu)}"
-        hit, cached = self._cache.get(cache_key)
-        if hit:
-            return {**cached, "cache_hit": True}
+        if not resuming_captcha and not resolved.session_cookie:
+            hit, cached = self._cache.get(cache_key)
+            if hit:
+                return {**cached, "cache_hit": True}
+
+        cookie_jar = dict(resolved.cookie_jar)
+        prefetched: dict[str, HttpResponse] = {}
+        if resolved.challenge is not None and resolved.challenge.connector == "transparencia":
+            sub_resp, cookie_jar = self._captcha_store.submit_upstream_solution(
+                resolved.challenge,
+                resolved,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+            )
+            try:
+                sub_resp.json()
+                prefetched[resolved.challenge.operation] = sub_resp
+            except UpstreamConnectorError:
+                pass
+
+        active_payload = {"cidade": raw_city, "uf": clean_uf}
+        request_ctx: dict[str, Any] = {
+            "cookie_jar": cookie_jar,
+            "cookie_lock": threading.Lock(),
+            "session_cookie": resolved.session_cookie,
+            "solution": resolved.solution,
+            "consulta_payload": active_payload,
+            "prefetched": prefetched,
+            "bypass_cache": resuming_captcha,
+        }
 
         avisos: list[str] = []
-        ibge_info, ibge_online = self._resolve_ibge_city(norm_city, clean_uf, avisos)
+        ibge_info, ibge_online = self._resolve_ibge_city(
+            norm_city, clean_uf, avisos, request_ctx=request_ctx
+        )
         ref_profile = MUNICIPAL_REFERENCE_PROFILES.get((norm_city, clean_uf))
 
         if ibge_online and ibge_info is None:
@@ -1251,12 +1419,22 @@ class MunicipalTransparencyService:
         codigo_ibge = str(municipio_meta.get("codigo_ibge") or "")
 
         with ThreadPoolExecutor(max_workers=3) as pool:
-            fut_tse = pool.submit(self._fetch_tse_elected, norm_city, clean_uf, avisos)
+            fut_tse = pool.submit(
+                self._fetch_tse_elected, norm_city, clean_uf, avisos, request_ctx
+            )
             fut_ibge_mon = pool.submit(
-                self._fetch_ibge_monetary_indicators, codigo_ibge, ref_profile, avisos
+                self._fetch_ibge_monetary_indicators,
+                codigo_ibge,
+                ref_profile,
+                avisos,
+                request_ctx,
             )
             fut_siconfi = pool.submit(
-                self._fetch_siconfi_dca, codigo_ibge, ref_profile, avisos
+                self._fetch_siconfi_dca,
+                codigo_ibge,
+                ref_profile,
+                avisos,
+                request_ctx,
             )
             tse_data = fut_tse.result()
             indicadores_ibge = fut_ibge_mon.result()
@@ -1318,6 +1496,7 @@ class MunicipalTransparencyService:
             transparencia_api_key,
             siconfi_dca,
             avisos,
+            request_ctx=request_ctx,
         )
 
         ibge_orc = indicadores_ibge.get("orcamento_anual_ibge") or {}
@@ -1366,6 +1545,7 @@ class MunicipalTransparencyService:
             "fonte_modo": fonte_modo,
             "unidade_moeda": CURRENCY_BRL,
             "cache_hit": False,
+            "captcha_resumed": resuming_captcha,
             "mandato": "2025-2028",
             "municipio": municipio_meta,
             "resumo_monetario": resumo_monetario,

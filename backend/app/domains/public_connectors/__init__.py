@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import NoReturn
 
 from api.connectors import (
+    CaptchaChallenge,
+    CaptchaChallengeStore,
     ConnectorCaptchaRequiredError,
     ConnectorError,
     ConnectorNotFoundError,
     ConnectorValidationError,
+    detect_captcha_in_html,
 )
 from app.core.errors import (
     DomainValidationError,
@@ -16,6 +19,7 @@ from app.core.errors import (
     UpstreamServiceError,
 )
 from app.domains.public_connectors.schemas import (
+    CaptchaResolveRequest,
     ConnectorEnvelope,
     ProjudiConsultaRequest,
     ProjudiResumoRequest,
@@ -24,7 +28,7 @@ from app.domains.public_connectors.schemas import (
 
 def raise_as_problem(exc: ConnectorError) -> NoReturn:
     """Translate stdlib connector exceptions into FastAPI RFC 7807 Problem instances."""
-    extra_payload = {"code": exc.code, **exc.extra}
+    extra_payload = {"ok": False, "code": exc.code, **exc.extra}
     if isinstance(exc, ConnectorCaptchaRequiredError):
         raise DomainValidationError(
             exc.detail,
@@ -41,8 +45,13 @@ def raise_as_problem(exc: ConnectorError) -> NoReturn:
 
 
 __all__ = [
+    "CaptchaChallenge",
+    "CaptchaChallengeStore",
+    "CaptchaResolveRequest",
+    "ConnectorCaptchaRequiredError",
     "ConnectorEnvelope",
     "ProjudiConsultaRequest",
     "ProjudiResumoRequest",
+    "detect_captcha_in_html",
     "raise_as_problem",
 ]

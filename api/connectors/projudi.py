@@ -25,13 +25,22 @@ from typing import Any
 from urllib.parse import urlencode, urljoin
 
 from api.connectors.cache import ConnectorTTLCache
+from api.connectors.captcha import (
+    CaptchaChallengeStore,
+    ResolvedCaptchaInput,
+    detect_captcha_in_html,
+)
 from api.connectors.errors import (
     ConnectorCaptchaRequiredError,
     ConnectorNotFoundError,
     ConnectorValidationError,
     UpstreamConnectorError,
 )
-from api.connectors.http_client import HttpTransport, UrllibHttpTransport
+from api.connectors.http_client import (
+    HttpTransport,
+    UrllibHttpTransport,
+    merge_cookie_header,
+)
 from api.connectors.validators import (
     clean_digits,
     mask_cnpj,
@@ -357,7 +366,14 @@ class ProjudiBootstrapHtmlParser(HTMLParser):
         tag_l = tag.lower()
         joined_vals = " ".join(attr.values()).lower()
 
-        if "g-recaptcha" in joined_vals or "recaptcha" in joined_vals or "captcha" in joined_vals:
+        if (
+            "g-recaptcha" in joined_vals
+            or "recaptcha" in joined_vals
+            or "captcha" in joined_vals
+            or "stickyimg" in joined_vals
+            or "codseguranca" in joined_vals
+            or "codigoseguranca" in joined_vals
+        ):
             self.requires_captcha = True
         if attr.get("data-sitekey"):
             self.site_key = attr["data-sitekey"].strip()
@@ -967,12 +983,14 @@ class ProjudiConnectorService:
         *,
         transport: HttpTransport | None = None,
         cache: ConnectorTTLCache | None = None,
+        captcha_store: CaptchaChallengeStore | None = None,
         upstream_search_url: str | None = None,
         timeout_seconds: float = 5.0,
         ttl_seconds: float = 300.0,
     ) -> None:
         self._transport = transport or UrllibHttpTransport(default_timeout_seconds=timeout_seconds)
         self._cache = cache or ConnectorTTLCache()
+        self._captcha_store = captcha_store or CaptchaChallengeStore(cache=self._cache)
         self._root_url = (
             upstream_search_url
             or os.environ.get("PROJUDI_PUBLIC_SEARCH_URL")
@@ -995,12 +1013,18 @@ class ProjudiConnectorService:
         return tribunal
 
     def _bootstrap_session(
-        self, session_cookie: str | None
+        self,
+        session_cookie: str | None,
+        *,
+        operation: str = "consulta_por_cpf",
+        consulta_payload: dict[str, Any] | None = None,
+        resume_endpoint: str = "/api/v1/projudi/processos/consulta",
+        resume_method: str = "POST",
     ) -> dict[str, Any]:
         """Resolve ``frameset#frameSetTeste`` -> ``frame#mainFrame`` -> ``form#buscaProcessoForm``."""
         cookie_jar: dict[str, str] = {}
         init_headers: dict[str, str] = {}
-        initial_cookie = _merge_cookie_header(cookie_jar, session_cookie)
+        initial_cookie = merge_cookie_header(cookie_jar, session_cookie)
         if initial_cookie:
             init_headers["Cookie"] = initial_cookie
 
@@ -1012,6 +1036,19 @@ class ProjudiConnectorService:
                 timeout_seconds=self._timeout,
             )
         except UpstreamConnectorError as exc:
+            self._captcha_store.inspect_upstream_error_for_captcha(
+                exc,
+                connector="projudi",
+                operation=operation,
+                consulta_payload=consulta_payload or {},
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+                portal_url=self._root_url,
+                cookie_jar=cookie_jar,
+                raw_session_cookie=session_cookie,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+            )
             raise UpstreamConnectorError(
                 f"Portal público do PROJUDI TJPR indisponível no momento: {exc.detail}",
                 status_code=503,
@@ -1034,7 +1071,7 @@ class ProjudiConnectorService:
         if frame_target and not boot.form_found:
             resolved_frame_url = urljoin(root_resp.url, frame_target)
             frame_headers: dict[str, str] = {"Referer": root_resp.url}
-            merged_cookie = _merge_cookie_header(cookie_jar, session_cookie)
+            merged_cookie = merge_cookie_header(cookie_jar, session_cookie)
             if merged_cookie:
                 frame_headers["Cookie"] = merged_cookie
 
@@ -1046,6 +1083,19 @@ class ProjudiConnectorService:
                     timeout_seconds=self._timeout,
                 )
             except UpstreamConnectorError as exc:
+                self._captcha_store.inspect_upstream_error_for_captcha(
+                    exc,
+                    connector="projudi",
+                    operation=operation,
+                    consulta_payload=consulta_payload or {},
+                    resume_endpoint=resume_endpoint,
+                    resume_method=resume_method,
+                    portal_url=self._root_url,
+                    cookie_jar=cookie_jar,
+                    raw_session_cookie=session_cookie,
+                    transport=self._transport,
+                    timeout_seconds=self._timeout,
+                )
                 raise UpstreamConnectorError(
                     f"Falha ao carregar o frame principal de consulta do PROJUDI: {exc.detail}",
                     status_code=503,
@@ -1063,25 +1113,60 @@ class ProjudiConnectorService:
             boot.feed(form_html)
             boot.finalize(form_html)
 
+        detected_cap = detect_captcha_in_html(
+            form_html,
+            base_url=form_url,
+            default_site_key=self._configured_site_key,
+            default_callback=DEFAULT_RECAPTCHA_CALLBACK,
+        )
+
         action_url = (
             urljoin(form_url, boot.form_action)
             if boot.form_action
             else (
-                PROJUDI_TJPR_SEARCH_URL
-                if "consulta.tjpr.jus.br" in form_url
-                else form_url
+                detected_cap.action_url
+                if detected_cap.detected and detected_cap.action_url
+                else (
+                    PROJUDI_TJPR_SEARCH_URL
+                    if "consulta.tjpr.jus.br" in form_url
+                    else form_url
+                )
             )
         )
+        provider = detected_cap.provider if detected_cap.detected else "recaptcha"
+        response_field = (
+            detected_cap.response_field if detected_cap.detected else "g-recaptcha-response"
+        )
+        site_key = (
+            boot.site_key
+            or detected_cap.site_key
+            or (self._configured_site_key if provider != "image" else None)
+        )
+        callback_name = (
+            boot.recaptcha_callback
+            or detected_cap.callback
+            or (DEFAULT_RECAPTCHA_CALLBACK if provider == "recaptcha" else None)
+        )
+        merged_fields = dict(detected_cap.form_fields)
+        merged_fields.update(boot.form_fields)
+        merged_fields.pop(response_field, None)
 
         return {
             "portal_url": self._root_url,
             "form_url": form_url,
             "action_url": action_url,
-            "form_fields": dict(boot.form_fields),
+            "form_fields": merged_fields,
             "cookie_jar": cookie_jar,
-            "requires_captcha": boot.requires_captcha,
-            "site_key": boot.site_key or self._configured_site_key,
-            "recaptcha_callback": boot.recaptcha_callback or DEFAULT_RECAPTCHA_CALLBACK,
+            "requires_captcha": bool(boot.requires_captcha or detected_cap.detected),
+            "provider": provider,
+            "response_field": response_field,
+            "site_key": site_key,
+            "recaptcha_callback": callback_name,
+            "image_url": detected_cap.image_url,
+            "image_base64": detected_cap.image_base64,
+            "image_mime_type": detected_cap.image_mime_type,
+            "image_data_uri": detected_cap.image_data_uri,
+            "prompt_label": detected_cap.prompt_label,
         }
 
     def _build_captcha_instructions(
@@ -1089,54 +1174,195 @@ class ProjudiConnectorService:
         *,
         form_url: str,
         site_key: str | None,
-        callback_name: str,
+        callback_name: str | None,
+        provider: str = "recaptcha",
+        resume_endpoint: str = "/api/v1/projudi/processos/consulta",
     ) -> list[str]:
+        if provider == "image":
+            return [
+                f"1. Visualize a imagem de segurança capturada da sessão do PROJUDI ({form_url}).",
+                "2. Informe os caracteres exibidos em 'captcha_solution' (ou 'captcha_token').",
+                (
+                    f"3. Reenvie para '{resume_endpoint}' ou 'POST /api/v1/captcha/resolve' "
+                    "com 'challenge_id' (e opcionalmente 'session_cookie') para concluir a consulta real."
+                ),
+            ]
         key_hint = site_key or "<data-sitekey exibida no DOM do portal>"
+        cb_hint = callback_name or DEFAULT_RECAPTCHA_CALLBACK
         return [
             f"1. Acesse o formulário público em {form_url} (frame 'mainFrame' de {self._root_url}).",
             (
-                f"2. Resolva o desafio Google reCAPTCHA público do TJPR "
-                f"(site_key: {key_hint}, callback: {callback_name}) para obter o token "
+                f"2. Resolva o desafio {provider} público do TJPR "
+                f"(site_key: {key_hint}, callback: {cb_hint}) para obter o token "
                 "'g-recaptcha-response'."
             ),
             (
-                "3. Reenvie a requisição informando 'captcha_token' (valor de g-recaptcha-response) "
-                "e opcionalmente 'session_cookie' (ex.: 'JSESSIONID=...') da mesma sessão HTTP."
+                f"3. Reenvie a requisição para '{resume_endpoint}' (ou 'POST /api/v1/captcha/resolve') "
+                "informando 'challenge_id' e 'captcha_token' (ou 'captcha_solution'), "
+                "preservando 'session_cookie' (JSESSIONID=...) da mesma sessão HTTP."
             ),
         ]
+
+    def _raise_captcha_challenge(
+        self,
+        detail: str,
+        *,
+        session: dict[str, Any],
+        operation: str,
+        consulta_payload: dict[str, Any],
+        resume_endpoint: str,
+        resume_method: str,
+        raw_session_cookie: str | None = None,
+        rejected_previous_attempt: bool = False,
+        override_html: str | None = None,
+        override_url: str | None = None,
+    ) -> None:
+        provider = str(session.get("provider") or "recaptcha")
+        site_key = session.get("site_key")
+        callback_name = session.get("recaptcha_callback")
+        response_field = str(session.get("response_field") or "g-recaptcha-response")
+        image_url = session.get("image_url")
+        image_base64 = session.get("image_base64")
+        image_mime_type = session.get("image_mime_type")
+        image_data_uri = session.get("image_data_uri")
+        prompt_label = session.get("prompt_label")
+        form_url = str(session.get("form_url") or PROJUDI_TJPR_FORM_URL)
+        action_url = str(session.get("action_url") or PROJUDI_TJPR_SEARCH_URL)
+        form_fields = dict(session.get("form_fields") or {})
+
+        if override_html:
+            det = detect_captcha_in_html(
+                override_html,
+                base_url=override_url or form_url,
+                default_site_key=site_key or self._configured_site_key,
+                default_callback=callback_name or DEFAULT_RECAPTCHA_CALLBACK,
+            )
+            if det.detected:
+                provider = det.provider
+                site_key = det.site_key if provider != "image" else None
+                callback_name = det.callback if provider != "image" else None
+                response_field = det.response_field or response_field
+                if det.action_url:
+                    action_url = det.action_url
+                if det.form_fields:
+                    form_fields.update(det.form_fields)
+                    form_fields.pop(response_field, None)
+                if det.image_data_uri:
+                    image_url = det.image_url
+                    image_base64 = det.image_base64
+                    image_mime_type = det.image_mime_type
+                    image_data_uri = det.image_data_uri
+                elif det.image_url:
+                    image_url = det.image_url
+                    image_base64 = None
+                    image_mime_type = None
+                    image_data_uri = None
+                prompt_label = det.prompt_label or prompt_label
+
+        challenge = self._captcha_store.issue_challenge(
+            connector="projudi",
+            operation=operation,
+            provider=provider,
+            site_key=site_key,
+            challenge_url=form_url,
+            portal_url=str(session.get("portal_url") or self._root_url),
+            action_url=action_url,
+            http_method="POST",
+            callback=callback_name,
+            response_field=response_field,
+            cookie_jar=session.get("cookie_jar"),
+            raw_session_cookie=raw_session_cookie,
+            form_fields=form_fields,
+            consulta_payload=consulta_payload,
+            resume_endpoint=resume_endpoint,
+            resume_method=resume_method,
+            image_url=image_url,
+            image_base64=image_base64,
+            image_mime_type=image_mime_type,
+            image_data_uri=image_data_uri,
+            prompt_label=prompt_label,
+            rejected_previous_attempt=rejected_previous_attempt,
+            instructions=self._build_captcha_instructions(
+                form_url=form_url,
+                site_key=site_key,
+                callback_name=callback_name,
+                provider=provider,
+                resume_endpoint=resume_endpoint,
+            ),
+            transport=self._transport,
+            timeout_seconds=self._timeout,
+        )
+        raise challenge.to_exception(detail)
 
     def _execute_search(
         self,
         *,
         search_params: dict[str, str],
         tribunal: str,
-        captcha_token: str | None,
-        session_cookie: str | None,
+        resolved_captcha: ResolvedCaptchaInput,
+        operation: str,
+        consulta_payload: dict[str, Any],
+        resume_endpoint: str,
+        resume_method: str,
     ) -> dict[str, Any]:
-        token_clean = str(captcha_token or "").strip()
-        cookie_clean = str(session_cookie or "").strip()
+        token_clean = resolved_captcha.solution or ""
+        cookie_clean = resolved_captcha.session_cookie or ""
+        stored = resolved_captcha.challenge
 
-        session = self._bootstrap_session(cookie_clean or None)
-        site_key = session["site_key"]
-        callback_name = session["recaptcha_callback"]
+        if stored is not None and stored.connector == "projudi":
+            merged_jar = dict(stored.cookie_jar)
+            merged_jar.update(resolved_captcha.cookie_jar)
+            session: dict[str, Any] = {
+                "portal_url": stored.portal_url,
+                "form_url": stored.challenge_url,
+                "action_url": stored.action_url,
+                "form_fields": dict(stored.form_fields),
+                "cookie_jar": merged_jar,
+                "requires_captcha": True,
+                "provider": stored.provider,
+                "response_field": stored.response_field,
+                "site_key": stored.site_key,
+                "recaptcha_callback": stored.callback
+                or (DEFAULT_RECAPTCHA_CALLBACK if stored.provider == "recaptcha" else None),
+                "image_url": stored.challenge_data.get("image_url"),
+                "image_base64": stored.challenge_data.get("image_base64"),
+                "image_mime_type": stored.challenge_data.get("image_mime_type"),
+                "image_data_uri": stored.challenge_data.get("image_data_uri"),
+                "prompt_label": stored.challenge_data.get("prompt_label"),
+            }
+        else:
+            session = self._bootstrap_session(
+                cookie_clean or None,
+                operation=operation,
+                consulta_payload=consulta_payload,
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+            )
+
         form_url = session["form_url"]
+        has_preauth_cookie_only = bool(cookie_clean and stored is None)
 
-        if session["requires_captcha"] and not token_clean and not cookie_clean:
-            raise ConnectorCaptchaRequiredError(
-                "A Consulta Pública do PROJUDI TJPR exige validação reCAPTCHA "
-                "(g-recaptcha-response) ou sessão autenticada ativa.",
-                site_key=site_key,
-                portal_url=session["portal_url"],
-                form_url=form_url,
-                recaptcha_callback=callback_name,
-                instructions=self._build_captcha_instructions(
-                    form_url=form_url,
-                    site_key=site_key,
-                    callback_name=callback_name,
-                ),
-                extra={
-                    "session_initialized": bool(session["cookie_jar"]),
-                },
+        if session["requires_captcha"] and not token_clean and not has_preauth_cookie_only:
+            if stored is not None:
+                self._captcha_store.consume_challenge(stored.challenge_id)
+            resp_field_hint = str(session.get("response_field") or "g-recaptcha-response")
+            challenge_msg = (
+                "A Consulta Pública do PROJUDI TJPR exige o código da imagem de segurança "
+                f"({resp_field_hint}) vinculado à sessão ativa."
+                if session.get("provider") == "image"
+                else (
+                    "A Consulta Pública do PROJUDI TJPR exige validação reCAPTCHA "
+                    f"({resp_field_hint}) ou sessão autenticada ativa."
+                )
+            )
+            self._raise_captcha_challenge(
+                challenge_msg,
+                session=session,
+                operation=operation,
+                consulta_payload=consulta_payload,
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+                raw_session_cookie=cookie_clean or None,
             )
 
         form_payload: dict[str, str] = dict(session["form_fields"])
@@ -1145,13 +1371,14 @@ class ProjudiConnectorService:
         form_payload.setdefault("tipoNumero", "1")
         form_payload.update(search_params)
         if token_clean:
-            form_payload["g-recaptcha-response"] = token_clean
+            resp_field = str(session.get("response_field") or "g-recaptcha-response")
+            form_payload[resp_field] = token_clean
 
         post_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Referer": form_url,
         }
-        cookie_header = _merge_cookie_header(session["cookie_jar"], cookie_clean or None)
+        cookie_header = merge_cookie_header(session["cookie_jar"], cookie_clean or None)
         if cookie_header:
             post_headers["Cookie"] = cookie_header
 
@@ -1167,6 +1394,19 @@ class ProjudiConnectorService:
                 timeout_seconds=self._timeout,
             )
         except UpstreamConnectorError as exc:
+            self._captcha_store.inspect_upstream_error_for_captcha(
+                exc,
+                connector="projudi",
+                operation=operation,
+                consulta_payload=consulta_payload,
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+                portal_url=session["portal_url"],
+                cookie_jar=session["cookie_jar"],
+                raw_session_cookie=cookie_clean or None,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+            )
             raise UpstreamConnectorError(
                 f"Falha ao submeter pesquisa no PROJUDI TJPR: {exc.detail}",
                 status_code=503,
@@ -1182,18 +1422,22 @@ class ProjudiConnectorService:
         try:
             parsed = parse_projudi_search_result(html, tribunal, base_url=search_resp.url)
         except ConnectorCaptchaRequiredError as exc:
-            raise ConnectorCaptchaRequiredError(
+            if stored is not None:
+                self._captcha_store.consume_challenge(stored.challenge_id)
+            if exc.extra.get("site_key"):
+                session["site_key"] = exc.extra["site_key"]
+            self._raise_captcha_challenge(
                 exc.detail,
-                site_key=exc.extra.get("site_key") or site_key,
-                portal_url=session["portal_url"],
-                form_url=form_url,
-                recaptcha_callback=callback_name,
-                instructions=self._build_captcha_instructions(
-                    form_url=form_url,
-                    site_key=exc.extra.get("site_key") or site_key,
-                    callback_name=callback_name,
-                ),
-            ) from exc
+                session=session,
+                operation=operation,
+                consulta_payload=consulta_payload,
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+                raw_session_cookie=cookie_clean or None,
+                rejected_previous_attempt=True,
+                override_html=html,
+                override_url=search_resp.url,
+            )
 
         # Guard against Struts silently re-rendering the empty search form without resultTable
         probe = ProjudiPublicHtmlParser()
@@ -1204,19 +1448,25 @@ class ProjudiConnectorService:
             and probe.has_search_form
             and not _NO_RECORDS_RE.search(normalize_search_text(html))
         ):
-            raise ConnectorCaptchaRequiredError(
+            if stored is not None:
+                self._captcha_store.consume_challenge(stored.challenge_id)
+            resp_field_hint = str(session.get("response_field") or "g-recaptcha-response")
+            self._raise_captcha_challenge(
                 "O PROJUDI TJPR retornou novamente o formulário de busca sem resultados "
-                "(token g-recaptcha-response expirado/inválido ou JSESSIONID ausente).",
-                site_key=site_key,
-                portal_url=session["portal_url"],
-                form_url=form_url,
-                recaptcha_callback=callback_name,
-                instructions=self._build_captcha_instructions(
-                    form_url=form_url,
-                    site_key=site_key,
-                    callback_name=callback_name,
-                ),
+                f"(solução '{resp_field_hint}' expirada/inválida ou JSESSIONID ausente).",
+                session=session,
+                operation=operation,
+                consulta_payload=consulta_payload,
+                resume_endpoint=resume_endpoint,
+                resume_method=resume_method,
+                raw_session_cookie=cookie_clean or None,
+                rejected_previous_attempt=True,
+                override_html=html,
+                override_url=search_resp.url,
             )
+
+        if stored is not None:
+            self._captcha_store.consume_challenge(stored.challenge_id)
 
         return {
             **parsed,
@@ -1229,32 +1479,66 @@ class ProjudiConnectorService:
         self,
         cpf: str | None = None,
         *,
-        tribunal: str | None = "TJPR",
+        tribunal: str | None = None,
         captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        challenge_id: str | None = None,
         session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
+        resume_endpoint: str = "/api/v1/projudi/processos/consulta",
+        resume_method: str = "POST",
     ) -> dict[str, Any]:
         """Validate CPF/CNPJ and scrape real PROJUDI ``table.resultTable`` records."""
-        doc_digits, doc_kind = validate_cpf_or_cnpj(cpf)
-        clean_tribunal = self._validate_tribunal(tribunal)
+        explicit_lookup = dict(consulta_payload or {})
+        if cpf and "*" not in str(cpf):
+            explicit_lookup["cpf"] = cpf
+        if tribunal:
+            explicit_lookup["tribunal"] = tribunal
+
+        resolved = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+
+        effective_cpf = (
+            cpf
+            if (cpf and "*" not in str(cpf))
+            else resolved.consulta_payload.get("cpf") or cpf
+        )
+        effective_tribunal = (
+            tribunal or resolved.consulta_payload.get("tribunal") or "TJPR"
+        )
+
+        doc_digits, doc_kind = validate_cpf_or_cnpj(effective_cpf)
+        clean_tribunal = self._validate_tribunal(effective_tribunal)
         doc_masked = mask_cpf(doc_digits) if doc_kind == "CPF" else mask_cnpj(doc_digits)
-        token_clean = str(captcha_token or "").strip()
-        cookie_clean = str(session_cookie or "").strip()
 
         doc_hash = hashlib.sha256(f"{doc_digits}:{clean_tribunal}".encode()).hexdigest()[:16]
         cache_key = f"projudi:real:doc:{doc_hash}"
-        if not token_clean and not cookie_clean:
+        if not resolved.solution and not resolved.session_cookie and not resolved.challenge_id:
             hit, cached = self._cache.get(cache_key)
             if hit:
                 return {**cached, "cache_hit": True}
 
+        active_payload = {
+            "cpf": doc_digits,
+            "cpf_mascarado": doc_masked,
+            "tribunal": clean_tribunal,
+        }
         result = self._execute_search(
             search_params={
                 "cpfCnpj": doc_digits,
                 "numeroProcesso": "",
             },
             tribunal=clean_tribunal,
-            captcha_token=token_clean or None,
-            session_cookie=cookie_clean or None,
+            resolved_captcha=resolved,
+            operation="consulta_por_cpf",
+            consulta_payload=active_payload,
+            resume_endpoint=resume_endpoint,
+            resume_method=resume_method,
         )
 
         processos = result["processos"]
@@ -1282,7 +1566,8 @@ class ProjudiConnectorService:
             "tipo_documento": doc_kind,
             "cpf_mascarado": doc_masked,
             "modo_execucao": "raspagem_real_projudi_tjpr",
-            "captcha_token_informado": bool(token_clean),
+            "captcha_token_informado": bool(resolved.solution),
+            "captcha_resumed": bool(resolved.challenge_id or resolved.solution),
             "cache_hit": False,
             "politica_privacidade": "LGPD_MASKED_PUBLIC_RECORDS_ONLY",
             "compliance": {
@@ -1305,13 +1590,29 @@ class ProjudiConnectorService:
 
     def obter_processo(
         self,
-        numero_processo: str | None,
+        numero_processo: str | None = None,
         *,
         captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        challenge_id: str | None = None,
         session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Lookup a single CNJ process on real PROJUDI TJPR (zero mocked records)."""
-        cnj = validate_cnj_process_number(numero_processo)
+        explicit_lookup = dict(consulta_payload or {})
+        if numero_processo:
+            explicit_lookup["numero_processo"] = numero_processo
+
+        resolved = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+        effective_cnj = numero_processo or resolved.consulta_payload.get("numero_processo")
+
+        cnj = validate_cnj_process_number(effective_cnj)
         tr_code = cnj.split(".")[-2]
         if tr_code != "16":
             raise ConnectorValidationError(
@@ -1321,19 +1622,23 @@ class ProjudiConnectorService:
             )
 
         cache_key = f"projudi:real:proc:{cnj}"
-        if not captcha_token and not session_cookie:
+        if not resolved.solution and not resolved.session_cookie and not resolved.challenge_id:
             hit, cached = self._cache.get(cache_key)
             if hit:
                 return {**cached, "cache_hit": True}
 
+        active_payload = {"numero_processo": cnj, "tribunal": "TJPR"}
         search_res = self._execute_search(
             search_params={
                 "numeroProcesso": cnj,
                 "cpfCnpj": "",
             },
             tribunal="TJPR",
-            captcha_token=captcha_token,
-            session_cookie=session_cookie,
+            resolved_captcha=resolved,
+            operation="obter_processo",
+            consulta_payload=active_payload,
+            resume_endpoint=f"/api/v1/projudi/processos/{cnj}",
+            resume_method="GET",
         )
 
         matched = next(
@@ -1350,6 +1655,7 @@ class ProjudiConnectorService:
                         "consultado_em": _utc_iso(),
                         "fonte": PROJUDI_TJPR_ROOT_URL,
                         "modo_execucao": "raspagem_real_projudi_tjpr",
+                        "captcha_resumed": bool(resolved.challenge_id or resolved.solution),
                         "cache_hit": False,
                         **detail,
                     }
@@ -1366,7 +1672,9 @@ class ProjudiConnectorService:
         }
         detail_url = matched.get("url_detalhe")
         if detail_url:
-            cookie_hdr = _merge_cookie_header(search_res["cookie_jar"], session_cookie)
+            cookie_hdr = merge_cookie_header(
+                search_res["cookie_jar"], resolved.session_cookie
+            )
             det_headers = {"Referer": search_res["response_url"]}
             if cookie_hdr:
                 det_headers["Cookie"] = cookie_hdr
@@ -1388,6 +1696,7 @@ class ProjudiConnectorService:
             "consultado_em": _utc_iso(),
             "fonte": PROJUDI_TJPR_ROOT_URL,
             "modo_execucao": "raspagem_real_projudi_tjpr",
+            "captcha_resumed": bool(resolved.challenge_id or resolved.solution),
             "cache_hit": False,
             **detail_data,
         }
@@ -1396,22 +1705,77 @@ class ProjudiConnectorService:
 
     def resumir_processo(
         self,
-        numero_processo: str | None,
+        numero_processo: str | None = None,
         body: dict[str, Any] | None = None,
+        *,
+        challenge_id: str | None = None,
+        captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        session_cookie: str | None = None,
     ) -> dict[str, Any]:
         """Extract deterministic case metrics/phases and prepare an AI/n8n-ready summary.
 
-        Uses real PROJUDI TJPR data when ``captcha_token``/``session_cookie`` or a cached
-        lookup is available, or summarizes caller-supplied ``texto_processo`` /
+        Uses real PROJUDI TJPR data when ``captcha_token``/``captcha_solution``/``session_cookie``
+        or a cached lookup is available, or summarizes caller-supplied ``texto_processo`` /
         ``movimentacoes`` directly without inventing synthetic process data.
         """
-        cnj = validate_cnj_process_number(numero_processo)
-        req_data = body if isinstance(body, dict) else {}
-        raw_text = mask_sensitive_text(str(req_data.get("texto_processo") or "").strip())
-        incoming_movs = req_data.get("movimentacoes")
-        objetivo = str(req_data.get("objetivo") or "triagem_juridica_executiva").strip()
-        captcha_token = str(req_data.get("captcha_token") or "").strip() or None
-        session_cookie = str(req_data.get("session_cookie") or "").strip() or None
+        req_data = dict(body) if isinstance(body, dict) else {}
+        eff_challenge_id = (
+            challenge_id or str(req_data.get("challenge_id") or "").strip() or None
+        )
+        eff_token = (
+            captcha_token or str(req_data.get("captcha_token") or "").strip() or None
+        )
+        eff_solution = (
+            captcha_solution
+            or str(
+                req_data.get("captcha_solution")
+                or req_data.get("g-recaptcha-response")
+                or req_data.get("resposta")
+                or req_data.get("captcha")
+                or ""
+            ).strip()
+            or None
+        )
+        eff_cookie = (
+            session_cookie or str(req_data.get("session_cookie") or "").strip() or None
+        )
+        nested_payload = (
+            req_data.get("consulta_payload")
+            if isinstance(req_data.get("consulta_payload"), dict)
+            else {}
+        )
+        explicit_lookup = dict(nested_payload)
+        if numero_processo:
+            explicit_lookup["numero_processo"] = numero_processo
+
+        resolved = self._captcha_store.resolve_inputs(
+            challenge_id=eff_challenge_id,
+            captcha_token=eff_token,
+            captcha_solution=eff_solution,
+            session_cookie=eff_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+        effective_cnj = numero_processo or resolved.consulta_payload.get("numero_processo")
+        cnj = validate_cnj_process_number(effective_cnj)
+
+        raw_text = mask_sensitive_text(
+            str(
+                req_data.get("texto_processo")
+                or resolved.consulta_payload.get("texto_processo")
+                or ""
+            ).strip()
+        )
+        incoming_movs = (
+            req_data.get("movimentacoes")
+            if req_data.get("movimentacoes") is not None
+            else resolved.consulta_payload.get("movimentacoes")
+        )
+        objetivo = str(
+            req_data.get("objetivo")
+            or resolved.consulta_payload.get("objetivo")
+            or "triagem_juridica_executiva"
+        ).strip()
 
         has_caller_corpus = bool(
             raw_text or (isinstance(incoming_movs, list) and len(incoming_movs) > 0)
@@ -1419,16 +1783,73 @@ class ProjudiConnectorService:
 
         base_case: dict[str, Any] | None = None
         cached_hit, cached_proc = self._cache.get(f"projudi:real:proc:{cnj}")
-        if cached_hit and isinstance(cached_proc, dict):
+        if (
+            cached_hit
+            and isinstance(cached_proc, dict)
+            and not resolved.solution
+            and not resolved.challenge_id
+        ):
             base_case = cached_proc
-        elif captcha_token or session_cookie or not has_caller_corpus:
+        elif (
+            resolved.solution
+            or resolved.session_cookie
+            or resolved.challenge_id
+            or not has_caller_corpus
+        ):
             try:
                 base_case = self.obter_processo(
                     cnj,
-                    captcha_token=captcha_token,
-                    session_cookie=session_cookie,
+                    captcha_token=eff_token,
+                    captcha_solution=eff_solution,
+                    challenge_id=eff_challenge_id,
+                    session_cookie=eff_cookie,
                 )
-            except (ConnectorCaptchaRequiredError, UpstreamConnectorError):
+            except ConnectorCaptchaRequiredError as exc:
+                if not has_caller_corpus:
+                    # Rebind challenge metadata to resumir_processo so popup resumes /resumo
+                    old_cid = exc.extra.get("challenge_id")
+                    old_ch = self._captcha_store.get_challenge(old_cid)
+                    if old_ch is not None:
+                        self._captcha_store.consume_challenge(old_cid)
+                        resumo_endpoint = f"/api/v1/projudi/processos/{cnj}/resumo"
+                        resumo_ch = self._captcha_store.issue_challenge(
+                            connector="projudi",
+                            operation="resumir_processo",
+                            provider=old_ch.provider,
+                            site_key=old_ch.site_key,
+                            challenge_url=old_ch.challenge_url,
+                            portal_url=old_ch.portal_url,
+                            action_url=old_ch.action_url,
+                            http_method=old_ch.http_method,
+                            callback=old_ch.callback,
+                            response_field=old_ch.response_field,
+                            cookie_jar=old_ch.cookie_jar,
+                            form_fields=old_ch.form_fields,
+                            consulta_payload={
+                                "numero_processo": cnj,
+                                "objetivo": objetivo,
+                            },
+                            resume_endpoint=resumo_endpoint,
+                            resume_method="POST",
+                            image_url=old_ch.challenge_data.get("image_url"),
+                            image_base64=old_ch.challenge_data.get("image_base64"),
+                            image_mime_type=old_ch.challenge_data.get("image_mime_type"),
+                            image_data_uri=old_ch.challenge_data.get("image_data_uri"),
+                            prompt_label=old_ch.challenge_data.get("prompt_label"),
+                            rejected_previous_attempt=bool(
+                                old_ch.challenge_data.get("rejected_previous_attempt")
+                            ),
+                            instructions=self._build_captcha_instructions(
+                                form_url=old_ch.challenge_url,
+                                site_key=old_ch.site_key,
+                                callback_name=old_ch.callback,
+                                provider=old_ch.provider,
+                                resume_endpoint=resumo_endpoint,
+                            ),
+                        )
+                        raise resumo_ch.to_exception(exc.detail) from exc
+                    raise
+            except UpstreamConnectorError:
                 if not has_caller_corpus:
                     raise
 
@@ -1552,6 +1973,8 @@ class ProjudiConnectorService:
             "gerado_em": _utc_iso(),
             "status": "ready_for_llm",
             "origem_dados": origem_dados,
+            "captcha_token_informado": bool(resolved.solution),
+            "captcha_resumed": bool(resolved.challenge_id or resolved.solution),
             "numero_processo": cnj,
             "tribunal": tribunal,
             "classe_processual": classe,

@@ -6,8 +6,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from api.connectors.cache import ConnectorTTLCache
+from api.connectors.captcha import CaptchaChallengeStore, ResolvedCaptchaInput
 from api.connectors.errors import ConnectorValidationError, UpstreamConnectorError
-from api.connectors.http_client import HttpTransport, UrllibHttpTransport
+from api.connectors.http_client import (
+    HttpResponse,
+    HttpTransport,
+    UrllibHttpTransport,
+    merge_cookie_header,
+)
 from api.connectors.validators import clean_digits, normalize_search_text
 
 BCB_SGS_BASE_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{serie}/dados/ultimos/{ultimos}"
@@ -295,45 +301,137 @@ class BCBConnectorService:
         *,
         transport: HttpTransport | None = None,
         cache: ConnectorTTLCache | None = None,
+        captcha_store: CaptchaChallengeStore | None = None,
         timeout_seconds: float = 3.0,
         indicadores_ttl_seconds: float = 900.0,
         instituicoes_ttl_seconds: float = 3600.0,
     ) -> None:
         self._transport = transport or UrllibHttpTransport(default_timeout_seconds=timeout_seconds)
         self._cache = cache or ConnectorTTLCache()
+        self._captcha_store = captcha_store or CaptchaChallengeStore(cache=self._cache)
         self._timeout = timeout_seconds
         self._indicadores_ttl = indicadores_ttl_seconds
         self._instituicoes_ttl = instituicoes_ttl_seconds
 
-    def get_indicadores(self, ultimos: int = 5) -> dict[str, Any]:
+    def _build_headers(
+        self,
+        cookie_jar: dict[str, str],
+        raw_session_cookie: str | None,
+        solution: str | None,
+    ) -> dict[str, str] | None:
+        headers: dict[str, str] = {}
+        merged_cookie = merge_cookie_header(cookie_jar, raw_session_cookie)
+        if merged_cookie:
+            headers["Cookie"] = merged_cookie
+        if solution:
+            headers["X-Captcha-Response"] = solution
+        return headers or None
+
+    def get_indicadores(
+        self,
+        ultimos: int | None = None,
+        *,
+        challenge_id: str | None = None,
+        captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Return Selic, IPCA, and PTAX USD/BRL series with recent history and variation."""
-        if not isinstance(ultimos, int) or ultimos < 1 or ultimos > 30:
+        explicit_lookup = dict(consulta_payload or {})
+        if ultimos is not None:
+            explicit_lookup["ultimos"] = ultimos
+
+        resolved: ResolvedCaptchaInput = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+
+        effective_ultimos = (
+            ultimos
+            if ultimos is not None
+            else (
+                int(resolved.consulta_payload["ultimos"])
+                if resolved.consulta_payload.get("ultimos") is not None
+                else 5
+            )
+        )
+        if (
+            not isinstance(effective_ultimos, int)
+            or effective_ultimos < 1
+            or effective_ultimos > 30
+        ):
             raise ConnectorValidationError(
                 "Parâmetro 'ultimos' deve ser um inteiro entre 1 e 30.",
                 extra={"field": "ultimos"},
             )
 
-        cache_key = f"bcb:indicadores:{ultimos}"
-        hit, cached = self._cache.get(cache_key)
-        if hit:
-            return {**cached, "cache_hit": True}
+        resuming_captcha = bool(resolved.challenge_id or resolved.solution)
+        cache_key = f"bcb:indicadores:{effective_ultimos}"
+        if not resuming_captcha and not resolved.session_cookie:
+            hit, cached = self._cache.get(cache_key)
+            if hit:
+                return {**cached, "cache_hit": True}
 
+        cookie_jar = dict(resolved.cookie_jar)
+        prefetched: dict[str, HttpResponse] = {}
+        if resolved.challenge is not None and resolved.challenge.connector == "bcb":
+            sub_resp, cookie_jar = self._captcha_store.submit_upstream_solution(
+                resolved.challenge,
+                resolved,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+                extra_params={"formato": "json"},
+            )
+            try:
+                if isinstance(sub_resp.json(), list):
+                    prefetched[resolved.challenge.operation] = sub_resp
+            except UpstreamConnectorError:
+                pass
+
+        active_payload = {"ultimos": effective_ultimos}
         indicadores: dict[str, Any] = {}
         avisos: list[str] = []
         live_count = 0
 
         for spec in SGS_SERIES_SPECS:
-            url = BCB_SGS_BASE_URL.format(serie=spec["codigo_sgs"], ultimos=ultimos)
+            op_name = f"sgs_{spec['codigo_sgs']}"
+            url = BCB_SGS_BASE_URL.format(
+                serie=spec["codigo_sgs"], ultimos=effective_ultimos
+            )
             points: list[dict[str, Any]] = []
             try:
-                resp = self._transport.request(
-                    url,
-                    params={"formato": "json"},
+                if op_name in prefetched:
+                    resp = prefetched.pop(op_name)
+                else:
+                    resp = self._transport.request(
+                        url,
+                        params={"formato": "json"},
+                        headers=self._build_headers(
+                            cookie_jar, resolved.session_cookie, resolved.solution
+                        ),
+                        timeout_seconds=self._timeout,
+                    )
+                cookie_jar.update(resp.cookies())
+                self._captcha_store.inspect_response_for_captcha(
+                    resp,
+                    connector="bcb",
+                    operation=op_name,
+                    consulta_payload=active_payload,
+                    resume_endpoint="/api/v1/bcb/indicadores",
+                    resume_method="GET",
+                    portal_url=url,
+                    cookie_jar=cookie_jar,
+                    raw_session_cookie=resolved.session_cookie,
+                    transport=self._transport,
                     timeout_seconds=self._timeout,
                 )
                 raw_items = resp.json()
                 if isinstance(raw_items, list):
-                    for row in raw_items[-ultimos:]:
+                    for row in raw_items[-effective_ultimos:]:
                         if not isinstance(row, dict):
                             continue
                         val = _parse_bcb_float(row.get("valor"))
@@ -345,8 +443,21 @@ class BCBConnectorService:
                 else:
                     raise UpstreamConnectorError(f"Série SGS {spec['codigo_sgs']} vazia.")
             except UpstreamConnectorError as exc:
+                self._captcha_store.inspect_upstream_error_for_captcha(
+                    exc,
+                    connector="bcb",
+                    operation=op_name,
+                    consulta_payload=active_payload,
+                    resume_endpoint="/api/v1/bcb/indicadores",
+                    resume_method="GET",
+                    portal_url=url,
+                    cookie_jar=cookie_jar,
+                    raw_session_cookie=resolved.session_cookie,
+                    transport=self._transport,
+                    timeout_seconds=self._timeout,
+                )
                 avisos.append(f"SGS {spec['codigo_sgs']} ({spec['chave']}): {exc.detail}")
-                fallback_pts = list(spec["fallback_serie"])[-ultimos:]
+                fallback_pts = list(spec["fallback_serie"])[-effective_ultimos:]
                 points = [dict(item) for item in fallback_pts]
 
             indicadores[spec["chave"]] = _summarize_series(spec, points)
@@ -363,27 +474,59 @@ class BCBConnectorService:
             "fonte": "Banco Central do Brasil — Dados Abertos SGS (Séries 432, 433 e 1)",
             "fonte_modo": fonte_modo,
             "cache_hit": False,
-            "janela_periodos": ultimos,
+            "captcha_resumed": resuming_captcha,
+            "janela_periodos": effective_ultimos,
             "indicadores": indicadores,
             "avisos": avisos,
         }
         self._cache.set(cache_key, payload, ttl_seconds=self._indicadores_ttl)
         return payload
 
-    def _load_pix_directory(self) -> tuple[list[dict[str, str]], str, bool, list[str]]:
+    def _load_pix_directory(
+        self,
+        *,
+        consulta_payload: dict[str, Any] | None = None,
+        cookie_jar: dict[str, str] | None = None,
+        raw_session_cookie: str | None = None,
+        solution: str | None = None,
+        prefetched_response: HttpResponse | None = None,
+        bypass_cache: bool = False,
+    ) -> tuple[list[dict[str, str]], str, bool, list[str]]:
         dir_key = "bcb:pix:directory"
-        hit, cached_entry = self._cache.get(dir_key)
-        if hit:
-            rows, fonte_modo, avisos = cached_entry
-            return rows, fonte_modo, True, list(avisos)
+        if not bypass_cache:
+            hit, cached_entry = self._cache.get(dir_key)
+            if hit:
+                rows, fonte_modo, avisos = cached_entry
+                return rows, fonte_modo, True, list(avisos)
 
+        active_jar = cookie_jar if cookie_jar is not None else {}
         avisos: list[str] = []
         rows: list[dict[str, str]] = []
         fonte_modo = "online_bcb_olinda"
         try:
-            resp = self._transport.request(
-                BCB_PIX_OLINDA_URL,
-                params={"$top": 500, "$format": "json"},
+            if prefetched_response is not None:
+                resp = prefetched_response
+            else:
+                resp = self._transport.request(
+                    BCB_PIX_OLINDA_URL,
+                    params={"$top": 500, "$format": "json"},
+                    headers=self._build_headers(
+                        active_jar, raw_session_cookie, solution
+                    ),
+                    timeout_seconds=self._timeout,
+                )
+            active_jar.update(resp.cookies())
+            self._captcha_store.inspect_response_for_captcha(
+                resp,
+                connector="bcb",
+                operation="search_instituicoes",
+                consulta_payload=consulta_payload or {},
+                resume_endpoint="/api/v1/bcb/instituicoes",
+                resume_method="GET",
+                portal_url=BCB_PIX_OLINDA_URL,
+                cookie_jar=active_jar,
+                raw_session_cookie=raw_session_cookie,
+                transport=self._transport,
                 timeout_seconds=self._timeout,
             )
             body = resp.json()
@@ -400,6 +543,19 @@ class BCBConnectorService:
             if not rows:
                 raise UpstreamConnectorError("Lista Olinda ParticipantesPix vazia.")
         except UpstreamConnectorError as exc:
+            self._captcha_store.inspect_upstream_error_for_captcha(
+                exc,
+                connector="bcb",
+                operation="search_instituicoes",
+                consulta_payload=consulta_payload or {},
+                resume_endpoint="/api/v1/bcb/instituicoes",
+                resume_method="GET",
+                portal_url=BCB_PIX_OLINDA_URL,
+                cookie_jar=active_jar,
+                raw_session_cookie=raw_session_cookie,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+            )
             fonte_modo = "fallback_resiliente"
             avisos.append(f"Olinda PIX indisponível ({exc.detail}); usando catálogo de referência.")
             rows = [dict(item) for item in FALLBACK_PIX_PARTICIPANTS]
@@ -409,19 +565,84 @@ class BCBConnectorService:
 
     def search_instituicoes(
         self,
-        busca: str = "",
+        busca: str | None = None,
         *,
-        limite: int = 20,
+        limite: int | None = None,
+        challenge_id: str | None = None,
+        captcha_token: str | None = None,
+        captcha_solution: str | None = None,
+        session_cookie: str | None = None,
+        consulta_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Filter BCB-authorized / PIX participant institutions by name or 8-digit ISPB."""
-        if not isinstance(limite, int) or limite < 1 or limite > 100:
+        explicit_lookup = dict(consulta_payload or {})
+        if busca is not None and str(busca).strip():
+            explicit_lookup["busca"] = str(busca).strip()
+        if limite is not None:
+            explicit_lookup["limite"] = limite
+
+        resolved: ResolvedCaptchaInput = self._captcha_store.resolve_inputs(
+            challenge_id=challenge_id,
+            captcha_token=captcha_token,
+            captcha_solution=captcha_solution,
+            session_cookie=session_cookie,
+            consulta_payload=explicit_lookup or None,
+        )
+
+        effective_busca = (
+            busca
+            if busca is not None
+            else str(resolved.consulta_payload.get("busca") or "")
+        )
+        effective_limite = (
+            limite
+            if limite is not None
+            else (
+                int(resolved.consulta_payload["limite"])
+                if resolved.consulta_payload.get("limite") is not None
+                else 20
+            )
+        )
+
+        if (
+            not isinstance(effective_limite, int)
+            or effective_limite < 1
+            or effective_limite > 100
+        ):
             raise ConnectorValidationError(
                 "Parâmetro 'limite' deve ser um inteiro entre 1 e 100.",
                 extra={"field": "limite"},
             )
 
-        rows, fonte_modo, cache_hit, avisos = self._load_pix_directory()
-        raw_query = str(busca or "").strip()
+        resuming_captcha = bool(resolved.challenge_id or resolved.solution)
+        cookie_jar = dict(resolved.cookie_jar)
+        prefetched_pix: HttpResponse | None = None
+        if resolved.challenge is not None and resolved.challenge.connector == "bcb":
+            sub_resp, cookie_jar = self._captcha_store.submit_upstream_solution(
+                resolved.challenge,
+                resolved,
+                transport=self._transport,
+                timeout_seconds=self._timeout,
+                extra_params={"$top": 500, "$format": "json"},
+            )
+            try:
+                maybe_body = sub_resp.json()
+                if isinstance(maybe_body, (dict, list)):
+                    prefetched_pix = sub_resp
+            except UpstreamConnectorError:
+                prefetched_pix = None
+
+        raw_query = str(effective_busca or "").strip()
+        active_payload = {"busca": raw_query, "limite": effective_limite}
+        rows, fonte_modo, cache_hit, avisos = self._load_pix_directory(
+            consulta_payload=active_payload,
+            cookie_jar=cookie_jar,
+            raw_session_cookie=resolved.session_cookie,
+            solution=resolved.solution,
+            prefetched_response=prefetched_pix,
+            bypass_cache=resuming_captcha,
+        )
+        limite = effective_limite
         norm_query = normalize_search_text(raw_query)
         digit_query = clean_digits(raw_query)
 
@@ -456,6 +677,7 @@ class BCBConnectorService:
             "fonte": "Banco Central do Brasil — Dados Abertos Olinda (Participantes PIX / STR)",
             "fonte_modo": fonte_modo,
             "cache_hit": cache_hit,
+            "captcha_resumed": resuming_captcha,
             "filtro_busca": raw_query,
             "total_catalogo": len(rows),
             "total_encontrado": total_encontrado,

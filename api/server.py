@@ -43,6 +43,10 @@ CONNECTORS: PublicConnectorsRegistry = create_public_connectors()
 
 _PROJUDI_DETAIL_RE = re.compile(r"^/api/v1/projudi/processos/([^/]+)$")
 _PROJUDI_RESUMO_RE = re.compile(r"^/api/v1/projudi/processos/([^/]+)/resumo$")
+_CAPTCHA_CHALLENGE_RE = re.compile(r"^/api/v1/captcha/challenges/([^/]+)$")
+_CAPTCHA_IMAGE_RE = re.compile(
+    r"^/api/v1/(?:captcha/challenges|projudi/captcha)/([^/]+)/image$"
+)
 
 # Ensure python:3.11-slim serves WebAssembly, glTF binary, WebP, and WOFF2
 # with standards-compliant MIME types (required by WebAssembly.instantiateStreaming).
@@ -67,6 +71,8 @@ REQUEST_COUNTERS: dict[str, int] = {
     "projudi_consulta": 0,
     "projudi_detalhe": 0,
     "projudi_resumo": 0,
+    "captcha_challenge": 0,
+    "captcha_resolve": 0,
 }
 
 
@@ -360,6 +366,39 @@ class PortfolioHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _extract_captcha_query_params(
+        self, qs: dict[str, list[str]]
+    ) -> dict[str, Any]:
+        challenge_id = (
+            _query_str(qs, "challenge_id", "").strip()
+            or (self.headers.get("X-Challenge-Id") or "").strip()
+            or None
+        )
+        captcha_token = (
+            _query_str(qs, "captcha_token", "").strip()
+            or (self.headers.get("X-Captcha-Token") or "").strip()
+            or None
+        )
+        captcha_solution = (
+            _query_str(qs, "captcha_solution", "").strip()
+            or _query_str(qs, "g-recaptcha-response", "").strip()
+            or _query_str(qs, "resposta", "").strip()
+            or (self.headers.get("X-Captcha-Solution") or "").strip()
+            or None
+        )
+        session_cookie = (
+            _query_str(qs, "session_cookie", "").strip()
+            or (self.headers.get("X-Captcha-Session") or "").strip()
+            or (self.headers.get("X-Projudi-Session") or "").strip()
+            or None
+        )
+        return {
+            "challenge_id": challenge_id,
+            "captcha_token": captcha_token,
+            "captcha_solution": captcha_solution,
+            "session_cookie": session_cookie,
+        }
+
     def _send_connector_error(self, method: str, path: str, exc: ConnectorError) -> None:
         record_event(method, path, exc.status_code, exc.title)
         self._send_json(
@@ -462,10 +501,41 @@ class PortfolioHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             started = time.perf_counter()
             try:
+                cap_qs = self._extract_captcha_query_params(qs)
+
+                cap_img_match = _CAPTCHA_IMAGE_RE.match(raw_path)
+                if cap_img_match:
+                    REQUEST_COUNTERS["captcha_challenge"] += 1
+                    cid = unquote(cap_img_match.group(1))
+                    img_bytes, img_mime = CONNECTORS.get_captcha_challenge_image(cid)
+                    record_event("GET", path, 200, f"captcha_image={cid}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", img_mime)
+                    self.send_header("Content-Length", str(len(img_bytes)))
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        self.wfile.write(img_bytes)
+                    return
+
+                cap_match = _CAPTCHA_CHALLENGE_RE.match(raw_path)
+                if cap_match:
+                    REQUEST_COUNTERS["captcha_challenge"] += 1
+                    cid = unquote(cap_match.group(1))
+                    data = CONNECTORS.get_captcha_challenge(cid)
+                    data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+                    record_event("GET", path, 200, f"challenge={cid}")
+                    self._send_json({"ok": True, "data": data})
+                    return
+
                 if path == "/api/v1/bcb/indicadores":
                     REQUEST_COUNTERS["bcb_indicadores"] += 1
-                    ultimos = _query_int(qs, "ultimos", 5)
-                    data = CONNECTORS.bcb.get_indicadores(ultimos=ultimos)
+                    ultimos = (
+                        _query_int(qs, "ultimos", 5)
+                        if _query_str(qs, "ultimos", "").strip()
+                        else (None if cap_qs["challenge_id"] else 5)
+                    )
+                    data = CONNECTORS.bcb.get_indicadores(ultimos=ultimos, **cap_qs)
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                     record_event("GET", path, 200, f"modo={data['fonte_modo']}")
                     self._send_json({"ok": True, "data": data})
@@ -473,9 +543,18 @@ class PortfolioHandler(BaseHTTPRequestHandler):
 
                 if path == "/api/v1/bcb/instituicoes":
                     REQUEST_COUNTERS["bcb_instituicoes"] += 1
-                    busca = _query_str(qs, "busca", "")
-                    limite = _query_int(qs, "limite", 20)
-                    data = CONNECTORS.bcb.search_instituicoes(busca=busca, limite=limite)
+                    raw_busca = _query_str(qs, "busca", "")
+                    busca = raw_busca if raw_busca else (None if cap_qs["challenge_id"] else "")
+                    limite = (
+                        _query_int(qs, "limite", 20)
+                        if _query_str(qs, "limite", "").strip()
+                        else (None if cap_qs["challenge_id"] else 20)
+                    )
+                    data = CONNECTORS.bcb.search_instituicoes(
+                        busca=busca,
+                        limite=limite,
+                        **cap_qs,
+                    )
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                     record_event("GET", path, 200, f"hits={data['total_encontrado']}")
                     self._send_json({"ok": True, "data": data})
@@ -483,26 +562,67 @@ class PortfolioHandler(BaseHTTPRequestHandler):
 
                 if path == "/api/v1/siscomex/ncm":
                     REQUEST_COUNTERS["siscomex_ncm"] += 1
-                    q = _query_str(qs, "q", "") or _query_str(qs, "termo", "")
-                    limite = _query_int(qs, "limite", 10)
-                    somente_vigentes = _query_bool(qs, "somente_vigentes", True)
+                    q = _query_str(qs, "q", "") or _query_str(qs, "termo", "") or None
+                    limite = (
+                        _query_int(qs, "limite", 10)
+                        if _query_str(qs, "limite", "").strip()
+                        else (None if cap_qs["challenge_id"] else 10)
+                    )
+                    somente_vigentes = (
+                        _query_bool(qs, "somente_vigentes", True)
+                        if _query_str(qs, "somente_vigentes", "").strip()
+                        else (None if cap_qs["challenge_id"] else True)
+                    )
                     data = CONNECTORS.siscomex.search_ncm(
                         q,
                         limite=limite,
                         somente_vigentes=somente_vigentes,
+                        **cap_qs,
                     )
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-                    record_event("GET", path, 200, f"q={q} hits={data['total_encontrado']}")
+                    record_event(
+                        "GET",
+                        path,
+                        200,
+                        f"q={data['termo_busca']} hits={data['total_encontrado']}",
+                    )
                     self._send_json({"ok": True, "data": data})
                     return
 
-                if path == "/api/v1/transparencia/municipio":
+                if path in {"/api/v1/transparencia/municipio", "/api/v1/transparencia/municipios"}:
                     REQUEST_COUNTERS["transparencia_municipio"] += 1
-                    cidade = _query_str(qs, "cidade", "")
-                    uf = _query_str(qs, "uf", "")
-                    data = CONNECTORS.transparencia.get_municipio(cidade=cidade, uf=uf)
+                    cidade = _query_str(qs, "cidade", "") or None
+                    uf = _query_str(qs, "uf", "") or None
+                    cgu_key = (self.headers.get("X-Transparencia-Api-Key") or "").strip() or None
+                    data = CONNECTORS.transparencia.get_municipio(
+                        cidade=cidade,
+                        uf=uf,
+                        transparencia_api_key=cgu_key,
+                        **cap_qs,
+                    )
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-                    record_event("GET", path, 200, f"{cidade}/{uf}")
+                    record_event(
+                        "GET",
+                        path,
+                        200,
+                        f"{data['municipio'].get('nome')}/{data['municipio'].get('uf')}",
+                    )
+                    self._send_json({"ok": True, "data": data})
+                    return
+
+                if path == "/api/v1/projudi/processos":
+                    REQUEST_COUNTERS["projudi_consulta"] += 1
+                    cpf = _query_str(qs, "cpf", "") or None
+                    tribunal = _query_str(qs, "tribunal", "") or None
+                    data = CONNECTORS.projudi.consulta_por_cpf(
+                        cpf=cpf,
+                        tribunal=tribunal,
+                        resume_endpoint="/api/v1/projudi/processos",
+                        resume_method="GET",
+                        **cap_qs,
+                    )
+                    data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+                    record_event("GET", path, 200, f"tribunal={data['tribunal']}")
                     self._send_json({"ok": True, "data": data})
                     return
 
@@ -510,16 +630,9 @@ class PortfolioHandler(BaseHTTPRequestHandler):
                 if detail_match:
                     REQUEST_COUNTERS["projudi_detalhe"] += 1
                     numero_processo = unquote(detail_match.group(1))
-                    captcha_token = _query_str(qs, "captcha_token", "") or None
-                    session_cookie = (
-                        _query_str(qs, "session_cookie", "")
-                        or self.headers.get("X-Projudi-Session")
-                        or None
-                    )
                     data = CONNECTORS.projudi.obter_processo(
                         numero_processo,
-                        captcha_token=captcha_token,
-                        session_cookie=session_cookie,
+                        **cap_qs,
                     )
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                     record_event("GET", path, 200, data["numero_processo"])
@@ -555,19 +668,72 @@ class PortfolioHandler(BaseHTTPRequestHandler):
 
         started = time.perf_counter()
         try:
+            if path == "/api/v1/captcha/resolve":
+                REQUEST_COUNTERS["captcha_resolve"] += 1
+                payload_dict = body or {}
+                session_cookie = (
+                    payload_dict.get("session_cookie")
+                    or self.headers.get("X-Captcha-Session")
+                    or self.headers.get("X-Projudi-Session")
+                    or None
+                )
+                cgu_key = (
+                    payload_dict.get("transparencia_api_key")
+                    or self.headers.get("X-Transparencia-Api-Key")
+                    or None
+                )
+                data = CONNECTORS.resolve_captcha(
+                    challenge_id=payload_dict.get("challenge_id")
+                    or self.headers.get("X-Challenge-Id"),
+                    captcha_token=payload_dict.get("captcha_token")
+                    or self.headers.get("X-Captcha-Token"),
+                    captcha_solution=payload_dict.get("captcha_solution")
+                    or self.headers.get("X-Captcha-Solution"),
+                    session_cookie=session_cookie,
+                    consulta_payload=(
+                        payload_dict.get("consulta_payload")
+                        if isinstance(payload_dict.get("consulta_payload"), dict)
+                        else None
+                    ),
+                    transparencia_api_key=cgu_key,
+                )
+                data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+                record_event(
+                    "POST",
+                    path,
+                    200,
+                    f"connector={data.get('connector')} op={data.get('operation')}",
+                )
+                self._send_json({"ok": True, "data": data})
+                return
+
             if path == "/api/v1/projudi/processos/consulta":
                 REQUEST_COUNTERS["projudi_consulta"] += 1
                 payload_dict = body or {}
                 session_cookie = (
                     payload_dict.get("session_cookie")
+                    or self.headers.get("X-Captcha-Session")
                     or self.headers.get("X-Projudi-Session")
                     or None
                 )
                 data = CONNECTORS.projudi.consulta_por_cpf(
                     cpf=payload_dict.get("cpf"),
-                    tribunal=payload_dict.get("tribunal", "TJPR"),
-                    captcha_token=payload_dict.get("captcha_token"),
+                    tribunal=payload_dict.get("tribunal"),
+                    captcha_token=payload_dict.get("captcha_token")
+                    or self.headers.get("X-Captcha-Token"),
+                    captcha_solution=payload_dict.get("captcha_solution")
+                    or payload_dict.get("g-recaptcha-response")
+                    or payload_dict.get("resposta")
+                    or payload_dict.get("captcha")
+                    or self.headers.get("X-Captcha-Solution"),
+                    challenge_id=payload_dict.get("challenge_id")
+                    or self.headers.get("X-Challenge-Id"),
                     session_cookie=session_cookie,
+                    consulta_payload=(
+                        payload_dict.get("consulta_payload")
+                        if isinstance(payload_dict.get("consulta_payload"), dict)
+                        else None
+                    ),
                 )
                 data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                 record_event("POST", path, 200, f"tribunal={data['tribunal']}")
@@ -578,7 +744,17 @@ class PortfolioHandler(BaseHTTPRequestHandler):
             if resumo_match:
                 REQUEST_COUNTERS["projudi_resumo"] += 1
                 numero_processo = unquote(resumo_match.group(1))
-                data = CONNECTORS.projudi.resumir_processo(numero_processo, body)
+                data = CONNECTORS.projudi.resumir_processo(
+                    numero_processo,
+                    body,
+                    challenge_id=self.headers.get("X-Challenge-Id"),
+                    captcha_token=self.headers.get("X-Captcha-Token"),
+                    captcha_solution=self.headers.get("X-Captcha-Solution"),
+                    session_cookie=(
+                        self.headers.get("X-Captcha-Session")
+                        or self.headers.get("X-Projudi-Session")
+                    ),
+                )
                 data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                 record_event("POST", path, 200, f"status={data['status']}")
                 self._send_json({"ok": True, "data": data})

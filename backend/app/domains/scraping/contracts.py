@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from app.domains.scraping.schemas import ScrapeStrategy
@@ -17,6 +17,7 @@ class RawHttpDocument:
     status_code: int
     content_type: str | None
     body_text: str
+    cookies: dict[str, str] = field(default_factory=dict)
 
 
 @runtime_checkable
