@@ -200,12 +200,11 @@ test('adapter uses the real facade, relative GLB + Draco paths, and preserves sc
     'AsciiSceneEngine',
     "'./assets/models/cena_completa.glb'",
     "'./assets/draco/'",
-    'pointermove',
-    'passive: true',
     'ResizeObserver',
     'requestAnimationFrame'
   ]);
-  assert.match(adapter, /setAutoOrbit[\s\S]*PointerEvent/);
+  assert.match(adapter, /setAutoOrbit[\s\S]*state\.instance\.setAutoOrbit/);
+  assert.doesNotMatch(adapter, /new PointerEvent\(/);
   assert.doesNotMatch(adapter, /https?:\/\//i, 'adapter contains zero external CDN URLs');
 });
 
@@ -219,7 +218,7 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
     path.join(root, 'ascii-engine-module/src/input/PointerInput.ts'),
     'utf8'
   );
-  includesAll(pointerInput, ['pointerdown', 'pointermove', 'pointerup', '{ passive: true }']);
+  includesAll(pointerInput, ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', '{ passive: true }']);
 });
 
 test('playground exposes exactly three scene modes and removes legacy procedural cyberpunk builders', () => {
@@ -231,9 +230,7 @@ test('playground exposes exactly three scene modes and removes legacy procedural
     'blockBlendWeight: preset.blockBlendWeight',
     'windStrength: preset.windStrength',
     'blockBlendWeight: 0.0',
-    'cellSize: 8',
-    'touchstart',
-    'touchmove'
+    'cellSize: 8'
   ]);
   assert.doesNotMatch(adapter, /sanctuary|dawn|storm|emerald|setCycle|syncPalette|cyberpunk-citadel/);
 
@@ -864,6 +861,8 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   const handle = pkg.applyObjectOutline(box, { highlightColor: '#4A7C7E', thickness: 1.3 });
   assert.equal(handle.getState().enabled, true);
   assert.equal(handle.getState().highlightColor, '#4A7C7E');
+  const outlineShell = box.children.find(child => child.userData.__isAsciiOutlineShell);
+  assert.equal(outlineShell.userData.skipNormalPass, true);
   assert.equal(handle.dispose(), 1);
   assert.equal(pkg.getObjectOutlineState(box), null);
   pkg.LifecycleManager.disposeObject3D(testScene);
@@ -889,11 +888,13 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     new pkg.THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5 })
   );
   decalMesh.userData.skipNormalPass = true;
-  passScene.add(mappedMesh, decalMesh);
+  const cutout = new pkg.THREE.Mesh(new pkg.THREE.PlaneGeometry(), new pkg.THREE.MeshStandardMaterial({ alphaTest: 0.5 }));
+  passScene.add(mappedMesh, decalMesh, cutout);
 
   const passCache = new pkg.NormalPassMaterialCache();
   passCache.beginPass(passScene);
   assert.equal(decalMesh.visible, false, 'skipNormalPass decal hidden during Pass 2');
+  assert.equal(cutout.visible, false, 'alpha-tested geometry must not become a solid normal card');
   assert.ok(
     mappedMesh.material.isMeshNormalMaterial && mappedMesh.material.normalMap === normalSet.facade,
     'Opaque mesh receives normal-mapped MeshNormalMaterial during Pass 2'
@@ -904,6 +905,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
   );
   passCache.endPass();
   assert.equal(decalMesh.visible, true, 'skipNormalPass decal restored immediately after Pass 2');
+  assert.equal(cutout.visible, true);
   assert.equal(mappedMesh.material, mappedMat, 'Original PBR material restored immediately after Pass 2');
 
   const dirKey = new pkg.THREE.DirectionalLight(0xffffff, 2.0);
@@ -1196,6 +1198,11 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
     false
   );
   assert.equal(microProf.activeCellSize, 2.25);
+  assert.equal(post.sceneTarget.width, microProf.renderTargetWidth);
+  assert.equal(post.normalTarget.height, microProf.renderTargetHeight);
+  assert.equal(post.compositeMaterial.uniforms.uResolution.value.x, microProf.physicalWidth);
+  assert.AlmostEqual(post.bloomMaterial.uniforms.uTexelSize.value.x, 1 / post.bloomTarget.width, 1e-8);
+  assert.doesNotMatch(adapter, /new PointerEvent\(/);
   assert.equal(
     post.compositeMaterial.uniforms.tGlyphAtlas.value,
     mountedAtlasTex,
@@ -1359,3 +1366,130 @@ function assertsNoSceneCollapse(mainSrc) {
   assert.doesNotMatch(mainSrc, /TP\.collapse\.expand\(section\)/, 'fullscreen no longer expands a clamped scene');
 }
 
+test('day, night, and rain presets produce distinct legible 3D illumination, complete GLB material coverage, and 4px small-cell shader mass', async () => {
+  const asciiShaderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'),
+    'utf8'
+  );
+  const postProcSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/shaders/AsciiPostProcessor.ts'),
+    'utf8'
+  );
+
+  // 1. Perceptual linear-to-sRGB transfer & DPR-invariant small-cell ('uCellCssSize') calibration
+  includesAll(postProcSrc, ['uCellCssSize', 'profile.activeCellSize']);
+  includesAll(asciiShaderSrc, [
+    'uniform float uCellCssSize',
+    'linearToSrgb',
+    'smallFontFactor',
+    'cellDensitySupport',
+    'geomMinLuma',
+    'effectiveBlockWeight',
+    'stepReflY'
+  ]);
+
+  // 2. Adapter preset palettes must clearly differentiate day, night, and rain
+  assert.match(adapter, /day:\s*\{[\s\S]*?background:\s*'#213242'/);
+  assert.match(adapter, /night:\s*\{[\s\S]*?background:\s*'#0E161F'/);
+  assert.match(adapter, /rain:\s*\{[\s\S]*?background:\s*'#111C27'/);
+
+  // 3. Load real cena_completa.glb and verify zero unclassified opaque materials, zero residual metalnessMap, and calibrated presets
+  const sandbox = createBundleSandbox();
+  const pkg = sandbox.ASCIIRealms;
+  pkg.THREE.ImageLoader.prototype.load = function (_url, onLoad) {
+    const img = { width: 2, height: 2, data: new Uint8Array(16) };
+    if (onLoad) onLoad(img);
+    return img;
+  };
+
+  const rawGlb = readFileSync(path.join(root, 'assets/models/cena_completa.glb'));
+  const glbBuffer = rawGlb.buffer.slice(rawGlb.byteOffset, rawGlb.byteOffset + rawGlb.byteLength);
+  const loader = new pkg.GlbSceneLoader();
+  const prepared = await loader.parseBuffer(glbBuffer, '');
+
+  const classifiedUuids = new Set();
+  for (const group of Object.values(prepared.materials)) {
+    if (Array.isArray(group)) {
+      for (const mat of group) classifiedUuids.add(mat.uuid);
+    }
+  }
+
+  let unclassifiedOpaque = 0;
+  let residualMetalnessMap = 0;
+  prepared.nodes.cidade.traverse((obj) => {
+    if (!obj.isMesh || !obj.visible) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      if (mat.metalnessMap) residualMetalnessMap += 1;
+      if (!mat.transparent && !classifiedUuids.has(mat.uuid)) unclassifiedOpaque += 1;
+    }
+  });
+  assert.equal(unclassifiedOpaque, 0, 'All visible opaque Cidade materials participate in atmosphere lighting');
+  assert.equal(residualMetalnessMap, 0, 'Baked ORM metalnessMap detached so scene.environment=null preserves diffuse albedo');
+  assert.ok(
+    prepared.materials.foliage.some((m) => /material\.006/i.test(m.name)),
+    'Large tree canopy Material.006 classified as foliage'
+  );
+  assert.ok(
+    prepared.materials.sidewalks.some((m) => /material\.010/i.test(m.name)),
+    'Courtyard ground slab Material.010 classified as sidewalk'
+  );
+
+  const ecsWorld = new pkg.World();
+  const baseCfg = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG);
+  const stage = pkg.UrbanGlbSceneBuilder.createStage(baseCfg, ecsWorld, prepared);
+  assert.ok(stage.ambientFill && stage.ambientFill.isAmbientLight, 'Dedicated UrbanAmbientFillLight present');
+
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(
+    stage,
+    Object.assign({}, baseCfg, {
+      atmosphere: 'day',
+      palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#213242', coolAmbient: '#9EB4C8', warmLight: '#C9A86A' })
+    }),
+    ecsWorld
+  );
+  const dayKey = stage.keyDirLight.intensity;
+  const dayHemi = stage.ambientHemi.intensity;
+  const dayAmb = stage.ambientFill.intensity;
+  const dayFog = stage.scene.fog.density;
+  const dayRoadScale = prepared.materials.roads[0].color.g;
+
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(
+    stage,
+    Object.assign({}, baseCfg, {
+      atmosphere: 'night',
+      palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#0E161F', coolAmbient: '#7D92A6', warmLight: '#5C8E92' })
+    }),
+    ecsWorld
+  );
+  const nightKey = stage.keyDirLight.intensity;
+  const nightHemi = stage.ambientHemi.intensity;
+  const nightAmb = stage.ambientFill.intensity;
+  const nightFog = stage.scene.fog.density;
+  const nightRoadScale = prepared.materials.roads[0].color.g;
+  const nightLamp = stage.urbanLightRig.streetLampWest.intensity;
+
+  pkg.UrbanGlbSceneBuilder.applyAtmosphere(
+    stage,
+    Object.assign({}, baseCfg, {
+      atmosphere: 'rain',
+      palette: Object.assign({}, pkg.DEFAULT_PALETTE, { background: '#111C27', coolAmbient: '#7890A6', warmLight: '#5A909C' })
+    }),
+    ecsWorld
+  );
+  const rainAmb = stage.ambientFill.intensity;
+  const rainFog = stage.scene.fog.density;
+  const rainLamp = stage.urbanLightRig.streetLampWest.intensity;
+
+  // Verify clear preset hierarchy: day wide sunlight >> storm/night, night local lamps >> day, rain fog > night > day
+  assert.ok(dayKey > nightKey * 2.0, `Day solar key (${dayKey}) > 2x night moonlight (${nightKey})`);
+  assert.ok(dayHemi > nightHemi * 1.5 && dayAmb > nightAmb * 1.8, 'Day sky/ambient fill markedly brighter than night');
+  assert.ok(dayRoadScale > 10.0 && nightRoadScale > 5.0 && dayRoadScale > nightRoadScale * 1.7, 'real_road 0.0084 linear albedo compensated cleanly in both day and night');
+  assert.ok(rainAmb > nightAmb && rainLamp > nightLamp && nightLamp > 15.0, 'Rain storm fill and wet lamp reflections stronger than dry night');
+  assert.ok(dayFog < nightFog && nightFog < rainFog, `Fog density hierarchy preserved: day (${dayFog}) < night (${nightFog}) < rain (${rainFog})`);
+
+  prepared.dispose();
+  loader.dispose();
+  pkg.LifecycleManager.disposeObject3D(stage.scene);
+});

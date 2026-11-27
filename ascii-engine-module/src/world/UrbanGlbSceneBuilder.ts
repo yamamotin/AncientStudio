@@ -97,6 +97,7 @@ export interface UrbanArchitecturalLightRig {
 
 export interface BuiltUrbanGlbStage {
   scene: THREE.Scene;
+  ambientFill: THREE.AmbientLight;
   ambientHemi: THREE.HemisphereLight;
   keyDirLight: THREE.DirectionalLight;
   rimDirLight: THREE.DirectionalLight;
@@ -494,8 +495,8 @@ export class UrbanGlbSceneBuilder {
     };
 
     // 1. Storefront Facade Lights, Warm Amber Transoms & Cyber-Cyan Neon Trim (`fachadas das lojas`)
-    // Tighter distance & quadratic-leaning decay carve crisp focal light islands surrounded by dark breathing space
-    const storefrontEastLight = new THREE.PointLight(new THREE.Color('#F4AA4C'), 9.2, 14.5, 1.78);
+    // Broad, smooth attenuation illuminates adjacent sidewalks, streets, and multi-story masonry facades
+    const storefrontEastLight = new THREE.PointLight(new THREE.Color('#F4AA4C'), 13.5, 24.0, 1.32);
     storefrontEastLight.position.set(-4.35, 3.05, -2.55);
     group.add(storefrontEastLight);
 
@@ -516,7 +517,7 @@ export class UrbanGlbSceneBuilder {
     eastNeonStrip.userData.skipObjectOutline = true;
     group.add(eastNeonStrip);
 
-    const storefrontWestLight = new THREE.PointLight(new THREE.Color('#ED9F44'), 8.8, 14.5, 1.78);
+    const storefrontWestLight = new THREE.PointLight(new THREE.Color('#ED9F44'), 12.8, 24.0, 1.32);
     storefrontWestLight.position.set(-13.35, 3.1, -1.75);
     group.add(storefrontWestLight);
 
@@ -535,7 +536,7 @@ export class UrbanGlbSceneBuilder {
     group.add(westNeonStrip);
 
     // Sidewalk Kiosk Warm Counter & Canopy Glow (casts vertical golden reflections onto foreground asphalt)
-    const kioskWarmLight = new THREE.PointLight(new THREE.Color('#F2B258'), 6.4, 11.5, 1.82);
+    const kioskWarmLight = new THREE.PointLight(new THREE.Color('#F2B258'), 9.4, 20.0, 1.35);
     kioskWarmLight.position.set(-3.42, 2.35, 3.65);
     group.add(kioskWarmLight);
 
@@ -551,7 +552,7 @@ export class UrbanGlbSceneBuilder {
     const lampGlobeGeo = new THREE.SphereGeometry(0.22, 10, 8);
     const lampGlobeMat = makeFixtureMat('#FFF4DC', '#FAD284', 1.82);
 
-    const streetLampWest = new THREE.PointLight(new THREE.Color('#F6C270'), 12.2, 19.0, 1.72);
+    const streetLampWest = new THREE.PointLight(new THREE.Color('#F6C270'), 17.5, 30.0, 1.28);
     streetLampWest.position.set(-17.99, 6.0, 3.14);
     group.add(streetLampWest);
 
@@ -563,9 +564,9 @@ export class UrbanGlbSceneBuilder {
 
     // Sleek curbside luminaire at `(-5.25, y, 4.00)` outside central player sightline, illuminating wet roadbed
     const poleMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color('#28323B'),
+      color: new THREE.Color('#3C4A56'),
       roughness: 0.52,
-      metalness: 0.35,
+      metalness: 0.18,
     });
     const postGeo = new THREE.CylinderGeometry(0.06, 0.085, 5.35, 8);
     const postMesh = new THREE.Mesh(postGeo, poleMat);
@@ -581,7 +582,7 @@ export class UrbanGlbSceneBuilder {
     armMesh.position.set(-5.25, 5.42, 4.3);
     group.add(armMesh);
 
-    const streetLampCenter = new THREE.PointLight(new THREE.Color('#F2BA68'), 10.6, 16.5, 1.76);
+    const streetLampCenter = new THREE.PointLight(new THREE.Color('#F2BA68'), 15.6, 28.0, 1.28);
     streetLampCenter.position.set(-5.25, 5.25, 4.58);
     group.add(streetLampCenter);
 
@@ -591,7 +592,7 @@ export class UrbanGlbSceneBuilder {
     globeCenter.userData.skipObjectOutline = true;
     group.add(globeCenter);
 
-    const streetLampEast = new THREE.PointLight(new THREE.Color('#ECAF5E'), 9.2, 16.0, 1.76);
+    const streetLampEast = new THREE.PointLight(new THREE.Color('#ECAF5E'), 13.8, 28.0, 1.28);
     streetLampEast.position.set(8.4, 6.0, 4.83);
     group.add(streetLampEast);
 
@@ -602,7 +603,7 @@ export class UrbanGlbSceneBuilder {
     group.add(globeEast);
 
     // 3. Distant West Avenue Cyber-Slate Beacon (depth layering light point in upper-left background)
-    const avenueBeaconLight = new THREE.PointLight(new THREE.Color('#5CA8BA'), 5.8, 17.5, 1.75);
+    const avenueBeaconLight = new THREE.PointLight(new THREE.Color('#5CA8BA'), 8.8, 26.0, 1.32);
     avenueBeaconLight.position.set(-27.2, 4.8, 1.6);
     group.add(avenueBeaconLight);
 
@@ -642,18 +643,22 @@ export class UrbanGlbSceneBuilder {
     const scene = new THREE.Scene();
     const bgColor = new THREE.Color(config.palette.background);
     scene.background = bgColor;
-    scene.fog = new THREE.FogExp2(bgColor.getHex(), 0.015);
+    scene.fog = new THREE.FogExp2(bgColor.getHex(), 0.011);
+
+    const ambientFill = new THREE.AmbientLight(new THREE.Color('#6E88A4'), 0.56);
+    ambientFill.name = 'UrbanAmbientFillLight';
+    scene.add(ambientFill);
 
     const ambientHemi = new THREE.HemisphereLight(
       new THREE.Color(config.palette.coolAmbient),
-      new THREE.Color('#090E13'),
-      0.78
+      new THREE.Color('#2C3C4C'),
+      1.58
     );
     scene.add(ambientHemi);
 
     const keyDirLight = new THREE.DirectionalLight(
-      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#C8D6E2'), 0.45),
-      1.48
+      new THREE.Color(config.palette.coolAmbient).lerp(new THREE.Color('#C8DCF0'), 0.55),
+      2.15
     );
     keyDirLight.name = 'KeyDirectionalLight';
     keyDirLight.position.set(16, 28, 18);
@@ -675,7 +680,7 @@ export class UrbanGlbSceneBuilder {
 
     const rimDirLight = new THREE.DirectionalLight(
       new THREE.Color(config.palette.warmLight),
-      0.54
+      1.08
     );
     rimDirLight.name = 'RimDirectionalLight';
     rimDirLight.position.set(-20, 14, -15);
@@ -702,6 +707,7 @@ export class UrbanGlbSceneBuilder {
 
     const stage: BuiltUrbanGlbStage = {
       scene,
+      ambientFill,
       ambientHemi,
       keyDirLight,
       rimDirLight,
@@ -1022,7 +1028,7 @@ export class UrbanGlbSceneBuilder {
     const fog = stage.scene.fog as THREE.FogExp2 | null;
     if (fog && fog.isFogExp2) {
       fog.color.copy(bg);
-      fog.density = mode === 'rain' ? 0.023 : mode === 'day' ? 0.01 : 0.015;
+      fog.density = mode === 'rain' ? 0.0205 : mode === 'day' ? 0.0055 : 0.011;
     }
 
     const cool = new THREE.Color(config.palette.coolAmbient);
@@ -1030,88 +1036,99 @@ export class UrbanGlbSceneBuilder {
     const rig = stage.urbanLightRig;
 
     if (mode === 'day') {
-      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#D5E2EC'), 0.55);
-      stage.ambientHemi.groundColor.set('#222D36');
-      stage.ambientHemi.intensity = 1.55;
+      // Bright, open sunlit urban day: clear sky fill, warm solar key, and opposite-azimuth bounce
+      // so streets, sidewalks, shaded facades, trees, Player_Rig, and Carro_Grupo read effortlessly
+      stage.ambientFill.color.set('#D6E4F0');
+      stage.ambientFill.intensity = 1.15;
 
-      stage.keyDirLight.color.set('#E2ECF4');
-      stage.keyDirLight.intensity = 2.95;
-      stage.keyDirLight.position.set(18, 32, 16);
+      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#E4F0FA'), 0.72);
+      stage.ambientHemi.groundColor.set('#6E7F8E');
+      stage.ambientHemi.intensity = 2.85;
 
-      stage.rimDirLight.color.copy(cool);
-      stage.rimDirLight.intensity = 0.68;
+      stage.keyDirLight.color.set('#FFF6E8');
+      stage.keyDirLight.intensity = 4.65;
+      stage.keyDirLight.position.set(20, 34, 18);
 
-      rig.storefrontEastLight.intensity = 1.25;
-      rig.storefrontWestLight.intensity = 1.15;
-      rig.kioskWarmLight.intensity = 0.85;
-      rig.streetLampWest.intensity = 1.05;
-      rig.streetLampCenter.intensity = 0.95;
-      rig.streetLampEast.intensity = 0.85;
-      rig.avenueBeaconLight.intensity = 0.7;
+      stage.rimDirLight.color.copy(cool).lerp(new THREE.Color('#C6DCF0'), 0.55);
+      stage.rimDirLight.intensity = 1.75;
+
+      rig.storefrontEastLight.intensity = 1.4;
+      rig.storefrontWestLight.intensity = 1.3;
+      rig.kioskWarmLight.intensity = 0.95;
+      rig.streetLampWest.intensity = 1.15;
+      rig.streetLampCenter.intensity = 1.05;
+      rig.streetLampEast.intensity = 0.95;
+      rig.avenueBeaconLight.intensity = 0.75;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 0.24;
+        m.emissiveIntensity = 0.28;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 1.1;
+        stage.playerRimLight.intensity = 1.65;
       }
     } else if (mode === 'rain') {
-      // Stormy Cyber-Noir: cohesive moonlit storm fill keeps distant facades & roofs legible around wet focal pools
-      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#9EB2C2'), 0.25);
-      stage.ambientHemi.groundColor.set('#0E151C');
-      stage.ambientHemi.intensity = 0.58;
+      // Stormy Cyber-Noir: cool overcast storm-cloud wash + intense wet-asphalt reflection pools
+      stage.ambientFill.color.set('#7B9AB8');
+      stage.ambientFill.intensity = 0.72;
 
-      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#ACC0D2'), 0.42);
-      stage.keyDirLight.intensity = 1.02;
+      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#B0CAE2'), 0.56);
+      stage.ambientHemi.groundColor.set('#34485C');
+      stage.ambientHemi.intensity = 1.92;
+
+      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C2DAF0'), 0.58);
+      stage.keyDirLight.intensity = 2.48;
       stage.keyDirLight.position.set(14, 27, 18);
 
-      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#8AB4C4'), 0.35);
-      stage.rimDirLight.intensity = 0.62;
+      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#92C2DA'), 0.52);
+      stage.rimDirLight.intensity = 1.38;
 
-      rig.storefrontEastLight.intensity = 11.4;
-      rig.storefrontWestLight.intensity = 10.8;
-      rig.kioskWarmLight.intensity = 8.0;
-      rig.streetLampWest.intensity = 15.0;
-      rig.streetLampCenter.intensity = 13.2;
-      rig.streetLampEast.intensity = 11.4;
-      rig.avenueBeaconLight.intensity = 7.6;
+      rig.storefrontEastLight.intensity = 15.2;
+      rig.storefrontWestLight.intensity = 14.4;
+      rig.kioskWarmLight.intensity = 10.6;
+      rig.streetLampWest.intensity = 19.6;
+      rig.streetLampCenter.intensity = 17.4;
+      rig.streetLampEast.intensity = 15.2;
+      rig.avenueBeaconLight.intensity = 9.8;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.88;
+        m.emissiveIntensity = 1.95;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.9;
+        stage.playerRimLight.intensity = 4.1;
       }
     } else {
-      // 'night' — balanced nocturnal skyline fill keeps architectural volumes whole & readable around warm pools
-      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#B2C4D4'), 0.28);
-      stage.ambientHemi.groundColor.set('#101720');
-      stage.ambientHemi.intensity = 0.66;
+      // 'night' — darker than day yet genuinely legible: moonlit skyline + broad warm street/facade pools
+      stage.ambientFill.color.set('#6E88A4');
+      stage.ambientFill.intensity = 0.56;
 
-      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C8D8E6'), 0.45);
-      stage.keyDirLight.intensity = 1.15;
+      stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#9AB4CC'), 0.48);
+      stage.ambientHemi.groundColor.set('#2C3C4C');
+      stage.ambientHemi.intensity = 1.58;
+
+      stage.keyDirLight.color.copy(cool).lerp(new THREE.Color('#C8DCF0'), 0.55);
+      stage.keyDirLight.intensity = 2.15;
       stage.keyDirLight.position.set(16, 28, 18);
 
-      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#96B8C4'), 0.3);
-      stage.rimDirLight.intensity = 0.58;
+      stage.rimDirLight.color.copy(warm).lerp(new THREE.Color('#88B4C6'), 0.42);
+      stage.rimDirLight.intensity = 1.08;
 
-      rig.storefrontEastLight.intensity = 9.8;
-      rig.storefrontWestLight.intensity = 9.4;
-      rig.kioskWarmLight.intensity = 6.8;
-      rig.streetLampWest.intensity = 12.8;
-      rig.streetLampCenter.intensity = 11.2;
-      rig.streetLampEast.intensity = 9.8;
-      rig.avenueBeaconLight.intensity = 6.4;
+      rig.storefrontEastLight.intensity = 13.5;
+      rig.storefrontWestLight.intensity = 12.8;
+      rig.kioskWarmLight.intensity = 9.4;
+      rig.streetLampWest.intensity = 17.5;
+      rig.streetLampCenter.intensity = 15.6;
+      rig.streetLampEast.intensity = 13.8;
+      rig.avenueBeaconLight.intensity = 8.8;
       for (const m of rig.emissiveFixtureMaterials) {
-        m.emissiveIntensity = 1.62;
+        m.emissiveIntensity = 1.72;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.6;
+        stage.playerRimLight.intensity = 3.8;
       }
     }
 
     stage.keyDirLight.castShadow = config.enableShadows;
     (stage.waypointMarker.material as THREE.MeshBasicMaterial).color.copy(warm);
 
-    // Update road wetness, dark breathing base albedo, normal-map scale, character/car contrast & emissives
+    // Update road wetness, calibrated linear albedo (`real_road` WebP is 0.0084 linear), normal relief & emissives
     if (stage.assets) {
       const applyScaledNormal = (mat: THREE.MeshStandardMaterial, factor: number): void => {
         if (!mat.normalMap || !mat.normalScale) return;
@@ -1126,42 +1143,76 @@ export class UrbanGlbSceneBuilder {
         mat.normalScale.set(baseX * factor, baseY * factor);
       };
 
-      const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.26;
-      const roadMetalness = mode === 'rain' ? 0.42 : mode === 'day' ? 0.04 : 0.28;
-      const roadBaseHex = mode === 'day' ? '#E4E9EE' : mode === 'rain' ? '#58626C' : '#646F7A';
-      // Rain film levels micro-pores on asphalt while keeping macro aggregate relief
+      const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.28;
+      const roadMetalness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.04 : 0.12;
+      // Compensate `real_road` embedded texture's 0.0084 linear albedo while keeping full aggregate texture detail
+      const roadColorScale: [number, number, number] =
+        mode === 'day'
+          ? [11.5, 12.2, 13.0]
+          : mode === 'rain'
+            ? [5.2, 5.9, 6.8]
+            : [5.8, 6.4, 7.2];
+      const roadEmissiveIntensity = mode === 'day' ? 0.03 : mode === 'rain' ? 0.09 : 0.08;
       const roadNormalFactor = mode === 'rain' ? 0.62 : mode === 'day' ? 1.08 : 0.92;
       for (const mat of stage.assets.materials.roads) {
         mat.roughness = roadRoughness;
         mat.metalness = roadMetalness;
-        mat.color.set(roadBaseHex);
+        mat.color.setRGB(roadColorScale[0], roadColorScale[1], roadColorScale[2]);
+        if (mat.emissive) {
+          mat.emissive.set(mode === 'day' ? '#2A3642' : '#121D28');
+          mat.emissiveIntensity = roadEmissiveIntensity;
+        }
         applyScaledNormal(mat, roadNormalFactor);
       }
 
-      const sidewalkRoughness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.88 : 0.38;
-      const sidewalkMetalness = mode === 'rain' ? 0.32 : mode === 'day' ? 0.05 : 0.18;
-      const sidewalkBaseHex = mode === 'day' ? '#E8EDF2' : mode === 'rain' ? '#707B86' : '#7C8894';
+      const sidewalkRoughness = mode === 'rain' ? 0.16 : mode === 'day' ? 0.86 : 0.38;
+      const sidewalkMetalness = mode === 'rain' ? 0.16 : mode === 'day' ? 0.04 : 0.1;
+      const sidewalkColorScale: [number, number, number] =
+        mode === 'day'
+          ? [1.42, 1.48, 1.54]
+          : mode === 'rain'
+            ? [0.98, 1.08, 1.18]
+            : [1.04, 1.12, 1.2];
+      const sidewalkEmissive = mode === 'day' ? 0.02 : mode === 'rain' ? 0.07 : 0.06;
       const sidewalkNormalFactor = mode === 'rain' ? 0.74 : mode === 'day' ? 1.08 : 0.96;
       for (const mat of stage.assets.materials.sidewalks) {
         mat.roughness = sidewalkRoughness;
         mat.metalness = sidewalkMetalness;
-        mat.color.set(sidewalkBaseHex);
+        mat.color.setRGB(
+          sidewalkColorScale[0],
+          sidewalkColorScale[1],
+          sidewalkColorScale[2]
+        );
+        if (mat.emissive) {
+          mat.emissive.set('#16222E');
+          mat.emissiveIntensity = sidewalkEmissive;
+        }
         applyScaledNormal(mat, sidewalkNormalFactor);
       }
 
-      // Keep nocturnal roofs/walls cohesive & readable while preserving directional masonry/seam normal relief
-      const wallBaseHex = mode === 'day' ? '#F2F5F8' : mode === 'rain' ? '#92A0AD' : '#9EACB8';
+      // Keep architectural walls, roofs, lampposts & urban props cohesive and sculpted across all 3 presets
+      const wallColorScale: [number, number, number] =
+        mode === 'day'
+          ? [1.3, 1.35, 1.4]
+          : mode === 'rain'
+            ? [0.96, 1.06, 1.16]
+            : [1.02, 1.1, 1.18];
+      const wallEmissive = mode === 'day' ? 0.05 : mode === 'rain' ? 0.1 : 0.09;
       const wallNormalFactor = mode === 'day' ? 1.15 : mode === 'rain' ? 0.98 : 1.08;
       for (const mat of stage.assets.materials.walls) {
-        mat.color.set(wallBaseHex);
+        mat.color.setRGB(wallColorScale[0], wallColorScale[1], wallColorScale[2]);
+        if (mat.emissive) {
+          mat.emissive.set(mode === 'day' ? '#243240' : '#16222E');
+          mat.emissiveIntensity = wallEmissive;
+        }
         applyScaledNormal(mat, wallNormalFactor);
       }
 
       // Protagonist (`Player_Rig`) sculpted contrast across day / night / rain
-      const charEmissive = mode === 'day' ? 0.08 : mode === 'rain' ? 0.34 : 0.28;
+      const charEmissive = mode === 'day' ? 0.14 : mode === 'rain' ? 0.36 : 0.3;
       const charNormalFactor = mode === 'day' ? 1.08 : 1.0;
       for (const mat of stage.assets.materials.character) {
-        mat.color.set(mode === 'day' ? '#DCE6F0' : '#E6F0F8');
+        mat.color.set(mode === 'day' ? '#E6EFF7' : '#EBF3FA');
         applyScaledNormal(mat, charNormalFactor);
         if (mat.emissive) {
           mat.emissive.set('#2C4456');
@@ -1170,9 +1221,10 @@ export class UrbanGlbSceneBuilder {
       }
 
       // Vehicle (`Carro_Grupo`) clear silhouette response during its 8s active pass
-      const carEmissive = mode === 'day' ? 0.06 : mode === 'rain' ? 0.28 : 0.24;
+      const carEmissive = mode === 'day' ? 0.14 : mode === 'rain' ? 0.3 : 0.26;
       const carNormalFactor = mode === 'rain' ? 0.88 : 1.0;
       for (const mat of stage.assets.materials.carBody) {
+        mat.color.set(mode === 'day' ? '#D8E4EE' : '#CEDCE8');
         applyScaledNormal(mat, carNormalFactor);
         if (mat.emissive) {
           mat.emissive.set('#1F3140');
@@ -1181,7 +1233,7 @@ export class UrbanGlbSceneBuilder {
       }
 
       // Warm golden-amber window glow on storefronts & upper stories (`Q 8 $ # o a` reference look)
-      const windowGlow = mode === 'day' ? 0.06 : mode === 'rain' ? 0.82 : 0.72;
+      const windowGlow = mode === 'day' ? 0.12 : mode === 'rain' ? 0.92 : 0.85;
       const windowAmber = new THREE.Color('#ECA84C');
       for (const mat of stage.assets.materials.windows) {
         if (mat.emissive) {
@@ -1190,7 +1242,7 @@ export class UrbanGlbSceneBuilder {
         }
       }
 
-      const kioskGlow = mode === 'day' ? 0.08 : mode === 'rain' ? 0.68 : 0.58;
+      const kioskGlow = mode === 'day' ? 0.12 : mode === 'rain' ? 0.76 : 0.68;
       const kioskAmber = new THREE.Color('#E2A24A');
       for (const mat of stage.assets.materials.kioskGlass) {
         if (mat.emissive) {
@@ -1200,7 +1252,7 @@ export class UrbanGlbSceneBuilder {
       }
 
       // Subtle background rooftop billboard glow for depth layering
-      const billboardGlow = mode === 'day' ? 0.04 : mode === 'rain' ? 0.42 : 0.34;
+      const billboardGlow = mode === 'day' ? 0.08 : mode === 'rain' ? 0.48 : 0.42;
       const billboardTint = new THREE.Color('#5AA6B8');
       for (const mat of stage.assets.materials.billboards) {
         if (mat.emissive) {
@@ -1209,17 +1261,24 @@ export class UrbanGlbSceneBuilder {
         }
       }
 
-      // Contained dark-emerald / moss-sage lift on foliage & ground grass beds
-      const foliageLift = mode === 'day' ? 0.02 : mode === 'rain' ? 0.12 : 0.1;
-      const mossEmissive = new THREE.Color('#1E4A30');
+      // Readable emerald / moss-sage canopies & ground grass beds across all 3 atmospheres
+      const foliageColorScale: [number, number, number] =
+        mode === 'day'
+          ? [1.38, 1.54, 1.32]
+          : mode === 'rain'
+            ? [1.04, 1.18, 1.08]
+            : [1.06, 1.2, 1.06];
+      const foliageLift = mode === 'day' ? 0.12 : mode === 'rain' ? 0.2 : 0.18;
+      const mossEmissive = new THREE.Color(mode === 'day' ? '#234E34' : '#1E4A30');
       for (const mat of stage.assets.materials.foliage) {
+        mat.color.setRGB(foliageColorScale[0], foliageColorScale[1], foliageColorScale[2]);
         if (mat.emissive) {
           mat.emissive.copy(mossEmissive);
           mat.emissiveIntensity = foliageLift;
         }
       }
 
-      const lampScale = mode === 'day' ? 0.18 : mode === 'rain' ? 1.28 : 1.15;
+      const lampScale = mode === 'day' ? 0.22 : mode === 'rain' ? 1.38 : 1.25;
       for (const mat of stage.assets.materials.streetLamps) {
         mat.emissiveIntensity = lampScale;
       }
@@ -1231,28 +1290,28 @@ export class UrbanGlbSceneBuilder {
       if (traffic) {
         if (mode === 'day') {
           traffic.baseSpotIntensity = 5.5;
-          traffic.basePointIntensity = 2.8;
-          traffic.baseTailIntensity = 0.8;
-          traffic.baseLensEmissive = 0.65;
-          traffic.baseHaloOpacity = 0.12;
+          traffic.basePointIntensity = 3.2;
+          traffic.baseTailIntensity = 1.0;
+          traffic.baseLensEmissive = 0.95;
+          traffic.baseHaloOpacity = 0.18;
           traffic.baseConeOpacity = 0.0;
-          traffic.baseRoadPoolOpacity = 0.04;
+          traffic.baseRoadPoolOpacity = 0.06;
         } else if (mode === 'rain') {
-          traffic.baseSpotIntensity = 68.0;
-          traffic.basePointIntensity = 30.0;
-          traffic.baseTailIntensity = 4.2;
-          traffic.baseLensEmissive = 4.6;
-          traffic.baseHaloOpacity = 0.78;
-          traffic.baseConeOpacity = 0.30;
-          traffic.baseRoadPoolOpacity = 0.48;
+          traffic.baseSpotIntensity = 72.0;
+          traffic.basePointIntensity = 32.0;
+          traffic.baseTailIntensity = 4.5;
+          traffic.baseLensEmissive = 4.8;
+          traffic.baseHaloOpacity = 0.82;
+          traffic.baseConeOpacity = 0.32;
+          traffic.baseRoadPoolOpacity = 0.52;
         } else {
-          traffic.baseSpotIntensity = 54.0;
-          traffic.basePointIntensity = 24.0;
-          traffic.baseTailIntensity = 3.4;
-          traffic.baseLensEmissive = 4.0;
-          traffic.baseHaloOpacity = 0.64;
-          traffic.baseConeOpacity = 0.22;
-          traffic.baseRoadPoolOpacity = 0.36;
+          traffic.baseSpotIntensity = 58.0;
+          traffic.basePointIntensity = 26.0;
+          traffic.baseTailIntensity = 3.6;
+          traffic.baseLensEmissive = 4.2;
+          traffic.baseHaloOpacity = 0.68;
+          traffic.baseConeOpacity = 0.24;
+          traffic.baseRoadPoolOpacity = 0.4;
         }
       }
     }
