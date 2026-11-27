@@ -45,7 +45,9 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _CNJ_FORMATTED_RE = re.compile(r"^(\d{7})-(\d{2})\.(\d{4})\.(\d)\.(\d{2})\.(\d{4})$")
 _CPF_INLINE_RE = re.compile(r"\b(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})\b")
 _CNPJ_INLINE_RE = re.compile(r"\b(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})\b")
-_EMAIL_INLINE_RE = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+_EMAIL_INLINE_RE = re.compile(
+    r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
 
 
 def clean_digits(value: str | None) -> str:
@@ -103,6 +105,25 @@ def is_valid_cpf(raw_cpf: str | None) -> bool:
     return check_second == int(digits[10])
 
 
+def is_valid_cnpj(raw_cnpj: str | None) -> bool:
+    """Verify Brazilian 14-digit CNPJ length, non-uniformity, and both mod-11 check digits."""
+    digits = clean_digits(raw_cnpj)
+    if len(digits) != 14 or len(set(digits)) == 1:
+        return False
+
+    weights_first = (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    weights_second = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+
+    rem_first = sum(int(digits[idx]) * weights_first[idx] for idx in range(12)) % 11
+    check_first = 0 if rem_first < 2 else 11 - rem_first
+    if check_first != int(digits[12]):
+        return False
+
+    rem_second = sum(int(digits[idx]) * weights_second[idx] for idx in range(13)) % 11
+    check_second = 0 if rem_second < 2 else 11 - rem_second
+    return check_second == int(digits[13])
+
+
 def validate_cpf(raw_cpf: str | None) -> str:
     """Return 11 canonical CPF digits or raise ``ConnectorValidationError`` (HTTP 422)."""
     digits = clean_digits(raw_cpf)
@@ -114,11 +135,31 @@ def validate_cpf(raw_cpf: str | None) -> str:
     return digits
 
 
+def validate_cpf_or_cnpj(raw_document: str | None) -> tuple[str, str]:
+    """Return ``(digits, 'CPF' | 'CNPJ')`` or raise ``ConnectorValidationError`` (HTTP 422)."""
+    digits = clean_digits(raw_document)
+    if len(digits) == 11 and is_valid_cpf(digits):
+        return digits, "CPF"
+    if len(digits) == 14 and is_valid_cnpj(digits):
+        return digits, "CNPJ"
+    raise ConnectorValidationError(
+        "Documento inválido: informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.",
+        extra={"field": "cpf"},
+    )
+
+
 def format_cpf(cpf_digits: str) -> str:
     digits = clean_digits(cpf_digits)
     if len(digits) != 11:
         return digits
     return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+
+
+def format_cnpj(cnpj_digits: str) -> str:
+    digits = clean_digits(cnpj_digits)
+    if len(digits) != 14:
+        return digits
+    return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
 
 
 def mask_cpf(raw_cpf: str | None) -> str:

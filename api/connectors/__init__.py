@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from api.connectors.bcb import BCBConnectorService
 from api.connectors.cache import ConnectorTTLCache, TTLCacheStats
 from api.connectors.errors import (
+    ConnectorCaptchaRequiredError,
     ConnectorError,
     ConnectorNotFoundError,
     ConnectorValidationError,
@@ -14,18 +15,24 @@ from api.connectors.errors import (
 )
 from api.connectors.http_client import HttpResponse, HttpTransport, UrllibHttpTransport
 from api.connectors.projudi import (
+    ProjudiBootstrapHtmlParser,
     ProjudiConnectorService,
     ProjudiPublicHtmlParser,
+    parse_projudi_detail_html,
+    parse_projudi_parties_cell,
     parse_projudi_search_html,
+    parse_projudi_search_result,
 )
-from api.connectors.siscomex import SiscomexNCMService
+from api.connectors.siscomex import SiscomexNCMService, parse_sijut2_solucoes_html
 from api.connectors.transparencia import MunicipalTransparencyService
 from api.connectors.validators import (
     VALID_BRAZILIAN_UFS,
     clean_digits,
     compute_cnj_check_digits,
     format_cnj_number,
+    format_cnpj,
     format_cpf,
+    is_valid_cnpj,
     is_valid_cpf,
     mask_cnpj,
     mask_cpf,
@@ -34,6 +41,7 @@ from api.connectors.validators import (
     strip_accents,
     validate_cnj_process_number,
     validate_cpf,
+    validate_cpf_or_cnpj,
     validate_uf,
 )
 
@@ -53,7 +61,7 @@ def create_public_connectors(
     *,
     transport: HttpTransport | None = None,
     cache: ConnectorTTLCache | None = None,
-    timeout_seconds: float = 3.2,
+    timeout_seconds: float = 4.0,
     transparencia_api_key: str | None = None,
 ) -> PublicConnectorsRegistry:
     shared_cache = cache or ConnectorTTLCache(default_ttl_seconds=900.0, max_entries=512)
@@ -86,6 +94,7 @@ def create_public_connectors(
 
 __all__ = [
     "BCBConnectorService",
+    "ConnectorCaptchaRequiredError",
     "ConnectorError",
     "ConnectorNotFoundError",
     "ConnectorTTLCache",
@@ -93,6 +102,7 @@ __all__ = [
     "HttpResponse",
     "HttpTransport",
     "MunicipalTransparencyService",
+    "ProjudiBootstrapHtmlParser",
     "ProjudiConnectorService",
     "ProjudiPublicHtmlParser",
     "PublicConnectorsRegistry",
@@ -105,15 +115,22 @@ __all__ = [
     "compute_cnj_check_digits",
     "create_public_connectors",
     "format_cnj_number",
+    "format_cnpj",
     "format_cpf",
+    "is_valid_cnpj",
     "is_valid_cpf",
     "mask_cnpj",
     "mask_cpf",
     "mask_sensitive_text",
     "normalize_search_text",
+    "parse_projudi_detail_html",
+    "parse_projudi_parties_cell",
     "parse_projudi_search_html",
+    "parse_projudi_search_result",
+    "parse_sijut2_solucoes_html",
     "strip_accents",
     "validate_cnj_process_number",
     "validate_cpf",
+    "validate_cpf_or_cnpj",
     "validate_uf",
 ]
