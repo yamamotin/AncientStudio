@@ -285,7 +285,10 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     // Favor foreground sub-quadrant when a thin character/vehicle contour crosses the cell
     float fgSnap = smoothstep(0.014, 0.055, linCenterOnly - linSubMin);
     float centerLinDepth = mix(linCenterOnly, linSubMin, fgSnap * 0.72);
-    float isGeometry = step(mix(rawCenterDepth, minSubRawDepth, fgSnap * 0.72), 0.9994);
+    // Perspective depth is nonlinear: 0.9994 already excludes valid distant
+    // geometry. Only the cleared far-plane value (1.0) represents empty sky.
+    float foregroundDepth = min(rawCenterDepth, minSubRawDepth);
+    float isGeometry = 1.0 - step(0.9999999, foregroundDepth);
     float subDepthPeak = clamp((linSubMax - linSubMin) * 9.5, 0.0, 1.15) * isGeometry;
 
     // 2. Atmospheric Depth Layering & Far-Plane Suppression (dark background with light points)

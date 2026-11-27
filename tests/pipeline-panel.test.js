@@ -308,6 +308,7 @@ test('CSP and referrer policy restrict origins to self and the GitHub public API
     "connect-src 'self' https://api.github.com",
     "form-action 'self'"
   ]);
-  assert.doesNotMatch(policy, /unsafe-inline|unsafe-eval|\*/);
+  // wasm-unsafe-eval permits Draco WebAssembly, not JavaScript unsafe-eval.
+  assert.doesNotMatch(policy, /'unsafe-inline'|'unsafe-eval'|\*/);
   assert.match(html, /<meta name="referrer" content="strict-origin-when-cross-origin">/);
 });

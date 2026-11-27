@@ -255,6 +255,8 @@ export interface CameraFollowComponent {
   maxDistance?: number;
   targetDistance?: number;
   currentDistance?: number;
+  /** World-space visible environment bounds for zooming out to an overview. */
+  overviewBounds?: THREE.Box3;
   /** Exponential damping rate (1/s) and meters-per-wheel-notch step for smooth zoom */
   zoomSmoothing?: number;
   zoomSpeed?: number;

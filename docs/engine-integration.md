@@ -44,7 +44,7 @@ var scene = TP.scene.create(container, { preset: 'night', weather: true });
 scene.mount()            // Promise<boolean>; false means fallback
 scene.setPaused(bool)
 scene.setPreset('day')   // only 'day' | 'night' | 'rain'
-scene.setAutoOrbit(true) // synthetic pointer movement drives camera rotation
+scene.setAutoOrbit(true) // engine camera drives the orbit
 scene.getCellSizeRange() // { min: 2, max: mountedCellPx, current, stops }
 scene.setCellSize(2.5)   // fine 0.25px (<6px) / 0.5px (>6px) stops up to mounted max
 scene.resetCellSize()    // restores initial mounted cell size & density config
@@ -122,9 +122,10 @@ light halos, wet reflections and rain particles (`uHighlightGlyphs`), grounded 3
 shaded tonal underlayers (`smoothBackdrop` + `tonedUnderlayer`), foreground-scoped
 depth-silhouette separation moats (`silhouetteOuterMoat` / `silhouetteInnerRim`),
 normal-perturbed vertical rippled ground reflections (`sampleGroundReflection`),
-and smooth damped mouse scroll-wheel zoom (`minDistance: 8.2m`, `maxDistance:
-31.5m`, baseline `~19.65m`) along the 3rd-person camera sightline without
-interfering with `WASD` or `setAutoOrbit`.
+and smooth damped mouse scroll-wheel zoom (`minDistance: 8.2m`, baseline `~19.65m`).
+The maximum distance is fitted to the visible GLB bounds and viewport aspect;
+the look target blends from the player to the city center at overview scale.
+WASD and `setAutoOrbit` continue to work.
 The adapter maps the three UI buttons (`day`, `night`, `rain`) to genuinely
 differentiated lighting (`UrbanAmbientFillLight` + `HemisphereLight` +
 `KeyDirectionalLight` + `RimDirectionalLight` + broad smooth-decay storefront &
@@ -177,6 +178,11 @@ Frontend integration is intentionally pending after 2026-11-25.
   2. `SceneGlbLoader.load('./assets/models/cena_completa.glb')` downloads the `.glb` (`ArrayBuffer`) and calls `gltfLoader.parseAsync()`, dispatching all `154` Draco mesh primitives (`498,351` unique vertices, `438,122` triangles) via zero-copy `Transferable` `ArrayBuffer`s across the 4 WebAssembly Workers off the main UI thread while the browser decodes the `77` `EXT_texture_webp` textures asynchronously.
   3. On `TP.scene.destroy()` / `loader.dispose()`, all 4 Web Workers are terminated (`worker.terminate()`), the `blob:` URL is revoked (`URL.revokeObjectURL`), and GPU geometries/materials/textures are disposed via `LifecycleManager.disposeObject3D`.
 - End-to-end benchmark: `node scripts/benchmark-site-load.js` and `tests/benchmark-site-load.test.js`.
+
+The document CSP permits self-hosted Draco's blob worker and WebAssembly compilation,
+and blob image/fetch URLs used by GLTFLoader for embedded WebP textures. It does not
+permit remote scripts or wildcard origins. If GLB loading fails, the adapter shows
+the fallback instead of reporting an empty stage as a loaded scene.
 
 ## Render pipeline notes
 
