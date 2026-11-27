@@ -340,6 +340,14 @@ window.TP = window.TP || {};
           if (isBackendOfflineError(error, backendOnline) && TP.api) {
             var simExt = await TP.api.extract();
             renderResponse(simExt.data, simExt, 'extract-meta', 'extract-output');
+          } else if (TP.captcha && TP.captcha.isRequired(error)) {
+            // Any /api/v1 answer may carry a challenge, not only the PROJUDI routes.
+            await resolveCaptchaAndResend(
+              error,
+              function () { return client.datasetSummary('ledger'); },
+              'extract-meta',
+              'extract-output'
+            );
           } else {
             renderError(error, 'extract-meta', 'extract-output');
           }
@@ -376,6 +384,13 @@ window.TP = window.TP || {};
               event_id: 'evt-ui-3522'
             });
             renderResponse(simInv.data, simInv, 'invoice-meta', 'invoice-output');
+          } else if (TP.captcha && TP.captcha.isRequired(error)) {
+            await resolveCaptchaAndResend(
+              error,
+              function () { return client.submitInvoice(sampleInvoice); },
+              'invoice-meta',
+              'invoice-output'
+            );
           } else {
             renderError(error, 'invoice-meta', 'invoice-output');
           }
@@ -403,7 +418,22 @@ window.TP = window.TP || {};
           );
           renderResponse(result.data, result, 'workflow-meta', 'workflow-output');
         } catch (error) {
-          renderError(error, 'workflow-meta', 'workflow-output');
+          if (TP.captcha && TP.captcha.isRequired(error)) {
+            await resolveCaptchaAndResend(
+              error,
+              function () {
+                return client.runWorkflow(
+                  'invoice-enrichment',
+                  { payload: { invoice_key: sampleInvoice.invoice_key } },
+                  apiKey()
+                );
+              },
+              'workflow-meta',
+              'workflow-output'
+            );
+          } else {
+            renderError(error, 'workflow-meta', 'workflow-output');
+          }
         } finally {
           workflowRun.disabled = false;
         }
@@ -430,7 +460,16 @@ window.TP = window.TP || {};
           var result = await client.workflowStatus(executionId, apiKey());
           renderResponse(result.data, result, 'workflow-meta', 'workflow-output');
         } catch (error) {
-          renderError(error, 'workflow-meta', 'workflow-output');
+          if (TP.captcha && TP.captcha.isRequired(error)) {
+            await resolveCaptchaAndResend(
+              error,
+              function () { return client.workflowStatus(executionId, apiKey()); },
+              'workflow-meta',
+              'workflow-output'
+            );
+          } else {
+            renderError(error, 'workflow-meta', 'workflow-output');
+          }
         } finally {
           workflowStatus.disabled = false;
         }

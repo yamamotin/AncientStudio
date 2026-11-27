@@ -53,7 +53,7 @@ Consulta processos públicos cíveis/fazendários por CPF (11 dígitos) ou CNPJ 
 ```
 
 **Fluxo do popup no cliente (`assets/js/captcha.js`):**
-1. Qualquer chamada de conector que responda `422` + `code: "CAPTCHA_REQUIRED"` abre o `<dialog id="captcha-dialog">` com `provider`, `site_key`, `portal_url`/`form_url`, `instructions` e a contagem do TTL (`expires_at`, 5 min quando ausente).
+1. Qualquer chamada a `/api/v1` (conectores PROJUDI, ETL, gateway fiscal, BCB, Siscomex, workflows) que responda `422` + `code: "CAPTCHA_REQUIRED"` abre o `<dialog id="captcha-dialog">` com `provider`, `site_key`, `portal_url`/`form_url`, `instructions` e a contagem do TTL (`expires_at`, 5 min quando ausente).
 2. O portal oficial é aberto em nova aba (`rel="noopener noreferrer"`); nenhum frame remoto é embutido (`frame-src 'none'`).
 3. Ao enviar, o popup devolve `{ captcha_token, session_cookie?, challenge_id? }` e o mesmo endpoint é rechamado com o corpo/query originais + essa resolução (`main.js` → `resolveCaptchaAndResend`). Um único reenvio por clique: se o portal recusar o token, a mensagem `captcha.rejected` aparece no painel em vez de reabrir o diálogo em loop.
 4. Cancelar/fechar (`Esc`, botão, backdrop) e expirar o desafio produzem mensagens traduzidas (`captcha.cancelled`, `captcha.expired`); token e cookie de sessão são apagados do DOM no fechamento e em `pagehide`.

@@ -425,6 +425,21 @@ test('main.js opens the popup on CAPTCHA_REQUIRED and resends the same call with
   assert.doesNotMatch(main, /while \(TP\.captcha/, 'no automatic CAPTCHA loop');
   assert.match(main, /if \(TP\.captcha\.isRequired\(retryError\)\) captchaNote\('captcha\.rejected'/);
 
+  // Every API/connector handler routes a challenge through the popup, not only PROJUDI.
+  const guardCount = (main.match(/TP\.captcha\.isRequired\(error\)/g) || []).length;
+  assert.ok(guardCount >= 6, `expected the popup on every handler, found ${guardCount} guards`);
+  for (const fragment of [
+    "client.datasetSummary('ledger')",
+    'client.submitInvoice(sampleInvoice)',
+    "client.runWorkflow(",
+    'client.workflowStatus(executionId, apiKey())'
+  ]) {
+    assert.ok(main.includes(fragment), `missing retry target: ${fragment}`);
+  }
+  // The guard is the positive form used by every handler, not just the module's own fallback.
+  const positive = (main.match(/(?:else )?if \(TP\.captcha && TP\.captcha\.isRequired\(error\)\)/g) || []).length;
+  assert.ok(positive >= 5, `expected one CAPTCHA guard per handler, found ${positive}`);
+
   // The resolved token is a one-shot credential: never echoed into the visible route label.
   includesAll(main, [
     'function redactSecrets(text)',
