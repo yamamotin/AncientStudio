@@ -169,5 +169,7 @@
   "captcha.unavailable": "// a janela de verificação não pôde ser aberta: recarregue a página e tente novamente",
   "api.close": "[ fechar ]",
   "api.closeAria": "Fechar a resposta desta API",
-  "brightness.short": "brilho"
+  "brightness.short": "brilho",
+  "scene.reflectionLabel": "Reflexo",
+  "scene.reflectionAria": "Intensidade do reflexo na cena"
 }

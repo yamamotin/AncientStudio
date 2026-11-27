@@ -28,7 +28,14 @@ export const DEFAULT_URBAN_SIDEWALK_BOUNDS: SidewalkBoundsComponent = {
   westStorefrontMinX: -17.65,
   westStorefrontMaxX: -9.35,
   westStorefrontMinZ: -2.5,
+  walkablePockets: [
+    // Paved areas alongside the two tree planters (Cidade_Object_78 / 70).
+    { minX: -14.0, maxX: -5.55, minZ: -1.92, maxZ: 4.1 },
+    { minX: 0.55, maxX: 7.8, minZ: -1.92, maxZ: 4.1 },
+  ],
   obstacles: [
+    { minX: -13.5, maxX: -5.55, minZ: 2.05, maxZ: 4.1 },
+    { minX: 2.1, maxX: 7.2, minZ: 1.75, maxZ: 4.05 },
     // Sidewalk kiosks (Cidade_Object_161 & Cidade_Object_266) with 0.22m character clearance
     { minX: -4.8, maxX: -2.08, minZ: 2.08, maxZ: 3.62 },
     // Curbside luminaire base (-5.25, 4.00) clearance
@@ -822,6 +829,7 @@ export class UrbanGlbSceneBuilder {
     const sidewalkBounds: SidewalkBoundsComponent = {
       ...DEFAULT_URBAN_SIDEWALK_BOUNDS,
       obstacles: DEFAULT_URBAN_SIDEWALK_BOUNDS.obstacles.map((o) => ({ ...o })),
+      walkablePockets: DEFAULT_URBAN_SIDEWALK_BOUNDS.walkablePockets?.map((p) => ({ ...p })),
       groundY,
     };
 
@@ -1058,18 +1066,18 @@ export class UrbanGlbSceneBuilder {
       // Bright, open sunlit urban day: clear sky fill, warm solar key, and opposite-azimuth bounce
       // so streets, sidewalks, shaded facades, trees, Player_Rig, and Carro_Grupo read effortlessly
       stage.ambientFill.color.set('#D6E4F0');
-      stage.ambientFill.intensity = 1.15;
+      stage.ambientFill.intensity = 0.98;
 
       stage.ambientHemi.color.copy(cool).lerp(new THREE.Color('#E4F0FA'), 0.72);
       stage.ambientHemi.groundColor.set('#6E7F8E');
-      stage.ambientHemi.intensity = 2.85;
+      stage.ambientHemi.intensity = 2.25;
 
       stage.keyDirLight.color.set('#FFF6E8');
-      stage.keyDirLight.intensity = 4.65;
+      stage.keyDirLight.intensity = 3.55;
       stage.keyDirLight.position.set(20, 34, 18);
 
       stage.rimDirLight.color.copy(cool).lerp(new THREE.Color('#C6DCF0'), 0.55);
-      stage.rimDirLight.intensity = 1.75;
+      stage.rimDirLight.intensity = 1.10;
 
       rig.storefrontEastLight.intensity = 1.4;
       rig.storefrontWestLight.intensity = 1.3;
@@ -1082,7 +1090,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 0.28;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 1.65;
+        stage.playerRimLight.intensity = 0.55;
       }
     } else if (mode === 'rain') {
       // Stormy Cyber-Noir: cool overcast storm-cloud wash + intense wet-asphalt reflection pools
@@ -1111,7 +1119,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 1.95;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 4.1;
+        stage.playerRimLight.intensity = 0.9;
       }
     } else {
       // 'night' — darker than day yet genuinely legible: moonlit skyline + broad warm street/facade pools
@@ -1140,7 +1148,7 @@ export class UrbanGlbSceneBuilder {
         m.emissiveIntensity = 1.72;
       }
       if (stage.playerRimLight) {
-        stage.playerRimLight.intensity = 3.8;
+        stage.playerRimLight.intensity = 0.8;
       }
     }
 
@@ -1162,8 +1170,9 @@ export class UrbanGlbSceneBuilder {
         mat.normalScale.set(baseX * factor, baseY * factor);
       };
 
-      const roadRoughness = mode === 'rain' ? 0.12 : mode === 'day' ? 0.9 : 0.28;
-      const roadMetalness = mode === 'rain' ? 0.18 : mode === 'day' ? 0.04 : 0.12;
+      const reflection = THREE.MathUtils.clamp(config.reflectionStrength ?? 0.35, 0, 1);
+      const roadRoughness = THREE.MathUtils.lerp(mode === 'day' ? 0.98 : 0.94, mode === 'rain' ? 0.50 : 0.65, reflection);
+      const roadMetalness = 0.04 * reflection;
       // Compensate `real_road` embedded texture's 0.0084 linear albedo while keeping full aggregate texture detail
       const roadColorScale: [number, number, number] =
         mode === 'day'
@@ -1176,6 +1185,9 @@ export class UrbanGlbSceneBuilder {
       for (const mat of stage.assets.materials.roads) {
         mat.roughness = roadRoughness;
         mat.metalness = roadMetalness;
+        // Both road tiles use the same real_road material. Its baked roughness
+        // map multiplied the preset roughness and produced harsh specular patches.
+        if (mat.roughnessMap) { mat.roughnessMap = null; mat.needsUpdate = true; }
         mat.color.setRGB(roadColorScale[0], roadColorScale[1], roadColorScale[2]);
         if (mat.emissive) {
           mat.emissive.set(mode === 'day' ? '#2A3642' : '#121D28');
@@ -1228,10 +1240,12 @@ export class UrbanGlbSceneBuilder {
       }
 
       // Protagonist (`Player_Rig`) sculpted contrast across day / night / rain
-      const charEmissive = mode === 'day' ? 0.14 : mode === 'rain' ? 0.36 : 0.3;
+      const charEmissive = mode === 'day' ? 0.03 : mode === 'rain' ? 0.08 : 0.07;
       const charNormalFactor = mode === 'day' ? 1.08 : 1.0;
       for (const mat of stage.assets.materials.character) {
-        mat.color.set(mode === 'day' ? '#E6EFF7' : '#EBF3FA');
+        mat.color.set(mode === 'day' ? '#788A98' : '#8796A2');
+        mat.roughness = Math.max(0.7, mat.roughness);
+        mat.metalness = Math.min(0.04, mat.metalness);
         applyScaledNormal(mat, charNormalFactor);
         if (mat.emissive) {
           mat.emissive.set('#2C4456');

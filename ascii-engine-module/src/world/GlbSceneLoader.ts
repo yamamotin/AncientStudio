@@ -368,11 +368,11 @@ export function extractAndPrepareGlbNodes(
   // to `metalness = 1.0, roughness = 1.0` -> zero diffuse albedo without an envMap!).
   const protagonistMaterial = new THREE.MeshStandardMaterial({
     name: 'PlayerProtagonistMaterial',
-    color: new THREE.Color('#E2EDF5'),
+    color: new THREE.Color('#788A98'),
     emissive: new THREE.Color('#2A4152'),
-    emissiveIntensity: 0.26,
-    roughness: 0.38,
-    metalness: 0.12,
+    emissiveIntensity: 0.06,
+    roughness: 0.72,
+    metalness: 0.03,
   });
   ensureSurfaceNormalMap(protagonistMaterial, proceduralNormals.contourTrim, 0.38, 0.38);
   character.push(protagonistMaterial);

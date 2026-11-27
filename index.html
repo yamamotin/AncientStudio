@@ -398,9 +398,14 @@
       <div class="scene-toolbar" role="group" aria-label="Controle de tamanho da fonte ASCII" data-i18n-attr="aria-label:scene.fontGroupAria">
         <div class="scene-font-control">
           <label for="scene-cell-size" data-i18n="scene.fontSizeLabel">Fonte / célula</label>
-          <input id="scene-cell-size" type="range" min="2" max="8" step="0.01" value="8" disabled aria-label="Tamanho da fonte e célula ASCII em pixels" data-i18n-attr="aria-label:scene.fontSizeAria">
-          <output id="scene-cell-value" for="scene-cell-size">8px</output>
+          <input id="scene-cell-size" type="range" min="2" max="21" step="0.01" value="2.25" disabled aria-label="Tamanho da fonte e célula ASCII em pixels" data-i18n-attr="aria-label:scene.fontSizeAria">
+          <output id="scene-cell-value" for="scene-cell-size">2.25px</output>
           <button id="scene-cell-reset" class="cmd-button cmd-button--small" type="button" disabled aria-label="Restaurar tamanho inicial da fonte ASCII" data-i18n="scene.fontReset" data-i18n-attr="aria-label:scene.fontResetAria">[ restaurar ]</button>
+        </div>
+        <div class="scene-font-control">
+          <label for="scene-reflection" data-i18n="scene.reflectionLabel">Reflexo</label>
+          <input id="scene-reflection" type="range" min="0" max="100" step="1" value="35" disabled aria-label="Intensidade do reflexo na cena" data-i18n-attr="aria-label:scene.reflectionAria">
+          <output id="scene-reflection-value" for="scene-reflection">35%</output>
         </div>
       </div>
       <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>

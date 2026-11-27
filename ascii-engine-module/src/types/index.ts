@@ -186,7 +186,7 @@ export interface EngineConfig {
   pauseOffscreen: boolean;
   /** Palette colors */
   palette: ThemePalette;
-  /** Base ASCII cell height in CSS pixels (recommended range: 6..20, default: 8) */
+  /** Base ASCII cell height in CSS pixels (range: 2..21, playground default: 2.25) */
   cellSize: number;
   /** Automatically scale cell density & DPR per container/device tier (default: true) */
   autoResponsiveDensity: boolean;
@@ -198,6 +198,8 @@ export interface EngineConfig {
   edgeStrength: number;
   /** GPU Lighten blend weight [0..1] mixing subtle stipple density with ASCII glyph detail */
   blockBlendWeight: number;
+  /** Urban surface reflection strength [0..1]. */
+  reflectionStrength: number;
   /** Wind speed & rain inclination multiplier [0..2.5] */
   windStrength: number;
   /** Subtle glow/bloom intensity on emissive elements [0..1.5] */

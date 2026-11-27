@@ -16,6 +16,9 @@ window.TP = window.TP || {};
   var DEFAULT_MODE = 'night';
   var SCENE_MODES = ['day', 'night', 'rain'];
   var MIN_CELL_PX = 2.0;
+  var MAX_CELL_PX = 21.0;
+  var DEFAULT_CELL_PX = 2.25;
+  var DEFAULT_REFLECTION = 0.35;
   var FINE_CELL_THRESHOLD_PX = 6.0;
   var FINE_CELL_STEP_PX = 0.25;
   var COARSE_CELL_STEP_PX = 0.5;
@@ -228,12 +231,12 @@ window.TP = window.TP || {};
       observer: null,
       resizeRaf: null,
       fullscreenListener: null,
-      initialConfigCellSize: Number(options && options.config && options.config.cellSize) || 8,
-      initialAutoResponsive: !(options && options.config && options.config.autoResponsiveDensity === false),
-      mountCellSize: Number(options && options.config && options.config.cellSize) || 8,
-      currentCellSize: Number(options && options.config && options.config.cellSize) || 8,
+      initialConfigCellSize: Number(options && options.config && options.config.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX),
+      initialAutoResponsive: isMascot ? true : Boolean(options && options.config && options.config.autoResponsiveDensity),
+      mountCellSize: Number(options && options.config && options.config.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX),
+      currentCellSize: Number(options && options.config && options.config.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX),
       customCellActive: false,
-      measuredInitialSize: false,
+      reflectionStrength: DEFAULT_REFLECTION,
       // Diagnostics: why the stage is still on the static skeleton (null once mounted).
       failure: null,
       attempts: 0,
@@ -386,15 +389,7 @@ window.TP = window.TP || {};
         state.resizeRaf = null;
         if (state.instance && typeof state.instance.resize === 'function') {
           state.instance.resize({ width: width, height: height }, false);
-          if (!state.measuredInitialSize && !state.customCellActive) {
-            var stats = typeof state.instance.getStats === 'function' ? state.instance.getStats() : null;
-            var active = stats && Number(stats.activeCellSize);
-            if (active > 0) {
-              state.mountCellSize = Math.max(MIN_CELL_PX, Math.min(state.initialConfigCellSize, Number(active.toFixed(2))));
-              state.currentCellSize = state.mountCellSize;
-              state.measuredInitialSize = true;
-            }
-          }
+
         }
       });
     }
@@ -473,8 +468,9 @@ window.TP = window.TP || {};
               // Wheel = camera zoom on the stage (the engine owns a non-passive listener
               // there and preventDefaults it, so the page never jumps while zooming).
               enableWheelZoom: true,
-              cellSize: 8,
-              autoResponsiveDensity: true,
+              cellSize: DEFAULT_CELL_PX,
+              autoResponsiveDensity: false,
+              reflectionStrength: state.reflectionStrength,
               enableShadows: true,
               maxPixelRatio: 2
             };
@@ -511,17 +507,13 @@ window.TP = window.TP || {};
         var lifecycle = typeof state.instance.getState === 'function' ? state.instance.getState() : '';
         if (lifecycle === 'idle' && typeof state.instance.mount === 'function') state.instance.mount();
 
-        // Capture ceiling (`max`) directly from the mounted scene/config (never expanding above it)
+        // The default/reset value is independent of the slider's 21px ceiling.
         var instCfg = typeof state.instance.getConfig === 'function' ? state.instance.getConfig() : mergedConfig;
-        var instStats = typeof state.instance.getStats === 'function' ? state.instance.getStats() : null;
-        var cfgCell = Number(instCfg && instCfg.cellSize) || Number(mergedConfig.cellSize) || 8;
-        state.initialConfigCellSize = cfgCell;
-        state.initialAutoResponsive = instCfg ? instCfg.autoResponsiveDensity !== false : mergedConfig.autoResponsiveDensity !== false;
-        var activeAtMount = instStats && Number(instStats.activeCellSize) > 0
-          ? Number(instStats.activeCellSize)
-          : cfgCell;
-        state.mountCellSize = Math.max(MIN_CELL_PX, Math.min(cfgCell, Number(activeAtMount.toFixed(2))));
+        state.initialConfigCellSize = Number(instCfg && instCfg.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX);
+        state.initialAutoResponsive = Boolean(instCfg && instCfg.autoResponsiveDensity);
+        state.mountCellSize = state.initialConfigCellSize;
         state.currentCellSize = state.mountCellSize;
+        state.reflectionStrength = Math.max(0, Math.min(1, Number.isFinite(Number(instCfg && instCfg.reflectionStrength)) ? Number(instCfg.reflectionStrength) : DEFAULT_REFLECTION));
         state.customCellActive = false;
 
         state.failure = null;
@@ -577,7 +569,7 @@ window.TP = window.TP || {};
 
     function setCellSize(px) {
       if (isMascot) return state.mountCellSize;
-      var snapped = snapCellSize(px, state.mountCellSize, MIN_CELL_PX);
+      var snapped = snapCellSize(px, MAX_CELL_PX, MIN_CELL_PX);
       state.currentCellSize = snapped;
       if (Math.abs(snapped - state.mountCellSize) < 0.005) {
         state.customCellActive = false;
@@ -609,9 +601,9 @@ window.TP = window.TP || {};
     function getCellSizeRange() {
       return {
         min: MIN_CELL_PX,
-        max: state.mountCellSize,
+        max: MAX_CELL_PX,
         current: state.currentCellSize,
-        stops: buildCellSizeStops(state.mountCellSize, MIN_CELL_PX)
+        stops: buildCellSizeStops(MAX_CELL_PX, MIN_CELL_PX)
       };
     }
 
@@ -621,9 +613,18 @@ window.TP = window.TP || {};
       setPreset: setPreset,
       setAutoOrbit: setAutoOrbit,
       setCellSize: setCellSize,
+      setReflection: function (value) {
+        if (isMascot) return state.reflectionStrength;
+        var amount = Number(value);
+        if (!Number.isFinite(amount)) return state.reflectionStrength;
+        state.reflectionStrength = Math.max(0, Math.min(1, amount));
+        applyConfig({ reflectionStrength: state.reflectionStrength });
+        return state.reflectionStrength;
+      },
+      getReflection: function () { return state.reflectionStrength; },
       resetCellSize: resetCellSize,
       getCellSize: function () { return state.currentCellSize; },
-      getMaxCellSize: function () { return state.mountCellSize; },
+      getMaxCellSize: function () { return isMascot ? state.mountCellSize : MAX_CELL_PX; },
       getCellSizeRange: getCellSizeRange,
       getScene: getThreeScene,
       setPlayableKeyboard: function (enabled) {
@@ -755,6 +756,7 @@ window.TP = window.TP || {};
     setPaused: function (paused) { controllers.forEach(function (c) { c.setPaused(paused); }); },
     setPreset: function (name) { controllers.forEach(function (c) { c.setPreset(name); }); },
     setAutoOrbit: function (enabled) { controllers.forEach(function (c) { c.setAutoOrbit(enabled); }); },
+    setReflection: function (value) { controllers.forEach(function (c) { c.setReflection(value); }); },
     getScene: function () { return controllers.length ? controllers[0].getScene() : null; },
     loadSceneGlb: loadSceneGlb,
     getGlbMetrics: function () { return lastGlbMetrics; },

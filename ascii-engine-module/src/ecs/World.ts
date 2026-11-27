@@ -127,6 +127,8 @@ export interface SidewalkBoundsComponent {
   westStorefrontMinX: number;
   westStorefrontMaxX: number;
   westStorefrontMinZ: number;
+  /** Additional walkable sidewalk pockets adjoining the main corridor. */
+  walkablePockets?: SidewalkObstacleBox[];
   /** Sidewalk furniture/kiosk AABBs smoothly pushed out on XZ */
   obstacles: SidewalkObstacleBox[];
   /** Ground Y elevation of the sidewalk surface */

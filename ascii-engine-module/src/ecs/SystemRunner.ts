@@ -28,46 +28,42 @@ export function clampToSidewalkBounds(
   z: number,
   bounds: SidewalkBoundsComponent
 ): { x: number; z: number } {
-  let clampedX = THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX);
-  let clampedZ = THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZ);
-
-  // Outside the central sidewalk plaza (`x < plazaMinX` or `x > plazaMaxX`), constrain Z to the
-  // continuous East-West sidewalk promenade (`corridorMinZ .. corridorMaxZ`).
-  if (clampedX < bounds.plazaMinX || clampedX > bounds.plazaMaxX) {
-    const localMinZ =
-      clampedX >= bounds.westStorefrontMinX && clampedX <= bounds.westStorefrontMaxX
-        ? bounds.westStorefrontMinZ
-        : bounds.corridorMinZ;
-    clampedZ = THREE.MathUtils.clamp(clampedZ, localMinZ, bounds.corridorMaxZ);
-  }
-
-  // Smoothly push out of any sidewalk kiosk/planter AABBs along the shallowest penetration axis
-  for (let i = 0; i < bounds.obstacles.length; i++) {
-    const box = bounds.obstacles[i]!;
-    if (
-      clampedX > box.minX &&
-      clampedX < box.maxX &&
-      clampedZ > box.minZ &&
-      clampedZ < box.maxZ
-    ) {
-      const pushLeft = clampedX - box.minX;
-      const pushRight = box.maxX - clampedX;
-      const pushBack = clampedZ - box.minZ;
-      const pushFront = box.maxZ - clampedZ;
-      const minPush = Math.min(pushLeft, pushRight, pushBack, pushFront);
-
-      if (minPush === pushLeft) clampedX = box.minX;
-      else if (minPush === pushRight) clampedX = box.maxX;
-      else if (minPush === pushBack) clampedZ = box.minZ;
-      else clampedZ = box.maxZ;
+  // Project onto the nearest point in the union of sidewalk rectangles,
+  // rather than abruptly snapping Z when crossing a plaza/tree boundary.
+  const regions = [
+    { minX: bounds.minX, maxX: bounds.westStorefrontMinX, minZ: bounds.corridorMinZ, maxZ: bounds.corridorMaxZ },
+    { minX: bounds.westStorefrontMinX, maxX: bounds.westStorefrontMaxX, minZ: bounds.westStorefrontMinZ, maxZ: bounds.corridorMaxZ },
+    { minX: bounds.westStorefrontMaxX, maxX: bounds.maxX, minZ: bounds.corridorMinZ, maxZ: bounds.corridorMaxZ },
+    { minX: bounds.plazaMinX, maxX: bounds.plazaMaxX, minZ: bounds.minZ, maxZ: bounds.maxZ },
+    ...(bounds.walkablePockets ?? []),
+  ];
+  const project = (px: number, pz: number): { x: number; z: number } => {
+    let bestX = bounds.minX, bestZ = bounds.corridorMinZ, bestDistance = Infinity;
+    for (const region of regions) {
+      const rx = THREE.MathUtils.clamp(px, Math.max(bounds.minX, region.minX), Math.min(bounds.maxX, region.maxX));
+      const rz = THREE.MathUtils.clamp(pz, Math.max(bounds.minZ, region.minZ), Math.min(bounds.maxZ, region.maxZ));
+      const distance = (px - rx) ** 2 + (pz - rz) ** 2;
+      if (distance < bestDistance) { bestDistance = distance; bestX = rx; bestZ = rz; }
+    }
+    return { x: bestX, z: bestZ };
+  };
+  const isInside = (p: { x: number; z: number }, box: { minX: number; maxX: number; minZ: number; maxZ: number }): boolean =>
+    p.x > box.minX && p.x < box.maxX && p.z > box.minZ && p.z < box.maxZ;
+  let point = project(x, z);
+  for (const box of bounds.obstacles) {
+    if (!isInside(point, box)) continue;
+    const candidates = [
+      project(box.minX, point.z), project(box.maxX, point.z),
+      project(point.x, box.minZ), project(point.x, box.maxZ),
+    ].filter((candidate) => !isInside(candidate, box) &&
+      !bounds.obstacles.some((other) => other !== box && isInside(candidate, other)));
+    let best = Infinity;
+    for (const candidate of candidates) {
+      const d = (x - candidate.x) ** 2 + (z - candidate.z) ** 2;
+      if (d < best) { best = d; point = candidate; }
     }
   }
-
-  // Final outer safety clamp via THREE.MathUtils.clamp
-  clampedX = THREE.MathUtils.clamp(clampedX, bounds.minX, bounds.maxX);
-  clampedZ = THREE.MathUtils.clamp(clampedZ, bounds.minZ, bounds.maxZ);
-
-  return { x: clampedX, z: clampedZ };
+  return point;
 }
 
 /**

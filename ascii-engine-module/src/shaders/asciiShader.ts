@@ -97,6 +97,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uDofStrength;
   uniform float uDaylight;
   uniform float uWetness;
+  uniform float uReflectionStrength;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uVolumeWrapStrength;
@@ -177,7 +178,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float upwardMask,
     vec2 normalTilt
   ) {
-    if (upwardMask <= 0.01 || uWetness <= 0.01) {
+    if (upwardMask <= 0.01 || uWetness <= 0.01 || uReflectionStrength <= 0.001) {
       return vec3(0.0);
     }
 
@@ -214,7 +215,9 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     }
 
     vec3 reflected = (reflAcc / max(weightSum, 0.001)) * rippleBand;
-    return reflected * upwardMask * uWetness;
+    // Limit screen-space reflection energy, which otherwise exaggerates the
+    // hard visual transition where one road half samples bright facades.
+    return min(reflected, vec3(0.38)) * upwardMask * uWetness * uReflectionStrength;
   }
 
   /**
@@ -441,8 +444,8 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       vec3 workingHdr = isGeometry > 0.5
         ? combinedHdr
         : (max(sceneCol - uBgColor * 1.04, vec3(0.0)) + haloLift);
-      float exposureGain = mix(1.55, 1.85, uDaylight);
-      vec3 exposedLinear = (workingHdr * exposureGain) / (vec3(1.0) + workingHdr * (0.38 * exposureGain));
+      float exposureGain = mix(1.35, 1.15, uDaylight);
+      vec3 exposedLinear = (workingHdr * exposureGain) / (vec3(1.0) + workingHdr * exposureGain);
       combinedSignal = linearToSrgb(exposedLinear);
     } else {
       combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.36)) * 1.28;
