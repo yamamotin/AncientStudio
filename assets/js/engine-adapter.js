@@ -1,10 +1,10 @@
 /* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
    Connects:
-   1. `#ascii-scene` -> Unified Cyberpunk Boulevard scenario (`mode: 'playground'`)
+   1. `#ascii-scene` -> Pre-built 3D Urban GLB scene (`./assets/models/cena_completa.glb` + `./assets/draco/`, `mode: 'playground'`)
       with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Com chuva")
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
-   Zero framework dependencies. The playground keeps scroll-safe passive pointer input;
-   the mascot has no pointer interaction and spins on its own via a single RAF loop. */
+   Zero framework dependencies and zero external CDNs. The playground keeps scroll-safe passive pointer input
+   and WASD + E character controls; the mascot has no pointer interaction and spins on its own via a single RAF loop. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -12,57 +12,57 @@ window.TP = window.TP || {};
 
   var controllers = [];
 
-  // The UI exposes one scene with exactly three modes: day, night and rain.
+  // The UI exposes one Cyber-Noir + Entropism scene with three modes: day, night and rain.
   var DEFAULT_MODE = 'night';
   var SCENE_MODES = ['day', 'night', 'rain'];
   var PRESETS = {
     night: {
       palette: {
-        background: '#05070F',
-        warmLight: '#FF2A85',
-        warmCore: '#FFC145',
-        coolAmbient: '#00F0FF',
-        foliageAccent: '#8A5CFF',
-        cursorLight: '#64F5FF'
+        background: '#0C1217',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#6E7B87',
+        foliageAccent: '#2A3540',
+        cursorLight: '#6E7B87'
       },
-      bloomIntensity: 1.42,
-      dofStrength: 0.34,
+      bloomIntensity: 0.28,
+      dofStrength: 0.20,
       edgeStrength: 0.96,
-      blockBlendWeight: 0.35,
+      blockBlendWeight: 0.06,
       windStrength: 0.62,
-      parallaxIntensity: 1.6
+      parallaxIntensity: 0.35
     },
     day: {
       palette: {
-        background: '#1E3F66',
-        warmLight: '#FF8A3D',
-        warmCore: '#FFF1A8',
-        coolAmbient: '#7AD4FF',
-        foliageAccent: '#4895EF',
-        cursorLight: '#FFF6D6'
+        background: '#162029',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#7A8894',
+        foliageAccent: '#2A3540',
+        cursorLight: '#8A99A6'
       },
-      bloomIntensity: 0.78,
-      dofStrength: 0.24,
+      bloomIntensity: 0.14,
+      dofStrength: 0.16,
       edgeStrength: 0.94,
-      blockBlendWeight: 0.32,
-      windStrength: 0.45,
-      parallaxIntensity: 1.4
+      blockBlendWeight: 0.05,
+      windStrength: 0.42,
+      parallaxIntensity: 0.30
     },
     rain: {
       palette: {
-        background: '#04060D',
-        warmLight: '#FF1E75',
-        warmCore: '#FFB703',
-        coolAmbient: '#00D8FF',
-        foliageAccent: '#6930C3',
-        cursorLight: '#8CF4FF'
+        background: '#0A0F14',
+        warmLight: '#4A7C7E',
+        warmCore: '#8A99A6',
+        coolAmbient: '#5E6C78',
+        foliageAccent: '#2A3540',
+        cursorLight: '#6E7B87'
       },
-      bloomIntensity: 1.72,
-      dofStrength: 0.44,
-      edgeStrength: 0.98,
-      blockBlendWeight: 0.37,
-      windStrength: 1.52,
-      parallaxIntensity: 1.75
+      bloomIntensity: 0.32,
+      dofStrength: 0.22,
+      edgeStrength: 0.96,
+      blockBlendWeight: 0.08,
+      windStrength: 1.45,
+      parallaxIntensity: 0.40
     }
   };
 
@@ -232,6 +232,9 @@ window.TP = window.TP || {};
 
     function setAutoOrbit(enabled) {
       stopOrbit();
+      if (state.instance && typeof state.instance.setAutoOrbit === 'function' && !isMascot) {
+        state.instance.setAutoOrbit(Boolean(enabled));
+      }
       if (!enabled || state.mode !== 'engine' || isMascot) return;
 
       state.orbitTimer = window.setInterval(function () {
@@ -322,15 +325,18 @@ window.TP = window.TP || {};
               cellSize: 8,
               autoResponsiveDensity: true,
               maxPixelRatio: 2,
-              bloomIntensity: 0.22,
+              bloomIntensity: 0.08,
               dofStrength: 0.0,
               edgeStrength: 0.96,
-              blockBlendWeight: 0.28,
+              blockBlendWeight: 0.0,
               enableShadows: true
             }
           : {
               mode: 'playground',
-              mapId: 'cyberpunk-citadel',
+              modelUrl: './assets/models/cena_completa.glb',
+              dracoDecoderPath: './assets/draco/',
+              fov: 58,
+              enableKeyboard: true,
               cellSize: 8,
               autoResponsiveDensity: true,
               enableShadows: true,
@@ -360,7 +366,6 @@ window.TP = window.TP || {};
         if (isMascot) startMascotSpin();
         observe();
         setPaused(state.paused);
-        if (!isMascot) setAutoOrbit(true);
         return true;
       } catch (error) {
         state.instance = null;
@@ -372,6 +377,7 @@ window.TP = window.TP || {};
 
     function destroy() {
       stopOrbit();
+      window.removeEventListener('pagehide', destroy);
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;
@@ -482,6 +488,49 @@ window.TP = window.TP || {};
     initDeferredEngineLoad();
   }
 
+  var DEFAULT_DRACO_PATH = './assets/draco/';
+  var DEFAULT_GLB_URL = './assets/models/cena_completa.glb';
+  var sharedGlbLoader = null;
+  var lastGlbMetrics = null;
+
+  function ensureGlbLoader(options) {
+    var resolved = resolveEngine();
+    if (!resolved || !resolved.source || typeof resolved.source.SceneGlbLoader !== 'function') {
+      return null;
+    }
+    if (!sharedGlbLoader) {
+      sharedGlbLoader = new resolved.source.SceneGlbLoader({
+        decoderPath: (options && options.decoderPath) || DEFAULT_DRACO_PATH,
+        modelUrl: (options && options.modelUrl) || DEFAULT_GLB_URL,
+        workerLimit: (options && options.workerLimit) || 4,
+        decoderType: options && options.decoderType,
+        fetchImpl: options && options.fetchImpl
+      });
+    }
+    return sharedGlbLoader;
+  }
+
+  function disposeGlbLoader() {
+    if (sharedGlbLoader && typeof sharedGlbLoader.dispose === 'function') {
+      sharedGlbLoader.dispose();
+    }
+    sharedGlbLoader = null;
+  }
+
+  async function loadSceneGlb(options) {
+    var loader = ensureGlbLoader(options);
+    if (!loader) {
+      throw new Error('SceneGlbLoader is unavailable until ascii-engine.bundle.js is loaded.');
+    }
+    var url = (options && options.url) || DEFAULT_GLB_URL;
+    var asset = await loader.load(url);
+    lastGlbMetrics = asset.metrics;
+    if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('tp:scene-glb-loaded', { detail: asset.metrics }));
+    }
+    return asset;
+  }
+
   TP.scene = {
     create: function (container, options) {
       var controller = createController(container, options);
@@ -493,7 +542,14 @@ window.TP = window.TP || {};
     },
     setPaused: function (paused) { controllers.forEach(function (c) { c.setPaused(paused); }); },
     setPreset: function (name) { controllers.forEach(function (c) { c.setPreset(name); }); },
-    destroy: function () { controllers.forEach(function (c) { c.destroy(); }); controllers = []; },
+    loadSceneGlb: loadSceneGlb,
+    getGlbMetrics: function () { return lastGlbMetrics; },
+    disposeGlbLoader: disposeGlbLoader,
+    destroy: function () {
+      controllers.forEach(function (c) { c.destroy(); });
+      controllers = [];
+      disposeGlbLoader();
+    },
     getMode: function () { return controllers.length ? controllers[0].getMode() : 'fallback'; }
   };
 

@@ -1,17 +1,20 @@
 import * as THREE from 'three';
-import { AnimationSystem } from '../animation/AnimationSystem';
+import {
+  AnimationSystem,
+  CharacterAnimationSystem,
+} from '../animation/AnimationSystem';
 import { DEFAULT_ENGINE_CONFIG, mergeEngineConfig } from './defaultConfig';
 import { EngineLoop } from './EngineLoop';
 import { LifecycleManager } from './LifecycleManager';
 import { computeAdaptiveResolution } from './ResolutionController';
 import {
+  CameraFollowSystem,
   InputSystem,
+  LineOfSightOcclusionSystem,
   MovementRotationSystem,
-  NeonPulseSystem,
-  PatrolSystem,
   RenderSyncSystem,
   SystemRunner,
-  WindSystem,
+  TrafficFlowSystem,
 } from '../ecs/SystemRunner';
 import { type EntityId, World } from '../ecs/World';
 import { TuxEntityFactory } from '../entities/TuxEntityFactory';
@@ -33,26 +36,32 @@ import type {
   OutlineTargetSelector,
   PartialEngineConfig,
   ResolvedObjectOutlineState,
+  ResolutionProfile,
   ResolutionTier,
 } from '../types';
 import { VfxController } from '../vfx/VfxController';
-import { MapLoader } from '../world/MapLoader';
+import { GlbSceneLoader } from '../world/GlbSceneLoader';
 import {
   type BuiltMascotStage,
   MASCOT_BACKDROP_HEX,
   MascotStageBuilder,
 } from '../world/MascotStageBuilder';
-import { type BuiltPlaygroundScene, PlaygroundSceneBuilder } from '../world/PlaygroundSceneBuilder';
+import {
+  type BuiltUrbanGlbStage,
+  DEFAULT_URBAN_PLAYER_SPAWN,
+  URBAN_CAMERA_FOLLOW_DEFAULTS,
+  UrbanGlbSceneBuilder,
+} from '../world/UrbanGlbSceneBuilder';
 
 /**
  * AsciiEngineCore: Modular WebGL2 runtime orchestrating:
  * - `EngineLoop` (clamped deltaTime, zero-jump pause/resume, FPS cap & telemetry)
  * - `LifecycleManager` (rAF-coalesced ResizeObserver, Fullscreen observer, IntersectionObserver, Page Visibility, leak-free `.dispose()`)
- * - `World` + `SystemRunner` (ordered ECS pipeline: InputSystem -> PatrolSystem -> MovementRotationSystem -> AnimationSystem -> NeonPulseSystem -> RenderSyncSystem)
- * - `MapLoader` + `PlaygroundSceneBuilder` (3D Cyberpunk Neo-Sector cityscape in `[ ASCII REALMS // SCENE ]`)
- * - `TuxEntityFactory` (dedicated high-contrast 3D Linux Tux stage for `[ STACK // NEOFETCH ]`)
- * - `PointerInput` + `KeyboardInput` (scroll-safe passive mouse/touch tracking + opt-in focus-gated keys)
- * - `VfxController` + `AsciiPostProcessor` (camera parallax, cursor spotlight, neon rain, wet canal reflections, bloom & smooth-transition ASCII shader)
+ * - `World` + `SystemRunner` (ordered ECS pipeline: InputSystem -> TrafficFlowSystem -> MovementRotationSystem -> CharacterAnimationSystem -> AnimationSystem -> CameraFollowSystem -> RenderSyncSystem)
+ * - `GlbSceneLoader` + `UrbanGlbSceneBuilder` (`./assets/models/cena_completa.glb` + self-hosted `./assets/draco/` in `[ ASCII REALMS // SCENE ]`)
+ * - `MascotStageBuilder` + `TuxEntityFactory` (dedicated 3D Linux Tux stage for `[ STACK // NEOFETCH ]`)
+ * - `PointerInput` + `KeyboardInput` (scroll-safe passive mouse/touch tracking + WASD/E character control)
+ * - `VfxController` + `AsciiPostProcessor` (3D-wrapping full-screen ASCII shader, normal-depth Sobel contours, rain VFX)
  */
 export class AsciiEngineCore {
   private readonly container: HTMLElement;
@@ -77,17 +86,19 @@ export class AsciiEngineCore {
 
   private ecsWorld: World | null = null;
   private systemRunner: SystemRunner | null = null;
-  private windSystem: WindSystem | null = null;
   private vfx: VfxController | null = null;
-  private builtPlayground: BuiltPlaygroundScene | null = null;
+  private glbLoader: GlbSceneLoader | null = null;
+  private builtUrbanStage: BuiltUrbanGlbStage | null = null;
+  private glbLoaded = false;
   private builtMascot: BuiltMascotStage | null = null;
   private mascotRootObj: THREE.Group | null = null;
   private primaryEntityId: EntityId | null = null;
 
   // Viewport & telemetry state
+  private lastResolutionProfile: ResolutionProfile | null = null;
   private containerWidth = 1;
   private containerHeight = 1;
-  private activeCellSize = 10;
+  private activeCellSize = 8;
   private gridColumns = 1;
   private gridRows = 1;
   private effectiveDpr = 1;
@@ -106,7 +117,18 @@ export class AsciiEngineCore {
     }
 
     this.container = container;
-    this.config = mergeEngineConfig(DEFAULT_ENGINE_CONFIG, initialConfig);
+    const baseDefaults =
+      initialConfig?.mode === 'mascot'
+        ? mergeEngineConfig(DEFAULT_ENGINE_CONFIG, {
+            fov: 38,
+            enableKeyboard: false,
+            bloomIntensity: 0.08,
+            dofStrength: 0.0,
+            blockBlendWeight: 0.0,
+            palette: { background: MASCOT_BACKDROP_HEX },
+          })
+        : DEFAULT_ENGINE_CONFIG;
+    this.config = mergeEngineConfig(baseDefaults, initialConfig);
 
     this.onPassivePointerMoveBound = this.handlePassiveContainerMove.bind(this);
     this.onContextLostBound = this.handleContextLost.bind(this);
@@ -165,15 +187,19 @@ export class AsciiEngineCore {
         trackWindowHover: false,
       });
       const keyboardInput = new KeyboardInput({
-        enabled: this.config.enableKeyboard,
+        enabled: this.config.mode !== 'mascot' && this.config.enableKeyboard,
         focusTarget: this.container,
       });
 
-      // Mascot stage (`#penguin-stage`) stays 100% pointer/touch-inert; only playground attaches pointer listeners
+      // Mascot stage (`#penguin-stage`) stays 100% pointer/touch/keyboard-inert
       if (this.config.mode !== 'mascot') {
         pointerInput.attach();
-        keyboardInput.attach();
-        this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, { passive: true });
+        if (this.config.enableKeyboard) {
+          keyboardInput.attach();
+        }
+        this.container.addEventListener('pointermove', this.onPassivePointerMoveBound, {
+          passive: true,
+        });
       }
 
       lifecycle.registerCleanup(() => {
@@ -186,7 +212,7 @@ export class AsciiEngineCore {
       this.pointerInput = pointerInput;
       this.keyboardInput = keyboardInput;
 
-      // 3. Build Scene Mode ('playground' vs 'mascot') + Ordered ECS Systems
+      // 3. Build Scene Mode ('playground' GLB vs 'mascot' Tux) + Ordered ECS Systems
       const ecsWorld = new World();
       const systemRunner = new SystemRunner();
       this.ecsWorld = ecsWorld;
@@ -195,13 +221,13 @@ export class AsciiEngineCore {
       if (this.config.mode === 'mascot') {
         this.initMascotStage(ecsWorld, systemRunner);
       } else {
-        this.initPlaygroundStage(ecsWorld, systemRunner, pointerInput, keyboardInput);
+        this.initPlaygroundStage(systemRunner, pointerInput, keyboardInput);
       }
 
-      // 4. ASCII Post-Processor
+      // 4. Full-Screen 3D-Wrapping ASCII Post-Processor
       this.postProcessor = new AsciiPostProcessor(this.config);
 
-      // 5. Initial Resize (immediate snap) + Observers (smooth transitions on subsequent resizes/fullscreen)
+      // 5. Initial Resize (immediate snap) + Observers
       const rect = this.container.getBoundingClientRect();
       this.applyResize(Math.max(1, rect.width), Math.max(1, rect.height), true);
 
@@ -229,6 +255,7 @@ export class AsciiEngineCore {
 
       this.state = 'running';
       this.loop.start();
+      this.config.callbacks?.onStateChange?.('running');
       this.config.callbacks?.onMount?.();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -238,52 +265,110 @@ export class AsciiEngineCore {
   }
 
   private initPlaygroundStage(
-    ecsWorld: World,
     systemRunner: SystemRunner,
     pointerInput: PointerInput,
     keyboardInput: KeyboardInput
   ): void {
-    const mapDef = MapLoader.load(this.config.mapId);
-    const built = PlaygroundSceneBuilder.build(mapDef, this.config, ecsWorld);
-    this.builtPlayground = built;
-    this.scene = built.scene;
-    this.primaryEntityId = built.avatarEntityId;
+    const stage = UrbanGlbSceneBuilder.createStage(this.config);
+    this.builtUrbanStage = stage;
+    this.scene = stage.scene;
 
-    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 46;
-    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.5, 110);
-    camera.position.set(...mapDef.cameraAnchor);
-    camera.lookAt(...mapDef.cameraLookAt);
+    const initialFov = typeof this.config.fov === 'number' ? this.config.fov : 58;
+    const defaultPlayerSpawn: [number, number, number] = [
+      DEFAULT_URBAN_PLAYER_SPAWN.x,
+      DEFAULT_URBAN_PLAYER_SPAWN.y,
+      DEFAULT_URBAN_PLAYER_SPAWN.z,
+    ];
+    const initialCamPos: [number, number, number] = [
+      defaultPlayerSpawn[0] + URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX,
+      defaultPlayerSpawn[1] + URBAN_CAMERA_FOLLOW_DEFAULTS.offsetY,
+      defaultPlayerSpawn[2] + URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ,
+    ];
+    const initialLookAt: [number, number, number] = [
+      defaultPlayerSpawn[0] + URBAN_CAMERA_FOLLOW_DEFAULTS.lookAtOffsetX,
+      defaultPlayerSpawn[1] + URBAN_CAMERA_FOLLOW_DEFAULTS.lookAtOffsetY,
+      defaultPlayerSpawn[2] + URBAN_CAMERA_FOLLOW_DEFAULTS.lookAtOffsetZ,
+    ];
+
+    const camera = new THREE.PerspectiveCamera(initialFov, 16 / 9, 0.15, 160);
+    camera.position.set(...initialCamPos);
+    camera.lookAt(...initialLookAt);
+    camera.updateMatrixWorld();
     this.camera = camera;
     this.lastAutoPlaygroundFov = typeof this.config.fov === 'number' ? null : initialFov;
 
     this.vfx = new VfxController({
-      scene: built.scene,
+      scene: stage.scene,
       config: this.config,
-      baseCameraPos: mapDef.cameraAnchor,
-      lookAtTarget: mapDef.cameraLookAt,
-      particleOrigin: mapDef.shrineCenter,
-      particleCount: 240,
+      baseCameraPos: initialCamPos,
+      lookAtTarget: initialLookAt,
     });
 
-    const windSys = new WindSystem(this.config.windStrength);
-    this.windSystem = windSys;
-
-    // Deterministic priority-sorted ECS pipeline
+    // Deterministic priority-sorted ECS pipeline for `cena_completa.glb`
     systemRunner
-      .addSystem(new InputSystem(pointerInput, keyboardInput), 10)
-      .addSystem(new PatrolSystem(), 15)
-      .addSystem(new MovementRotationSystem(built.terrainHeightAt), 20)
-      .addSystem(windSys, 25)
+      .addSystem(new InputSystem(pointerInput, keyboardInput, camera), 10)
+      .addSystem(new TrafficFlowSystem(), 15)
+      .addSystem(new MovementRotationSystem(stage.waypointMarker), 20)
+      .addSystem(new CharacterAnimationSystem(), 28)
       .addSystem(new AnimationSystem(), 30)
-      .addSystem(new NeonPulseSystem(), 35)
+      .addSystem(new CameraFollowSystem(camera), 38)
+      .addSystem(new LineOfSightOcclusionSystem(camera), 39)
       .addSystem(new RenderSyncSystem(), 40);
+
+    // Stream & decode `./assets/models/cena_completa.glb` via self-hosted `./assets/draco/`
+    const loader = new GlbSceneLoader();
+    this.glbLoader = loader;
+    this.container.setAttribute('data-scene-loading', 'true');
+
+    loader
+      .load({
+        modelUrl: this.config.modelUrl,
+        dracoDecoderPath: this.config.dracoDecoderPath,
+        onProgress: (progress) => {
+          this.config.callbacks?.onLoadProgress?.(progress);
+        },
+      })
+      .then((preparedAssets) => {
+        if (this.state === 'destroyed' || !this.ecsWorld || !this.builtUrbanStage) {
+          preparedAssets.dispose();
+          return;
+        }
+
+        UrbanGlbSceneBuilder.attachPreparedAssets(
+          this.builtUrbanStage,
+          preparedAssets,
+          this.config,
+          this.ecsWorld
+        );
+        this.primaryEntityId = this.builtUrbanStage.playerEntityId;
+        this.glbLoaded = true;
+        this.container.removeAttribute('data-scene-loading');
+        this.container.setAttribute('data-glb-ready', 'true');
+
+        // Snap initial ECS state (Player_Rig, CameraFollow, Carro_Grupo t=0) before next render
+        this.systemRunner?.run(this.ecsWorld, {
+          dt: 0,
+          elapsed: this.loop?.getElapsedSeconds() ?? 0,
+        });
+        if (this.renderer) {
+          this.renderer.shadowMap.needsUpdate = true;
+        }
+        if (this.state === 'paused') {
+          this.loop?.stepOnce(0);
+        }
+        this.config.callbacks?.onLoadReady?.();
+      })
+      .catch((err) => {
+        if (this.state === 'destroyed') return;
+        this.container.removeAttribute('data-scene-loading');
+        this.container.setAttribute('data-glb-error', 'true');
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.config.callbacks?.onLoadError?.(error);
+        this.config.callbacks?.onError?.(error);
+      });
   }
 
-  private initMascotStage(
-    ecsWorld: World,
-    systemRunner: SystemRunner
-  ): void {
-    // Ensure post-processor backdrop matches the #13222E mascot color-theory backdrop
+  private initMascotStage(ecsWorld: World, systemRunner: SystemRunner): void {
     this.config = {
       ...this.config,
       palette: {
@@ -313,18 +398,8 @@ export class AsciiEngineCore {
     });
     this.primaryEntityId = entityId;
     this.mascotRootObj = rootGroup;
+    this.vfx = null;
 
-    // Zero particles & zero cursor light hotspot so the floor + backdrop stay clean and minimalist
-    this.vfx = new VfxController({
-      scene: builtMascot.scene,
-      config: this.config,
-      baseCameraPos: cameraAnchor,
-      lookAtTarget: lookTarget,
-      particleOrigin: [0, 0],
-      particleCount: 0,
-    });
-
-    // No InputSystem on mascot stage: Tux stays pointer-free and spins smoothly on horizontal yaw
     systemRunner
       .addSystem(new MovementRotationSystem(), 20)
       .addSystem(new AnimationSystem(), 30)
@@ -343,12 +418,31 @@ export class AsciiEngineCore {
 
   public setPlayableKeyboardEnabled(enabled: boolean): void {
     this.config.enableKeyboard = enabled;
-    this.keyboardInput?.setEnabled(enabled);
+    if (this.config.mode !== 'mascot') {
+      this.keyboardInput?.setEnabled(enabled);
+    }
   }
 
   /**
-   * Public programmatic resize hook (also invoked automatically by ResizeObserver & fullscreenchange).
+   * Toggles gentle 3rd-person camera auto-orbit around `Player_Rig` while preserving smooth lerp tracking.
    */
+  public setAutoOrbit(enabled: boolean): void {
+    this.config.autoOrbit = Boolean(enabled);
+    if (this.ecsWorld && this.builtUrbanStage?.playerEntityId != null) {
+      const follow = this.ecsWorld.getComponent(
+        this.builtUrbanStage.playerEntityId,
+        'CameraFollow'
+      );
+      if (follow) {
+        follow.autoOrbit = Boolean(enabled);
+      }
+    }
+  }
+
+  public isGlbLoaded(): boolean {
+    return this.glbLoaded;
+  }
+
   public resize(dimensions: { width: number; height: number }, immediate = false): void {
     if (this.state === 'destroyed') return;
     if (dimensions.width > 0 && dimensions.height > 0) {
@@ -366,9 +460,13 @@ export class AsciiEngineCore {
     const prevMaxDpr = this.config.maxPixelRatio;
 
     this.config = mergeEngineConfig(this.config, partialConfig);
-    this.keyboardInput?.setEnabled(this.config.enableKeyboard);
+    if (this.config.mode !== 'mascot') {
+      this.keyboardInput?.setEnabled(this.config.enableKeyboard);
+    }
+    if (partialConfig.autoOrbit !== undefined) {
+      this.setAutoOrbit(partialConfig.autoOrbit);
+    }
     this.loop?.setMaxFps(this.config.maxFps);
-    this.windSystem?.setWindStrength(this.config.windStrength);
 
     if (!this.renderer || !this.scene || !this.postProcessor) return;
 
@@ -386,7 +484,6 @@ export class AsciiEngineCore {
       this.renderer.shadowMap.needsUpdate = true;
     }
 
-    // Apply live atmosphere & palette updates to sky, fog, architecture, shadows & boulevard uniforms
     if (this.builtMascot && !partialConfig.palette?.background) {
       this.config.palette.background = MASCOT_BACKDROP_HEX;
     }
@@ -394,8 +491,12 @@ export class AsciiEngineCore {
       this.scene.background.set(this.config.palette.background);
     }
 
-    if (this.builtPlayground) {
-      PlaygroundSceneBuilder.applyAtmosphere(this.builtPlayground, this.config);
+    if (this.builtUrbanStage) {
+      UrbanGlbSceneBuilder.applyAtmosphere(
+        this.builtUrbanStage,
+        this.config,
+        this.ecsWorld ?? undefined
+      );
       this.renderer.shadowMap.needsUpdate = true;
     } else if (this.scene.fog instanceof THREE.FogExp2) {
       this.scene.fog.color.set(this.config.palette.background);
@@ -419,6 +520,7 @@ export class AsciiEngineCore {
         typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
         this.isCoarsePointerDevice()
       );
+      this.lastResolutionProfile = grid;
       this.activeCellSize = grid.activeCellSize;
       this.gridColumns = grid.columns;
       this.gridRows = grid.rows;
@@ -439,20 +541,37 @@ export class AsciiEngineCore {
 
     this.systemRunner?.clear();
     this.systemRunner = null;
-    this.windSystem = null;
 
     for (const outlined of this.outlinedTargets) {
       clearObjectOutline(outlined);
     }
     this.outlinedTargets.clear();
 
-    // Dispose ECS-owned dynamic entities & lights cleanly before sweeping remaining scene graph
+    if (this.glbLoader) {
+      this.glbLoader.dispose();
+      this.glbLoader = null;
+    }
+
+    if (this.vfx) {
+      this.vfx.dispose();
+      this.vfx = null;
+    }
+
+    // Dispose ECS-owned entities, AnimationMixers, SpotLights/PointLights, geometries & textures
     this.ecsWorld?.clear(true);
     this.ecsWorld = null;
-    this.builtPlayground = null;
+
+    if (this.builtUrbanStage?.assets) {
+      this.builtUrbanStage.assets.dispose();
+    }
+    this.builtUrbanStage = null;
+    this.glbLoaded = false;
     this.builtMascot = null;
     this.mascotRootObj = null;
-    this.vfx = null;
+
+    this.container.removeAttribute('data-scene-loading');
+    this.container.removeAttribute('data-glb-ready');
+    this.container.removeAttribute('data-glb-error');
 
     this.lifecycle?.disposeAll(this.scene);
     this.lifecycle = null;
@@ -478,6 +597,7 @@ export class AsciiEngineCore {
     }
 
     this.state = 'destroyed';
+    this.config.callbacks?.onStateChange?.('destroyed');
     this.config.callbacks?.onDestroy?.();
   }
 
@@ -505,8 +625,16 @@ export class AsciiEngineCore {
     };
   }
 
+  public getResolutionProfile(): ResolutionProfile | null {
+    return this.lastResolutionProfile;
+  }
+
   public getScene(): THREE.Scene | null {
     return this.scene;
+  }
+
+  public getWorld(): World | null {
+    return this.ecsWorld;
   }
 
   public getCamera(): THREE.PerspectiveCamera | null {
@@ -520,10 +648,6 @@ export class AsciiEngineCore {
     return { yaw: t.rotY, pitch: t.rotX };
   }
 
-  /**
-   * Resolves a target selector (`THREE.Object3D`, `'primary'`, object name in scene, or ECS `EntityId`)
-   * to its underlying `THREE.Object3D` without applying any global scene effects.
-   */
   private resolveOutlineTarget(target: OutlineTargetSelector): THREE.Object3D | null {
     if (!target && target !== 0) return null;
 
@@ -549,12 +673,6 @@ export class AsciiEngineCore {
     return null;
   }
 
-  /**
-   * Applies or updates a configurable silhouette outline on a specific target object on demand.
-   * Accepts `thickness`/`width`, `enabled`/`visible`, `intensity`, `opacity`, and an optional
-   * `highlightColor`/`color` (defaulting to the engine's `palette.cursorLight` or `#7DF9FF` when
-   * omitted on first application so dark objects stand out against dark backgrounds).
-   */
   public setObjectOutline(
     target: OutlineTargetSelector,
     options?: ObjectOutlineOptions
@@ -584,10 +702,6 @@ export class AsciiEngineCore {
     return handle;
   }
 
-  /**
-   * Removes and disposes the outline from a specific target (or from all outlined targets in this
-   * engine instance when `target` is omitted). Returns the number of outline shell meshes removed.
-   */
   public clearObjectOutline(target?: OutlineTargetSelector): number {
     if (target === undefined) {
       let total = 0;
@@ -612,9 +726,6 @@ export class AsciiEngineCore {
     return removed;
   }
 
-  /**
-   * Returns the current outline configuration snapshot for `target`, or `null` if not outlined.
-   */
   public getObjectOutlineState(
     target: OutlineTargetSelector
   ): ResolvedObjectOutlineState | null {
@@ -626,12 +737,12 @@ export class AsciiEngineCore {
   private renderFrame(dt: number, elapsed: number): void {
     if (!this.renderer || !this.scene || !this.camera || !this.postProcessor) return;
 
-    // 1. Run Ordered ECS Systems (Input -> Patrol -> Movement/Rotation -> Animation -> NeonPulse -> RenderSync)
+    // 1. Run Ordered ECS Systems
     if (this.ecsWorld && this.systemRunner) {
       this.systemRunner.run(this.ecsWorld, { dt, elapsed });
     }
 
-    // 2. Update Camera Parallax, Cursor Spotlight & Cyberpunk Rain/Particles
+    // 2. Update Weather VFX & Cursor Fill Light
     const ptr = this.pointerInput
       ? this.pointerInput.sample(0)
       : {
@@ -646,62 +757,9 @@ export class AsciiEngineCore {
           lastInteractionMs: 0,
         };
 
-    this.vfx?.update(dt, elapsed, ptr, this.camera, this.config);
+    this.vfx?.update(this.camera, ptr, dt, elapsed);
 
-    // 3. Sync Playground Boulevard Reflections, Real-Time PCF Shadow Map & Protagonist Grounding
-    if (this.builtPlayground) {
-      const u = this.builtPlayground.waterMaterial.uniforms;
-      if (u.uTime) u.uTime.value = elapsed;
-      if (u.uCamPos) u.uCamPos.value.copy(this.camera.position);
-      if (u.uShrineLight) {
-        u.uShrineLight.value.set(
-          this.builtPlayground.torchLight.position.x,
-          this.builtPlayground.torchLight.position.y,
-          this.builtPlayground.torchLight.position.z,
-          this.builtPlayground.torchLight.intensity
-        );
-      }
-
-      // Bind live DirectionalLight shadow map & projection matrix so street surface receives real-time shadows
-      const dirShadow = this.builtPlayground.moonDirLight.shadow;
-      if (this.config.enableShadows && dirShadow.map) {
-        if (u.uDirShadowMap) u.uDirShadowMap.value = dirShadow.map.texture;
-        if (u.uDirShadowMatrix) u.uDirShadowMatrix.value.copy(dirShadow.matrix);
-        if (u.uShadowMapSize) {
-          u.uShadowMapSize.value.set(dirShadow.mapSize.width, dirShadow.mapSize.height);
-        }
-        if (u.uShadowEnabled) u.uShadowEnabled.value = 1.0;
-      } else if (u.uShadowEnabled) {
-        u.uShadowEnabled.value = 0.0;
-      }
-
-      if (this.ecsWorld && u.uAvatarPos) {
-        const avT = this.ecsWorld.getComponent(this.builtPlayground.avatarEntityId, 'Transform');
-        if (avT) {
-          u.uAvatarPos.value.set(avT.x, avT.y, avT.z);
-        }
-      }
-
-      if (this.vfx) {
-        const cursorLight = this.vfx.getCursorLight();
-        if (u.uCursorPos) u.uCursorPos.value.copy(cursorLight.position);
-        if (u.uCursorIntensity) u.uCursorIntensity.value = cursorLight.intensity;
-      }
-
-      const torchUniforms = ['uTorch0', 'uTorch1', 'uTorch2', 'uTorch3'] as const;
-      for (let i = 0; i < torchUniforms.length; i++) {
-        const key = torchUniforms[i]!;
-        const bl = this.builtPlayground.brazierLights[i];
-        if (u[key]) {
-          if (bl) {
-            u[key].value.set(bl.position.x, bl.position.y, bl.position.z, bl.intensity);
-          } else {
-            u[key].value.set(0, 0, 0, 0);
-          }
-        }
-      }
-    }
-
+    // 3. Keep Mascot Stage Floor Shadow & Diffused Reflection Synced
     if (this.builtMascot) {
       const mu = this.builtMascot.floorMaterial.uniforms;
       if (mu.uCamPos) {
@@ -732,7 +790,7 @@ export class AsciiEngineCore {
       }
     }
 
-    // 4. Multi-Pass ASCII Post-Processing Render (with smooth cell-density transition step)
+    // 4. Multi-Pass 3D-Wrapping ASCII Post-Processing Render
     const metrics = this.postProcessor.render(
       this.renderer,
       this.scene,
@@ -775,7 +833,6 @@ export class AsciiEngineCore {
       isFullscreen: this.isFullscreenActive || cssFullscreen,
     });
 
-    // Skip duplicate no-op resize ticks if physical resolution and grid are already identical
     if (
       !immediate &&
       this.containerWidth === profile.cssWidth &&
@@ -786,6 +843,7 @@ export class AsciiEngineCore {
       return;
     }
 
+    this.lastResolutionProfile = profile;
     this.containerWidth = profile.cssWidth;
     this.containerHeight = profile.cssHeight;
     this.effectiveDpr = profile.effectiveDpr;
@@ -801,8 +859,6 @@ export class AsciiEngineCore {
 
     const aspect = Math.max(0.1, profile.cssWidth / Math.max(1, profile.cssHeight));
     this.camera.aspect = aspect;
-    // Preserve explicit custom FOV (e.g. 106°) when configured via `config.fov` or mutated on `camera.fov`;
-    // otherwise apply responsive default playground FOV
     if (typeof this.config.fov === 'number') {
       this.camera.fov = this.config.fov;
       this.lastAutoPlaygroundFov = null;
@@ -811,7 +867,7 @@ export class AsciiEngineCore {
         this.lastAutoPlaygroundFov !== null &&
         Math.abs(this.camera.fov - this.lastAutoPlaygroundFov) > 0.01;
       if (!wasCustomizedExternally) {
-        const autoFov = aspect < 1.0 ? 54 : this.isFullscreenActive || cssFullscreen ? 44 : 46;
+        const autoFov = 58;
         this.camera.fov = autoFov;
         this.lastAutoPlaygroundFov = autoFov;
       }
@@ -819,6 +875,7 @@ export class AsciiEngineCore {
     this.camera.updateProjectionMatrix();
 
     this.postProcessor.applyResolutionProfile(profile, this.config, immediate);
+    this.config.callbacks?.onResolutionChange?.(profile);
 
     if (this.state === 'paused') {
       this.loop?.stepOnce(0);
@@ -829,6 +886,7 @@ export class AsciiEngineCore {
     if (this.state !== 'running') return;
     this.loop?.pause();
     this.state = 'paused';
+    this.config.callbacks?.onStateChange?.('paused');
     this.config.callbacks?.onPause?.();
   }
 
@@ -839,6 +897,7 @@ export class AsciiEngineCore {
     }
     this.state = 'running';
     this.loop?.resume();
+    this.config.callbacks?.onStateChange?.('running');
     this.config.callbacks?.onResume?.();
   }
 

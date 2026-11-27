@@ -26,3 +26,12 @@ venv/
 
 # Pages staging directory (created by .github/workflows/pages.yml)
 _site/
+
+# Block raw/uncompressed 3D authoring backups (only compressed assets/models/*.glb are tracked)
+*.blend
+*.blend1
+*.fbx
+*.obj
+*.orig.glb
+*.raw.glb
+*.uncompressed.glb

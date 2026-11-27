@@ -90,3 +90,14 @@ jobs:
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: --prod
           working-directory: .
+
+  vcr-cleanup:
+    name: Prune surplus VCR images
+    needs: deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/vcr-cleanup.yml
+    with:
+      allow_missing_token: true
+    secrets: inherit

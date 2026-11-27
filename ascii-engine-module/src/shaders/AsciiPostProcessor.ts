@@ -3,220 +3,251 @@ import {
   computeAdaptiveResolution,
   ResolutionTransitionController,
 } from '../core/ResolutionController';
+import type { EngineConfig, ResolutionProfile } from '../types';
 import {
   ASCII_COMPOSITE_FRAGMENT_SHADER,
-  BLOOM_BLUR_FRAGMENT_SHADER,
-  BLOOM_DOWNSAMPLE_FRAGMENT_SHADER,
+  BLOOM_EXTRACT_FRAGMENT_SHADER,
   FULLSCREEN_VERTEX_SHADER,
 } from './asciiShader';
 import { createGlyphAtlas, type GlyphAtlasData } from './glyphAtlas';
-import type { EngineConfig, ResolutionProfile } from '../types';
+import {
+  extractSceneDirectionalVectors,
+  NormalPassMaterialCache,
+} from './normalMaps';
+
+export interface PostProcessRenderMetrics {
+  drawCalls: number;
+  triangles: number;
+}
 
 /**
- * Self-contained WebGL multi-pass post-processor:
- *  Pass 1: 3D Scene -> Offscreen RGBA HalfFloat RenderTarget + DepthTexture
- *  Pass 2: Bright-pass extraction & downsample (1/3 desktop, 1/4 mobile)
- *  Pass 3 & 4: Separable wide Gaussian/Kawase blur (H + V) so neon light bleeds across neighboring ASCII cells
- *  Pass 5: High-Resolution Adaptive ASCII Composite (center-anchored smooth cell-size transition + 5-tap sub-cell supersampling + DoF + Sobel structural glyphs)
+ * AsciiPostProcessor: Multi-pass GPU post-processing pipeline:
+ * 1. Offscreen Scene Color + Depth RenderTarget (`HalfFloatType` + `DepthTexture`)
+ * 2. Offscreen Normal-Map-Aware View-Space Normal RenderTarget (`NormalPassMaterialCache` —
+ *    captures vertex normals + macro-filtered embedded/procedural normal maps across static & skinned meshes)
+ * 3. Downsampled 13-tap Soft-Knee Bloom RenderTarget (contained typographic light halos)
+ * 4. Full-screen 3D-Wrapping ASCII Composite Shader (view-space directional normal lighting,
+ *    normal-perturbed ground reflections, sub-cell supersampling, and 5:8 glyph atlas)
  */
 export class AsciiPostProcessor {
-  private readonly quadScene: THREE.Scene;
-  private readonly quadCamera: THREE.OrthographicCamera;
-  private readonly quadGeometry: THREE.BufferGeometry;
-  private readonly quadMesh: THREE.Mesh;
-
   private sceneTarget: THREE.WebGLRenderTarget;
+  private normalTarget: THREE.WebGLRenderTarget;
+  private bloomTarget: THREE.WebGLRenderTarget;
   private depthTexture: THREE.DepthTexture;
-  private bloomTargetA: THREE.WebGLRenderTarget;
-  private bloomTargetB: THREE.WebGLRenderTarget;
 
-  private atlasData: GlyphAtlasData;
-
-  private readonly downsampleMaterial: THREE.ShaderMaterial;
-  private readonly blurMaterial: THREE.ShaderMaterial;
+  private readonly normalPassCache = new NormalPassMaterialCache();
+  private readonly bloomMaterial: THREE.ShaderMaterial;
   private readonly compositeMaterial: THREE.ShaderMaterial;
-  private readonly transitionController: ResolutionTransitionController;
+  private readonly transitionController = new ResolutionTransitionController(14.0);
+  private readonly savedClearColor = new THREE.Color();
 
-  private lastProfile: ResolutionProfile | null = null;
-  private allocatedPhysW = 2;
-  private allocatedPhysH = 2;
-  private allocatedBloomW = 2;
-  private allocatedBloomH = 2;
+  private readonly quadGeometry: THREE.PlaneGeometry;
+  private readonly bloomQuad: THREE.Mesh;
+  private readonly compositeQuad: THREE.Mesh;
+  private readonly postScene: THREE.Scene;
+  private readonly bloomScene: THREE.Scene;
+  private readonly orthoCamera: THREE.OrthographicCamera;
 
-  constructor(config: EngineConfig) {
-    this.quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.quadScene = new THREE.Scene();
-    this.quadGeometry = new THREE.PlaneGeometry(2, 2);
-    this.transitionController = new ResolutionTransitionController(14.0);
+  private atlas: GlyphAtlasData;
+  private currentAtlasSignature = '';
+  private currentBloomDownsample = 3;
 
-    this.atlasData = createGlyphAtlas(
-      config.characterRamp,
-      config.structuralChars,
-      config.fontFamily,
-      64
-    );
+  constructor(
+    configOrWidth: EngineConfig | number,
+    initialHeight?: number,
+    maybeConfig?: EngineConfig,
+    initialTileSize = 64
+  ) {
+    const isShortCtor = typeof configOrWidth === 'object';
+    const config = isShortCtor ? configOrWidth : maybeConfig!;
+    const w = Math.max(2, Math.floor(isShortCtor ? 320 : configOrWidth));
+    const h = Math.max(2, Math.floor(isShortCtor ? 240 : (initialHeight ?? 240)));
 
-    this.depthTexture = new THREE.DepthTexture(2, 2);
-    this.depthTexture.type = THREE.UnsignedIntType;
-    this.depthTexture.minFilter = THREE.NearestFilter;
-    this.depthTexture.magFilter = THREE.NearestFilter;
+    this.depthTexture = new THREE.DepthTexture(w, h);
+    this.depthTexture.type = THREE.UnsignedInt248Type;
+    this.depthTexture.format = THREE.DepthStencilFormat;
 
-    this.sceneTarget = new THREE.WebGLRenderTarget(2, 2, {
+    this.sceneTarget = new THREE.WebGLRenderTarget(w, h, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.HalfFloatType,
+      depthTexture: this.depthTexture,
+      depthBuffer: true,
+    });
+
+    this.normalTarget = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
       format: THREE.RGBAFormat,
       type: THREE.HalfFloatType,
       depthBuffer: true,
-      stencilBuffer: false,
-      depthTexture: this.depthTexture,
     });
 
-    this.bloomTargetA = new THREE.WebGLRenderTarget(2, 2, {
+    const bw = Math.max(2, Math.floor(w / this.currentBloomDownsample));
+    const bh = Math.max(2, Math.floor(h / this.currentBloomDownsample));
+    this.bloomTarget = new THREE.WebGLRenderTarget(bw, bh, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
       type: THREE.HalfFloatType,
       depthBuffer: false,
-      stencilBuffer: false,
     });
 
-    this.bloomTargetB = new THREE.WebGLRenderTarget(2, 2, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.HalfFloatType,
-      depthBuffer: false,
-      stencilBuffer: false,
-    });
+    this.atlas = createGlyphAtlas(
+      config.characterRamp,
+      config.structuralChars,
+      config.fontFamily,
+      initialTileSize
+    );
+    this.currentAtlasSignature = this.computeAtlasSignature(config, initialTileSize);
 
-    this.downsampleMaterial = new THREE.ShaderMaterial({
+    this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.quadGeometry = new THREE.PlaneGeometry(2, 2);
+
+    this.bloomMaterial = new THREE.ShaderMaterial({
       vertexShader: FULLSCREEN_VERTEX_SHADER,
-      fragmentShader: BLOOM_DOWNSAMPLE_FRAGMENT_SHADER,
-      depthWrite: false,
-      depthTest: false,
+      fragmentShader: BLOOM_EXTRACT_FRAGMENT_SHADER,
       uniforms: {
         tScene: { value: this.sceneTarget.texture },
-        uTexelSize: { value: new THREE.Vector2(1 / 2, 1 / 2) },
+        uTexelSize: { value: new THREE.Vector2(1 / w, 1 / h) },
         uThreshold: { value: config.bloomThreshold },
-        uTime: { value: 0 },
       },
-    });
-
-    this.blurMaterial = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX_SHADER,
-      fragmentShader: BLOOM_BLUR_FRAGMENT_SHADER,
-      depthWrite: false,
       depthTest: false,
-      uniforms: {
-        tInput: { value: null },
-        uTexelSize: { value: new THREE.Vector2(1 / 2, 1 / 2) },
-        uDirection: { value: new THREE.Vector2(1, 0) },
-      },
+      depthWrite: false,
     });
 
-    const bgColor = new THREE.Color(config.palette.background);
+    const bg = new THREE.Color(config.palette.background);
+    const cool = new THREE.Color(config.palette.coolAmbient);
+    const warm = new THREE.Color(config.palette.warmLight);
 
     this.compositeMaterial = new THREE.ShaderMaterial({
       vertexShader: FULLSCREEN_VERTEX_SHADER,
       fragmentShader: ASCII_COMPOSITE_FRAGMENT_SHADER,
-      depthWrite: false,
-      depthTest: false,
       uniforms: {
         tScene: { value: this.sceneTarget.texture },
+        tNormal: { value: this.normalTarget.texture },
         tDepth: { value: this.depthTexture },
-        tBloom: { value: this.bloomTargetA.texture },
-        tGlyphAtlas: { value: this.atlasData.texture },
-        uResolution: { value: new THREE.Vector2(2, 2) },
-        uCellSize: { value: new THREE.Vector2(8, 13) },
+        tBloom: { value: this.bloomTarget.texture },
+        tGlyphAtlas: { value: this.atlas.texture },
+        uResolution: { value: new THREE.Vector2(w, h) },
+        uCellPixelSize: { value: new THREE.Vector2(6, 10) },
         uAtlasTileSize: {
-          value: new THREE.Vector2(this.atlasData.tileWidth, this.atlasData.tileHeight),
+          value: new THREE.Vector2(this.atlas.tileWidth, this.atlas.tileHeight),
         },
         uSubCellSpread: { value: 0.22 },
-        uTransitionMix: { value: 0.0 },
-        uRampCount: { value: this.atlasData.rampCount },
-        uStructuralCount: { value: this.atlasData.structuralCount },
-        uBlockCount: { value: this.atlasData.blockCount },
-        uTotalGlyphs: { value: this.atlasData.totalGlyphs },
-        uCameraNear: { value: 0.5 },
-        uCameraFar: { value: 110.0 },
-        uDofFocus: { value: config.dofFocusDistance },
-        uDofStrength: { value: config.dofStrength },
+        uRampCount: { value: this.atlas.rampCount },
+        uStructCount: { value: this.atlas.structuralCount },
+        uBlockCount: { value: this.atlas.blockCount },
+        uTotalGlyphs: { value: this.atlas.totalGlyphs },
         uEdgeStrength: { value: config.edgeStrength },
         uBlockBlendWeight: { value: config.blockBlendWeight },
         uBloomIntensity: { value: config.bloomIntensity },
+        uDofFocus: { value: config.dofFocusDistance },
+        uDofStrength: { value: config.dofStrength },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
-        uMascotStudio: { value: config.mode === 'mascot' ? 1.0 : 0.0 },
-        uBgColor: { value: bgColor },
+        uWetness: { value: AsciiPostProcessor.resolveWetness(config) },
+        uCameraNear: { value: 0.1 },
+        uCameraFar: { value: 140.0 },
+        uVolumeWrapStrength: { value: config.mode === 'mascot' ? 0.0 : 1.0 },
+        uNormalReliefStrength: { value: AsciiPostProcessor.resolveNormalRelief(config) },
+        uKeyLightViewDir: { value: new THREE.Vector3(-0.48, 0.72, 0.50).normalize() },
+        uRimLightViewDir: { value: new THREE.Vector3(0.58, 0.42, -0.70).normalize() },
+        uWorldUpViewDir: { value: new THREE.Vector3(0.0, 0.78, 0.62).normalize() },
+        uBgColor: { value: bg },
+        uCoolTint: { value: cool },
+        uWarmTint: { value: warm },
         uTime: { value: 0 },
       },
+      depthTest: false,
+      depthWrite: false,
     });
 
-    this.quadMesh = new THREE.Mesh(this.quadGeometry, this.compositeMaterial);
-    this.quadMesh.frustumCulled = false;
-    this.quadScene.add(this.quadMesh);
+    this.bloomQuad = new THREE.Mesh(this.quadGeometry, this.bloomMaterial);
+    this.bloomScene = new THREE.Scene();
+    this.bloomScene.add(this.bloomQuad);
+
+    this.compositeQuad = new THREE.Mesh(this.quadGeometry, this.compositeMaterial);
+    this.postScene = new THREE.Scene();
+    this.postScene.add(this.compositeQuad);
   }
 
-  /**
-   * Applies an adaptive `ResolutionProfile` to offscreen render targets (skipping redundant GPU
-   * reallocations when dimensions are unchanged) and feeds smooth cell-density interpolation.
-   */
+  private static resolveWetness(config: EngineConfig): number {
+    if (config.mode === 'mascot') return 0.0;
+    if (config.atmosphere === 'rain') return 1.0;
+    if (config.atmosphere === 'day') return 0.22;
+    return 0.62;
+  }
+
+  private static resolveNormalRelief(config: EngineConfig): number {
+    if (config.mode === 'mascot') return 0.72;
+    if (config.atmosphere === 'day') return 1.12;
+    if (config.atmosphere === 'rain') return 1.06;
+    return 1.0;
+  }
+
+  private computeAtlasSignature(config: EngineConfig, tileSize: number): string {
+    return `${config.characterRamp}::${config.structuralChars}::${config.fontFamily}::${tileSize}`;
+  }
+
+  private rebuildAtlasIfNeeded(config: EngineConfig, tileSize: number, force = false): void {
+    const nextSig = this.computeAtlasSignature(config, tileSize);
+    if (!force && nextSig === this.currentAtlasSignature) return;
+
+    const oldAtlas = this.atlas;
+    this.atlas = createGlyphAtlas(
+      config.characterRamp,
+      config.structuralChars,
+      config.fontFamily,
+      tileSize
+    );
+    this.currentAtlasSignature = nextSig;
+
+    this.compositeMaterial.uniforms.tGlyphAtlas!.value = this.atlas.texture;
+    this.compositeMaterial.uniforms.uAtlasTileSize!.value.set(
+      this.atlas.tileWidth,
+      this.atlas.tileHeight
+    );
+    this.compositeMaterial.uniforms.uRampCount!.value = this.atlas.rampCount;
+    this.compositeMaterial.uniforms.uStructCount!.value = this.atlas.structuralCount;
+    this.compositeMaterial.uniforms.uBlockCount!.value = this.atlas.blockCount;
+    this.compositeMaterial.uniforms.uTotalGlyphs!.value = this.atlas.totalGlyphs;
+    oldAtlas.texture.dispose();
+  }
+
   public applyResolutionProfile(
     profile: ResolutionProfile,
     config: EngineConfig,
     immediate = false
-  ): ResolutionProfile {
-    this.lastProfile = profile;
+  ): void {
+    const w = Math.max(2, profile.physicalWidth);
+    const h = Math.max(2, profile.physicalHeight);
 
-    if (
-      this.allocatedPhysW !== profile.physicalWidth ||
-      this.allocatedPhysH !== profile.physicalHeight
-    ) {
-      this.allocatedPhysW = profile.physicalWidth;
-      this.allocatedPhysH = profile.physicalHeight;
-      this.sceneTarget.setSize(profile.physicalWidth, profile.physicalHeight);
-    }
+    this.currentBloomDownsample = profile.bloomDownsample;
+    const bw = Math.max(2, Math.floor(w / this.currentBloomDownsample));
+    const bh = Math.max(2, Math.floor(h / this.currentBloomDownsample));
 
-    const bloomWidth = Math.max(2, Math.floor(profile.physicalWidth / profile.bloomDownsample));
-    const bloomHeight = Math.max(2, Math.floor(profile.physicalHeight / profile.bloomDownsample));
-    if (this.allocatedBloomW !== bloomWidth || this.allocatedBloomH !== bloomHeight) {
-      this.allocatedBloomW = bloomWidth;
-      this.allocatedBloomH = bloomHeight;
-      this.bloomTargetA.setSize(bloomWidth, bloomHeight);
-      this.bloomTargetB.setSize(bloomWidth, bloomHeight);
-    }
+    this.sceneTarget.setSize(w, h);
+    this.normalTarget.setSize(w, h);
+    this.bloomTarget.setSize(bw, bh);
 
-    this.downsampleMaterial.uniforms.uTexelSize.value.set(
-      1 / profile.physicalWidth,
-      1 / profile.physicalHeight
-    );
-    this.blurMaterial.uniforms.uTexelSize.value.set(1 / bloomWidth, 1 / bloomHeight);
-    this.compositeMaterial.uniforms.uResolution.value.set(
-      profile.physicalWidth,
-      profile.physicalHeight
-    );
+    this.bloomMaterial.uniforms.uTexelSize!.value.set(1 / w, 1 / h);
+    this.compositeMaterial.uniforms.uResolution!.value.set(w, h);
 
     this.transitionController.setTarget(profile, immediate);
-    const initialStep = this.transitionController.step(0);
-    this.compositeMaterial.uniforms.uCellSize.value.set(initialStep.cellW, initialStep.cellH);
-    this.compositeMaterial.uniforms.uSubCellSpread.value = initialStep.subCellSpread;
-    this.compositeMaterial.uniforms.uTransitionMix.value = initialStep.transitionMix;
+    const stepped = this.transitionController.step(0);
+    this.compositeMaterial.uniforms.uCellPixelSize!.value.set(stepped.cellW, stepped.cellH);
+    this.compositeMaterial.uniforms.uSubCellSpread!.value = stepped.subCellSpread;
 
-    // Upgrade or downgrade 2D Canvas glyph atlas resolution when moving between 1x and HiDPI/Retina
-    if (this.atlasData.tileSize !== profile.atlasTileSize) {
-      this.rebuildGlyphAtlas(config, profile.atlasTileSize);
-    }
-
-    return profile;
+    this.rebuildAtlasIfNeeded(config, profile.atlasTileSize, false);
   }
 
-  /**
-   * Backward-compatible resize entry computing an adaptive profile directly.
-   */
-  public setSize(
-    cssWidth: number,
-    cssHeight: number,
-    devicePixelRatio: number,
+  public applyConfig(
     config: EngineConfig,
+    forceAtlasRebuild = false,
+    cssWidth = 640,
+    cssHeight = 360,
+    devicePixelRatio = 1,
     isCoarsePointer = false
   ): ResolutionProfile {
     const profile = computeAdaptiveResolution({
@@ -226,128 +257,120 @@ export class AsciiPostProcessor {
       config,
       isCoarsePointer,
     });
-    return this.applyResolutionProfile(profile, config);
-  }
 
-  /**
-   * Updates shader uniforms or regenerates the glyph atlas when config changes dynamically.
-   */
-  public applyConfig(
-    config: EngineConfig,
-    rebuildAtlas: boolean,
-    cssWidth: number,
-    cssHeight: number,
-    devicePixelRatio = 1,
-    isCoarsePointer = false
-  ): ResolutionProfile {
-    const profile = computeAdaptiveResolution({
-      cssWidth,
-      cssHeight,
-      devicePixelRatio: this.lastProfile?.effectiveDpr ?? devicePixelRatio,
-      config,
-      isCoarsePointer,
-    });
-
-    if (rebuildAtlas || this.atlasData.tileSize !== profile.atlasTileSize) {
-      this.rebuildGlyphAtlas(config, profile.atlasTileSize);
-    }
-
-    this.downsampleMaterial.uniforms.uThreshold.value = config.bloomThreshold;
-    this.compositeMaterial.uniforms.uBloomIntensity.value = config.bloomIntensity;
-    this.compositeMaterial.uniforms.uDofFocus.value = config.dofFocusDistance;
-    this.compositeMaterial.uniforms.uDofStrength.value = config.dofStrength;
-    this.compositeMaterial.uniforms.uEdgeStrength.value = config.edgeStrength;
-    this.compositeMaterial.uniforms.uBlockBlendWeight.value = config.blockBlendWeight;
-    this.compositeMaterial.uniforms.uDaylight.value = config.atmosphere === 'day' ? 1.0 : 0.0;
-    this.compositeMaterial.uniforms.uMascotStudio.value = config.mode === 'mascot' ? 1.0 : 0.0;
-    this.compositeMaterial.uniforms.uBgColor.value.set(config.palette.background);
-
-    return this.applyResolutionProfile(profile, config, false);
-  }
-
-  private rebuildGlyphAtlas(config: EngineConfig, tileSize: number): void {
-    const oldAtlas = this.atlasData;
-    this.atlasData = createGlyphAtlas(
-      config.characterRamp,
-      config.structuralChars,
-      config.fontFamily,
-      tileSize
+    this.rebuildAtlasIfNeeded(config, profile.atlasTileSize, forceAtlasRebuild);
+    this.transitionController.setTarget(profile, true);
+    this.compositeMaterial.uniforms.uCellPixelSize!.value.set(
+      profile.cellPhysW,
+      profile.cellPhysH
     );
-    this.compositeMaterial.uniforms.tGlyphAtlas.value = this.atlasData.texture;
-    this.compositeMaterial.uniforms.uAtlasTileSize.value.set(
-      this.atlasData.tileWidth,
-      this.atlasData.tileHeight
+    this.compositeMaterial.uniforms.uSubCellSpread!.value = profile.subCellSampleSpread;
+
+    this.bloomMaterial.uniforms.uThreshold!.value = config.bloomThreshold;
+    this.compositeMaterial.uniforms.uEdgeStrength!.value = config.edgeStrength;
+    this.compositeMaterial.uniforms.uBlockBlendWeight!.value = config.blockBlendWeight;
+    this.compositeMaterial.uniforms.uBloomIntensity!.value = config.bloomIntensity;
+    this.compositeMaterial.uniforms.uDofFocus!.value = config.dofFocusDistance;
+    this.compositeMaterial.uniforms.uDofStrength!.value = config.dofStrength;
+    this.compositeMaterial.uniforms.uDaylight!.value = config.atmosphere === 'day' ? 1.0 : 0.0;
+    this.compositeMaterial.uniforms.uWetness!.value = AsciiPostProcessor.resolveWetness(config);
+    this.compositeMaterial.uniforms.uVolumeWrapStrength!.value =
+      config.mode === 'mascot' ? 0.0 : 1.0;
+    this.compositeMaterial.uniforms.uNormalReliefStrength!.value =
+      AsciiPostProcessor.resolveNormalRelief(config);
+
+    (this.compositeMaterial.uniforms.uBgColor!.value as THREE.Color).set(
+      config.palette.background
     );
-    this.compositeMaterial.uniforms.uRampCount.value = this.atlasData.rampCount;
-    this.compositeMaterial.uniforms.uStructuralCount.value = this.atlasData.structuralCount;
-    this.compositeMaterial.uniforms.uBlockCount.value = this.atlasData.blockCount;
-    this.compositeMaterial.uniforms.uTotalGlyphs.value = this.atlasData.totalGlyphs;
-    oldAtlas.texture.dispose();
+    (this.compositeMaterial.uniforms.uCoolTint!.value as THREE.Color).set(
+      config.palette.coolAmbient
+    );
+    (this.compositeMaterial.uniforms.uWarmTint!.value as THREE.Color).set(
+      config.palette.warmLight
+    );
+
+    return profile;
   }
 
   public render(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
-    camera: THREE.PerspectiveCamera,
+    camera: THREE.Camera,
     elapsedSeconds: number,
-    dtSeconds = 1 / 60
-  ): { drawCalls: number; triangles: number } {
-    // Advance smooth resolution / cell-density transition
-    const tr = this.transitionController.step(dtSeconds);
-    this.compositeMaterial.uniforms.uCellSize.value.set(tr.cellW, tr.cellH);
-    this.compositeMaterial.uniforms.uSubCellSpread.value = tr.subCellSpread;
-    this.compositeMaterial.uniforms.uTransitionMix.value = tr.transitionMix;
+    dt = 0
+  ): PostProcessRenderMetrics {
+    this.compositeMaterial.uniforms.uTime!.value = elapsedSeconds;
 
-    this.compositeMaterial.uniforms.uCameraNear.value = camera.near;
-    this.compositeMaterial.uniforms.uCameraFar.value = camera.far;
-    this.compositeMaterial.uniforms.uTime.value = elapsedSeconds;
-    this.downsampleMaterial.uniforms.uTime.value = elapsedSeconds;
+    if (dt > 0) {
+      const stepped = this.transitionController.step(dt);
+      this.compositeMaterial.uniforms.uCellPixelSize!.value.set(stepped.cellW, stepped.cellH);
+      this.compositeMaterial.uniforms.uSubCellSpread!.value = stepped.subCellSpread;
+    }
 
-    // Pass 1: Render 3D world + depth texture
+    const persp = camera as THREE.PerspectiveCamera;
+    if (persp.isPerspectiveCamera) {
+      this.compositeMaterial.uniforms.uCameraNear!.value = persp.near;
+      this.compositeMaterial.uniforms.uCameraFar!.value = persp.far;
+    }
+
+    // Extract view-space directional key/rim lights and true world-up vector with zero allocations
+    extractSceneDirectionalVectors(
+      scene,
+      camera,
+      this.compositeMaterial.uniforms.uKeyLightViewDir!.value as THREE.Vector3,
+      this.compositeMaterial.uniforms.uRimLightViewDir!.value as THREE.Vector3,
+      this.compositeMaterial.uniforms.uWorldUpViewDir!.value as THREE.Vector3
+    );
+
+    // Pass 1: Lit 3D Scene + Hardware DepthTexture
     renderer.setRenderTarget(this.sceneTarget);
-    renderer.clear(true, true, false);
+    renderer.clear();
     renderer.render(scene, camera);
 
     const drawCalls = renderer.info.render.calls;
     const triangles = renderer.info.render.triangles;
 
-    // Pass 2: Bright-pass extraction & downsample into bloomTargetA
-    this.quadMesh.material = this.downsampleMaterial;
-    renderer.setRenderTarget(this.bloomTargetA);
-    renderer.render(this.quadScene, this.quadCamera);
+    // Pass 2: Normal-Map-Aware View-Space Surface Normals (`MeshNormalMaterial` per normalMap)
+    // Excludes alpha-blended billboard decals/foliage cards (`skipNormalPass`) & `Points`/`Line`
+    // while capturing embedded glTF + procedural tangent-space normal relief at macro scale.
+    const prevBackground = scene.background;
+    const prevClearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this.savedClearColor);
 
-    // Pass 3: Horizontal wide blur (bloomTargetA -> bloomTargetB)
-    this.quadMesh.material = this.blurMaterial;
-    this.blurMaterial.uniforms.tInput.value = this.bloomTargetA.texture;
-    this.blurMaterial.uniforms.uDirection.value.set(1.35, 0.0);
-    renderer.setRenderTarget(this.bloomTargetB);
-    renderer.render(this.quadScene, this.quadCamera);
+    this.normalPassCache.beginPass(scene);
+    scene.background = null;
+    renderer.setRenderTarget(this.normalTarget);
+    renderer.setClearColor(0x8080ff, 1);
+    renderer.clear();
+    renderer.render(scene, camera);
+    this.normalPassCache.endPass();
 
-    // Pass 4: Vertical wide blur (bloomTargetB -> bloomTargetA)
-    this.blurMaterial.uniforms.tInput.value = this.bloomTargetB.texture;
-    this.blurMaterial.uniforms.uDirection.value.set(0.0, 1.35);
-    renderer.setRenderTarget(this.bloomTargetA);
-    renderer.render(this.quadScene, this.quadCamera);
+    scene.background = prevBackground;
+    renderer.setClearColor(this.savedClearColor, prevClearAlpha);
 
-    // Pass 5: Final ASCII composite to canvas backbuffer
-    this.quadMesh.material = this.compositeMaterial;
+    // Pass 3: Soft-Knee Bloom Extract
+    renderer.setRenderTarget(this.bloomTarget);
+    renderer.clear();
+    renderer.render(this.bloomScene, this.orthoCamera);
+
+    // Pass 4: Full-Screen 3D-Wrapping ASCII Composite to Canvas
     renderer.setRenderTarget(null);
-    renderer.render(this.quadScene, this.quadCamera);
+    renderer.clear();
+    renderer.render(this.postScene, this.orthoCamera);
 
     return { drawCalls, triangles };
   }
 
   public dispose(): void {
-    this.quadScene.remove(this.quadMesh);
-    this.quadGeometry.dispose();
-    this.downsampleMaterial.dispose();
-    this.blurMaterial.dispose();
-    this.compositeMaterial.dispose();
-
-    this.atlasData.texture.dispose();
-    this.depthTexture.dispose();
     this.sceneTarget.dispose();
-    this.bloomTargetA.dispose();
-    this.bloomTargetB.dispose();
+    this.normalTarget.dispose();
+    this.bloomTarget.dispose();
+    this.depthTexture.dispose();
+    this.atlas.texture.dispose();
+
+    this.normalPassCache.dispose();
+    this.bloomMaterial.dispose();
+    this.compositeMaterial.dispose();
+    this.quadGeometry.dispose();
   }
 }

@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     rag_embedding_provider: str = "local"
     rag_embedding_model: str = "text-embedding-3-small"
 
+    # Public data connectors (BCB, Siscomex, IBGE/TSE/CGU, PROJUDI)
+    transparencia_api_key: str | None = None
+    connector_timeout_seconds: float = Field(default=3.2, gt=0.2, le=30.0)
+
     @property
     def is_local_like(self) -> bool:
         return self.environment.strip().lower() in _LOCAL_ENVIRONMENTS

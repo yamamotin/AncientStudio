@@ -1,214 +1,288 @@
-import * as THREE from 'three';
+import type * as THREE from 'three';
 
-/**
- * LifecycleManager: Centralized resource, observer, and listener custodian.
- * - Manages container-scoped `ResizeObserver` (with rAF coalescing for smooth drag/fullscreen resize)
- * - Manages `IntersectionObserver`, `fullscreenchange`, and Page Visibility (`visibilitychange`)
- * - Tracks disposable functions and executes deep Three.js scene graph `.dispose()`
- *   on geometries, materials, shadow maps, and textures to guarantee zero GPU memory leaks.
- */
+export type CleanupTask = () => void;
 
-export interface LifecycleObserverCallbacks {
-  onResize: (width: number, height: number, immediate?: boolean) => void;
+export interface ContainerObserverCallbacks {
+  onResize?: (width: number, height: number) => void;
   onVisibilityChange?: (isVisible: boolean) => void;
   onTabHiddenChange?: (isHidden: boolean) => void;
   onFullscreenChange?: (isFullscreen: boolean) => void;
 }
 
+export interface ContainerObserverOptions {
+  observeViewportIntersection?: boolean;
+  observeTabVisibility?: boolean;
+}
+
+const MATERIAL_TEXTURE_KEYS = [
+  'map',
+  'alphaMap',
+  'aoMap',
+  'bumpMap',
+  'clearcoatMap',
+  'clearcoatNormalMap',
+  'clearcoatRoughnessMap',
+  'displacementMap',
+  'emissiveMap',
+  'envMap',
+  'iridescenceMap',
+  'iridescenceThicknessMap',
+  'lightMap',
+  'metalnessMap',
+  'normalMap',
+  'roughnessMap',
+  'sheenColorMap',
+  'sheenRoughnessMap',
+  'specularColorMap',
+  'specularIntensityMap',
+  'thicknessMap',
+  'transmissionMap',
+] as const;
+
+/**
+ * LifecycleManager: Centralized registry for deterministic teardown of:
+ * - DOM & Window event listeners
+ * - ResizeObserver / IntersectionObserver / Fullscreen / Visibility observers
+ * - Three.js Scene hierarchies (geometries, PBR/glTF materials, textures, skeletons, lights, targets)
+ * - Three.js `AnimationMixer` instances and Draco/GLTF loader workers
+ */
 export class LifecycleManager {
-  private readonly container: HTMLElement;
-  private resizeObserver: ResizeObserver | null = null;
-  private intersectionObserver: IntersectionObserver | null = null;
-  private pendingResizeRaf: number | null = null;
-  private pendingWidth = 0;
-  private pendingHeight = 0;
-  private cleanupCallbacks: Array<() => void> = [];
+  private readonly container: HTMLElement | null;
+  private readonly cleanups: CleanupTask[] = [];
   private disposed = false;
 
-  constructor(container: HTMLElement) {
-    this.container = container;
+  constructor(container?: HTMLElement | null) {
+    this.container = container ?? null;
   }
 
-  public observeContainer(
-    callbacks: LifecycleObserverCallbacks,
-    options?: { observeViewportIntersection?: boolean; observeTabVisibility?: boolean }
-  ): void {
-    if (this.disposed) return;
-
-    const scheduleResize = (width: number, height: number) => {
-      if (width <= 0 || height <= 0 || this.disposed) return;
-      this.pendingWidth = width;
-      this.pendingHeight = height;
-
-      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        if (this.pendingResizeRaf !== null) return;
-        this.pendingResizeRaf = window.requestAnimationFrame(() => {
-          this.pendingResizeRaf = null;
-          if (!this.disposed && this.pendingWidth > 0 && this.pendingHeight > 0) {
-            callbacks.onResize(this.pendingWidth, this.pendingHeight, false);
-          }
-        });
-      } else {
-        callbacks.onResize(width, height, false);
+  public register(task: CleanupTask): void {
+    if (this.disposed) {
+      try {
+        task();
+      } catch {
+        // Ignore cleanup errors after teardown
       }
-    };
+      return;
+    }
+    this.cleanups.push(task);
+  }
 
-    // 1. Container ResizeObserver (rAF-coalesced to prevent redundant WebGL renderTarget reallocations)
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.target === this.container) {
-            const { width, height } = entry.contentRect;
-            if (width > 0 && height > 0) {
-              scheduleResize(width, height);
-            }
-          }
+  public registerCleanup(task: CleanupTask): void {
+    this.register(task);
+  }
+
+  /**
+   * Attaches rAF-coalesced ResizeObserver, IntersectionObserver, Page Visibility, and Fullscreen
+   * listeners to `this.container`, automatically disconnecting all of them on `disposeAll()`.
+   */
+  public observeContainer(
+    callbacks: ContainerObserverCallbacks,
+    options?: ContainerObserverOptions
+  ): void {
+    const target = this.container;
+    if (!target || typeof window === 'undefined') return;
+
+    let resizeRaf: number | null = null;
+    const scheduleResize = (w: number, h: number): void => {
+      if (w <= 0 || h <= 0) return;
+      if (resizeRaf !== null) {
+        window.cancelAnimationFrame(resizeRaf);
+      }
+      resizeRaf = window.requestAnimationFrame(() => {
+        resizeRaf = null;
+        if (!this.disposed) {
+          callbacks.onResize?.(w, h);
         }
       });
-      this.resizeObserver.observe(this.container);
+    };
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          scheduleResize(entry.contentRect.width, entry.contentRect.height);
+        }
+      });
+      ro.observe(target);
+      this.register(() => {
+        if (resizeRaf !== null) {
+          window.cancelAnimationFrame(resizeRaf);
+          resizeRaf = null;
+        }
+        ro.disconnect();
+      });
     }
 
-    // 2. Fullscreen & Window Resize listeners for smooth fullscreen expansion/collapse
+    if (options?.observeViewportIntersection !== false && typeof IntersectionObserver !== 'undefined') {
+      const io = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry && !this.disposed) {
+            callbacks.onVisibilityChange?.(entry.isIntersecting);
+          }
+        },
+        { threshold: 0.02 }
+      );
+      io.observe(target);
+      this.register(() => io.disconnect());
+    }
+
+    if (options?.observeTabVisibility !== false && typeof document !== 'undefined') {
+      const onVis = (): void => {
+        if (!this.disposed) {
+          callbacks.onTabHiddenChange?.(document.hidden);
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+      this.register(() => document.removeEventListener('visibilitychange', onVis));
+    }
+
     if (typeof document !== 'undefined') {
-      const handleFullscreen = () => {
+      const onFs = (): void => {
         if (this.disposed) return;
-        const fsElem =
-          document.fullscreenElement ??
-          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement ??
-          null;
         const isFs = Boolean(
-          fsElem && (fsElem === this.container || fsElem.contains(this.container))
+          document.fullscreenElement ||
+            target.closest?.('[data-fullscreen-view="true"], .is-scene-fullscreen')
         );
         callbacks.onFullscreenChange?.(isFs);
-        const rect = this.container.getBoundingClientRect();
+        const rect = target.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           scheduleResize(rect.width, rect.height);
         }
       };
-
-      document.addEventListener('fullscreenchange', handleFullscreen);
-      document.addEventListener('webkitfullscreenchange', handleFullscreen);
-      this.registerCleanup(() => {
-        document.removeEventListener('fullscreenchange', handleFullscreen);
-        document.removeEventListener('webkitfullscreenchange', handleFullscreen);
-      });
+      document.addEventListener('fullscreenchange', onFs);
+      this.register(() => document.removeEventListener('fullscreenchange', onFs));
     }
-
-    // 3. Viewport IntersectionObserver (auto-hibernate offscreen stages)
-    if (
-      options?.observeViewportIntersection !== false &&
-      typeof IntersectionObserver !== 'undefined' &&
-      callbacks.onVisibilityChange
-    ) {
-      const onVis = callbacks.onVisibilityChange;
-      this.intersectionObserver = new IntersectionObserver(
-        (entries) => {
-          const entry = entries[0];
-          if (entry) {
-            onVis(entry.isIntersecting);
-          }
-        },
-        { threshold: 0.01 }
-      );
-      this.intersectionObserver.observe(this.container);
-    }
-
-    // 4. Page Visibility API
-    if (
-      options?.observeTabVisibility !== false &&
-      typeof document !== 'undefined' &&
-      callbacks.onTabHiddenChange
-    ) {
-      const onTab = callbacks.onTabHiddenChange;
-      const handler = () => onTab(document.hidden);
-      document.addEventListener('visibilitychange', handler);
-      this.registerCleanup(() => document.removeEventListener('visibilitychange', handler));
-    }
-  }
-
-  public registerCleanup(fn: () => void): void {
-    if (this.disposed) {
-      fn();
-      return;
-    }
-    this.cleanupCallbacks.push(fn);
   }
 
   /**
-   * Traverses any Three.js Object3D hierarchy (Scene or Group) and disposes all
-   * BufferGeometries, Materials, Textures, and Light ShadowMaps.
+   * Stops all actions and uncaches clips/bindings on a `THREE.AnimationMixer`.
    */
-  public static disposeObject3D(root: THREE.Object3D): void {
-    const geometries = new Set<THREE.BufferGeometry>();
-    const materials = new Set<THREE.Material>();
+  public static disposeMixer(
+    mixer: THREE.AnimationMixer | null | undefined,
+    root?: THREE.Object3D | null
+  ): void {
+    if (!mixer) return;
+    try {
+      mixer.stopAllAction();
+      const targetRoot = root ?? (mixer.getRoot() as THREE.Object3D | undefined);
+      if (targetRoot) {
+        mixer.uncacheRoot(targetRoot);
+      }
+    } catch {
+      // Ignore mixer teardown errors on already-uncached roots
+    }
+  }
+
+  /**
+   * Recursively disposes all geometries, materials, PBR/extension textures, skeletons, and shadow maps
+   * inside a Three.js Object3D / Scene tree.
+   */
+  public static disposeObject3D(root: THREE.Object3D | null | undefined): void {
+    if (!root) return;
+
+    const disposedGeometries = new Set<THREE.BufferGeometry>();
+    const disposedMaterials = new Set<THREE.Material>();
+    const disposedTextures = new Set<THREE.Texture>();
 
     root.traverse((obj) => {
-      if (obj instanceof THREE.Mesh || obj instanceof THREE.Points || obj instanceof THREE.Line) {
-        if (obj.geometry && !geometries.has(obj.geometry)) {
-          obj.geometry.dispose();
-          geometries.add(obj.geometry);
-        }
-
-        const matList = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const mat of matList) {
-          if (mat && !materials.has(mat)) {
-            LifecycleManager.disposeMaterialTextures(mat);
-            mat.dispose();
-            materials.add(mat);
+      const meshLike = obj as THREE.Mesh & {
+        skeleton?: THREE.Skeleton;
+      };
+      if (meshLike.geometry && !disposedGeometries.has(meshLike.geometry)) {
+        disposedGeometries.add(meshLike.geometry);
+        meshLike.geometry.dispose();
+      }
+      if (meshLike.skeleton && typeof meshLike.skeleton.dispose === 'function') {
+        meshLike.skeleton.dispose();
+      }
+      if (meshLike.material) {
+        if (Array.isArray(meshLike.material)) {
+          for (const mat of meshLike.material) {
+            LifecycleManager.disposeMaterial(mat, disposedMaterials, disposedTextures);
           }
+        } else {
+          LifecycleManager.disposeMaterial(meshLike.material, disposedMaterials, disposedTextures);
         }
       }
 
-      if (obj instanceof THREE.Light && obj.shadow && obj.shadow.map) {
-        obj.shadow.map.dispose();
+      const lightLike = obj as THREE.Light;
+      if (lightLike.isLight && lightLike.shadow?.map) {
+        lightLike.shadow.map.dispose();
       }
     });
 
-    if (root instanceof THREE.Scene) {
-      root.clear();
+    if (root.parent) {
+      root.parent.remove(root);
+    }
+
+    while (root.children.length > 0) {
+      const child = root.children[root.children.length - 1];
+      if (child) root.remove(child);
     }
   }
 
-  private static disposeMaterialTextures(material: THREE.Material): void {
-    const record = material as unknown as Record<string, unknown>;
+  public static disposeMaterial(
+    mat: THREE.Material | null | undefined,
+    seenMaterials?: Set<THREE.Material>,
+    seenTextures?: Set<THREE.Texture>
+  ): void {
+    if (!mat) return;
+    if (seenMaterials) {
+      if (seenMaterials.has(mat)) return;
+      seenMaterials.add(mat);
+    }
+
+    const record = mat as unknown as Record<string, unknown>;
+
+    const disposeTex = (candidate: unknown): void => {
+      if (!candidate || typeof candidate !== 'object') return;
+      const tex = candidate as THREE.Texture;
+      if (!tex.isTexture || typeof tex.dispose !== 'function') return;
+      if (seenTextures) {
+        if (seenTextures.has(tex)) return;
+        seenTextures.add(tex);
+      }
+      tex.dispose();
+    };
+
+    for (const key of MATERIAL_TEXTURE_KEYS) {
+      disposeTex(record[key]);
+    }
+
     for (const key of Object.keys(record)) {
-      const val = record[key];
-      if (val instanceof THREE.Texture) {
-        val.dispose();
+      disposeTex(record[key]);
+    }
+
+    const shaderUniforms = (mat as THREE.ShaderMaterial).uniforms;
+    if (shaderUniforms && typeof shaderUniforms === 'object') {
+      for (const uKey of Object.keys(shaderUniforms)) {
+        disposeTex(shaderUniforms[uKey]?.value);
       }
     }
+
+    mat.dispose();
   }
 
-  public disposeAll(sceneToDispose?: THREE.Object3D | null): void {
+  public disposeAll(scene?: THREE.Object3D | null): void {
     if (this.disposed) return;
     this.disposed = true;
 
-    if (this.pendingResizeRaf !== null && typeof window !== 'undefined') {
-      window.cancelAnimationFrame(this.pendingResizeRaf);
-      this.pendingResizeRaf = null;
-    }
-
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-
-    if (this.intersectionObserver) {
-      this.intersectionObserver.disconnect();
-      this.intersectionObserver = null;
-    }
-
-    for (let i = this.cleanupCallbacks.length - 1; i >= 0; i--) {
+    for (let i = this.cleanups.length - 1; i >= 0; i--) {
       try {
-        this.cleanupCallbacks[i]?.();
+        this.cleanups[i]!();
       } catch {
-        // Ignore individual cleanup errors to guarantee complete teardown
+        // Ensure every registered resource gets a chance to clean up
       }
     }
-    this.cleanupCallbacks.length = 0;
+    this.cleanups.length = 0;
 
-    if (sceneToDispose) {
-      LifecycleManager.disposeObject3D(sceneToDispose);
+    if (scene) {
+      LifecycleManager.disposeObject3D(scene);
     }
+  }
+
+  public isDisposed(): boolean {
+    return this.disposed;
   }
 }

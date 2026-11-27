@@ -10,6 +10,8 @@ AncientStudio/
 ├── assets/
 │   ├── css/style.css                  # Layout, retrato no hero, modos de cena e brilho
 │   ├── img/eron-portrait-ascii.png    # Retrato ASCII do hero na coluna esquerda
+│   ├── models/cena_completa.glb       # Cena 3D pré-construída (Cidade_Sketchfab_model, Player_Rig, Carro_Grupo)
+│   ├── draco/                         # Decoders Draco WASM/JS self-hosted (zero CDN)
 │   ├── js/
 │   │   ├── core.js                    # Helpers, prefers-reduced-motion
 │   │   ├── i18n.js                    # Alternância pt-br ↔ en sem rebuild + dicionário embutido
@@ -26,7 +28,7 @@ AncientStudio/
 │   └── fonts/                         # JetBrains Mono self-hosted (zero CDN)
 │
 ├── ascii-engine-module/               # Pacote TypeScript/WebGL2 3D ASCII + ECS [agente 3D]
-│   ├── src/                           # Core, ECS, World, Entities, Shaders (PCF, water, objectOutline), VFX
+│   ├── src/                           # Core, ECS, GlbSceneLoader, UrbanGlbSceneBuilder, Mascot, Shaders, VFX
 │   ├── demo/                          # Demo standalone de desenvolvimento
 │   └── integration-entry.ts           # Fachada pública exportada para o bundle do portfólio
 │
@@ -83,8 +85,12 @@ AncientStudio/
 │
 ├── docker-compose.yml                 # Subida local de api + n8n com segredos obrigatórios via .env
 ├── .env.example                       # Variáveis documentadas e higienizadas (sem credenciais reais)
-├── Dockerfile                         # Host estático legado usado na Vercel atual (api/server.py)
-└── tests/                             # Suítes Node (contratos estáticos, UI, i18n, CI, VCR e engine) + 6 unittest
+├── api/                               # Host estático + Conectores Públicos stdlib (zero pip deps)
+│   ├── server.py                      # Servidor HTTP da raiz (Vercel) + rotas /api/v1/*
+│   ├── data/siscomex_ncm_seed.json    # Base local oficial NCM/SH-2022 (Portal Único Siscomex)
+│   └── connectors/                    # Serviços desacoplados (BCB, Siscomex, IBGE/TSE/CGU, PROJUDI + TTL Cache)
+├── Dockerfile                         # Container Python stdlib usado na Vercel (api/server.py + conectores)
+└── tests/                             # Suítes Node + unittest Python (test_api.py + test_public_connectors.py)
 ```
 
 ## 2. Responsabilidades por trilha
@@ -93,11 +99,11 @@ AncientStudio/
 
 - `pt-br` é o idioma primário, com paridade total de chaves entre `assets/i18n/pt-br.json`, `en.json` e o dicionário embutido em `assets/js/i18n.js` para funcionamento inclusive via `file://`.
 - Hero apresenta único título ASCII `ERON YAMAMOTO` (sem rótulo duplicado) e retrato em cartão na coluna esquerda com topo alinhado ao texto da direita e às ações no padrão `[ termo ]` (`[ github ]`, `[ linkedin ]`, `[ contato ]`/`[ contact ]`, `[ curriculo-pt-br ]`/`[ resume-pt-br ]` e `[ curriculo-en ]`/`[ resume-en ]`); no footer, o controle de **brilho da página** opera com padrão `130%` (`100%–150%`).
-- `[ CENA 3D INTERATIVA ]` (`en`: `[ INTERACTIVE SCENE 3D ]`) expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário cyberpunk em camadas com sombras PCF, vento ECS e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D girando continuamente em `yaw`, isolado de eventos de mouse/toque.
-- `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend.
-- `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, workflows n8n, pipelines e console RAG), sem respostas simuladas.
+- `[ CENA 3D INTERATIVA ]` (`en`: `[ INTERACTIVE SCENE 3D ]`) expõe três modos unificados (`[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`) sobre o cenário GLB `cena_completa.glb` com personagem `WASD`/`E`, iluminação PBR e carregamento diferido do bundle; `[ STACK // NEOFETCH ]` mantém o pinguim 3D sobre o estúdio ASCII minimalista (`MascotStageBuilder`: fundo `#13222E` + piso `#1D2B36`) girando continuamente em `yaw`, isolado de eventos de mouse/toque.
+- `ascii-engine-module/` expõe também a API sob demanda de contorno por objeto (`setObjectOutline`, `clearObjectOutline`, `getObjectOutlineState`), ainda reservada para futura ativação visual no frontend, e consolida em [`ascii-engine-module/README.md`](../ascii-engine-module/README.md) as regras obrigatórias para novas implementações (ECS enxuto, coerência estilística ASCII integral sem código residual, paletas sóbrias/controladas e ciclo de vida limpo).
+- `assets/js/api-client.js` executa chamadas HTTP reais para `/api/v1` (health, build, ETL, gateway fiscal, BCB SGS/PIX, Siscomex NCM, transparência municipal IBGE/TSE, triagem pública PROJUDI, workflows n8n, pipelines e console RAG), sem respostas simuladas; quando aberto estaticamente no GitHub Pages sem servidor Python, `assets/js/api.js` + `assets/js/main.js` ativam automaticamente simulação realista validada no cliente (sem runner de pipeline fictício).
 - `[ LIVE CI/CD & DOCKER PIPELINE ]` é um painel real: `assets/js/pipeline.js` lê apenas metadados públicos e read-only de `/repos/yamamotin/AncientStudio/actions/runs` e `/actions/workflows`, com cache de 5 min em `localStorage`, timeout de 8 s via `AbortController`, bloqueio de requisições concorrentes, cooldown de 4 s, fallback informativo com link do Actions e renderização exclusivamente por `createElement`/`textContent` (allowlist de `html_url`). Documentação completa em `docs/ci-cd-pipeline.md`.
-- `[ API GATEWAY // INTEGRAÇÕES ]` (`en`: `[ API GATEWAY // INTEGRATIONS ]`) substitui o antigo título com "Playground" em todas as traduções e metadados.
+- `[ API GATEWAY // INTEGRAÇÕES ]` (`en`: `[ API GATEWAY // INTEGRATIONS ]`) substitui o antigo título com "Playground" em todas as traduções, metadados e classes CSS (`.gateway-*`); o `id` `mode: 'playground'` do adapter permanece por contrato da engine.
 
 ### Backend FastAPI (Fases 1 a 5)
 

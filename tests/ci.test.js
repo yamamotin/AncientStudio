@@ -34,7 +34,11 @@ test('Pages artifact root is verified before deploy', () => {
     'Verify static artifact root',
     'test -f _site/index.html',
     'assets/i18n/pt-br.json',
-    'assets/js/api-client.js'
+    'assets/js/api-client.js',
+    'test -s _site/assets/models/cena_completa.glb',
+    'test -s _site/assets/draco/draco_decoder.js',
+    'test -s _site/assets/draco/draco_decoder.wasm',
+    'test -s _site/assets/draco/draco_wasm_wrapper.js'
   ]);
 });
 
@@ -43,6 +47,11 @@ test('backend CI workflow keeps the root Dockerfile and Vercel flow intact', () 
   includesAll(ci, ['ruff check .', 'pytest', 'infra/docker/Dockerfile', 'VERCEL_TOKEN']);
   const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
   assert.match(dockerfile, /api\/server\.py/);
+  includesAll(dockerfile, [
+    'COPY assets ./assets',
+    './assets/models/cena_completa.glb',
+    './assets/draco/draco_decoder.wasm'
+  ]);
 });
 
 test('Pages parity helper is versioned and non-blocking by design', () => {

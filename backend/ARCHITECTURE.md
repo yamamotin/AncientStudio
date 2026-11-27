@@ -88,3 +88,7 @@ backend/
 - **Citações Verificáveis em Disco e Endpoints Dedicados (`/api/v1/rag/*`):**
   - Cada citação (`[1]`, `[2]`, ...) expõe `source_path`, `start_line`, `end_line`, `content_sha256` e flag `verified_on_disk` recalculada contra o arquivo real em disco (detectando imediatamente qualquer adulteração pós-indexação).
   - Endpoints: `GET /api/v1/rag/index/status`, `POST /api/v1/rag/index/rebuild` (síncrono ou assíncrono no worker `rag.reindex`), `POST /api/v1/rag/search`, `POST /api/v1/rag/query` (`extractive-grounded` ou `llm-grounded` com validação estrita de IDs citados) e `GET /api/v1/rag/sources/{chunk_id}`.
+
+### Fase 6 — Conectores de Dados Públicos, Fintech/Tax, ETL Municipal & PROJUDI (`/api/v1/{bcb,siscomex,transparencia,projudi}`)
+- Compartilha o pacote desacoplado `api/connectors/` (`ConnectorTTLCache` monotônico thread-safe, `HttpTransport` injetável com timeout curto de `3.2s` e teto de bytes, validadores mod-11 de CPF e CNJ 20 dígitos, mascaramento LGPD) entre o monólito FastAPI (`backend/app/api/v1/{bcb,siscomex,transparencia,projudi}.py`) e o host Python da raiz (`api/server.py`).
+- Endpoints entregues: `GET /api/v1/bcb/indicadores`, `GET /api/v1/bcb/instituicoes`, `GET /api/v1/siscomex/ncm`, `GET /api/v1/transparencia/municipio`, `POST /api/v1/projudi/processos/consulta`, `GET /api/v1/projudi/processos/{numero_processo}` e `POST /api/v1/projudi/processos/{numero_processo}/resumo` (`status: "ready_for_llm"`).

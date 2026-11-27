@@ -100,9 +100,14 @@ Campos exibidos por execução, todos verificáveis no GitHub:
   `autocomplete="new-password"`, marcada com `data-sensitive="true"`, **nunca** é gravada
   em storage e é apagada em `pagehide` e em `visibilitychange` → `hidden`
   (`initSensitiveInputs()` em `assets/js/main.js`).
-- Não existe campo de CPF/documento na UI atual. A regra de mascaramento e
-  não-persistência é genérica (`input[data-sensitive]`), então qualquer campo sensível
-  futuro já nasce mascarado, sem `autocomplete` do navegador e sem escrita em storage.
+- O formulário público de consulta PROJUDI (Gateway → ETL/Integrações) recebe um CPF
+  validado por mod-11. Esse campo é `data-sensitive="true"`, sem `autocomplete`, sem
+  `spellcheck`, e a regra é genérica: nenhum `input[data-sensitive]` é gravado em
+  storage, todos são limpos em `pagehide`/aba oculta e ficam mascarados quando fora de
+  foco (`input[data-sensitive]:not(:focus) { -webkit-text-security: disc }`). O valor só
+  viaja no corpo da própria requisição para `/api/v1/projudi/*`, nunca é ecoado no painel
+  de resposta nem no console. A máscara definitiva de exibição LGPD
+  (`***.456.789-**`) é aplicada no servidor.
 - O runner fictício saiu do cliente: `TP.api.runPipeline` foi removido e o painel nunca
   dispara builds. O endpoint `POST /api/v1/pipeline/run` continua existindo apenas no
   backend legado, com seus próprios testes, sem uso pela interface.

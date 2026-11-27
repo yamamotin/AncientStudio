@@ -1,11 +1,11 @@
 import type * as THREE from 'three';
 import { LifecycleManager } from '../core/LifecycleManager';
+import type { ForegroundOccluderGroup } from '../world/GlbSceneLoader';
 
 /**
  * Lean, cache-friendly Entity-Component-System (ECS) World.
- * Pure data components (Transform, Velocity, RotationTarget, AnimationState, Renderable,
- * NeonBeacon, PatrolPath, InputState, LifecycleTag) keep entity logic modular, deterministic,
- * and completely leak-free on entity or world teardown.
+ * Pure data components keep entity logic modular, deterministic, and completely leak-free
+ * across scene transitions, entity removal, and engine teardown.
  */
 
 export type EntityId = number;
@@ -51,7 +51,6 @@ export interface ArticulatedParts {
   leftFoot?: THREE.Object3D;
   rightFoot?: THREE.Object3D;
   orbitRing?: THREE.Object3D;
-  coatTail?: THREE.Object3D;
 }
 
 export interface AnimationStateComponent {
@@ -63,12 +62,107 @@ export interface AnimationStateComponent {
   bobFrequency: number;
   /** Subtle breathing/squash-stretch scale pulse */
   breatheAmplitude: number;
-  /** Phase offset so multiple entities never bob in robotic unison */
+  /** Phase offset */
   phase: number;
   /** Reaction energy [0..1] boosted by pointer movement or interaction */
   excitement: number;
-  /** Optional articulated sub-meshes (e.g. Tux wings/head/feet or holo-ring) */
+  /** Optional articulated sub-meshes (used by Tux 3D mascot) */
   parts?: ArticulatedParts;
+}
+
+export type CharacterClipName = 'Idle' | 'Walking' | 'Casting';
+
+/**
+ * CharacterAnimationComponent: Drives `THREE.AnimationMixer` NLA clip transitions
+ * (`Idle`, `Walking`, `Casting`) on `Player_Rig` using smooth `crossFadeTo`.
+ */
+export interface CharacterAnimationComponent {
+  mixer: THREE.AnimationMixer;
+  root: THREE.Object3D;
+  actions: {
+    Idle: THREE.AnimationAction | null;
+    Walking: THREE.AnimationAction | null;
+    Casting: THREE.AnimationAction | null;
+  };
+  durations: {
+    Idle: number;
+    Walking: number;
+    Casting: number;
+  };
+  activeClip: CharacterClipName;
+  /** Remaining seconds when playing `Casting` (`THREE.LoopOnce`) */
+  castRemaining: number;
+  /** Cross-fade blend duration in seconds */
+  crossFadeDuration: number;
+  /** Latched interaction trigger from keyboard (`E` / `Space`) */
+  interactRequested: boolean;
+  /** Optional mixer `'finished'` listener cleanup callback */
+  disposeListener?: () => void;
+}
+
+export interface SidewalkObstacleBox {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/**
+ * SidewalkBoundsComponent: Constrains `Player_Rig` movement to walkable urban sidewalks
+ * via `THREE.MathUtils.clamp` so the character never clips into walls or falls into the void.
+ */
+export interface SidewalkBoundsComponent {
+  /** Outer sidewalk envelope clamped via `THREE.MathUtils.clamp` */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Central courtyard plaza X span where the sidewalk widens southward */
+  plazaMinX: number;
+  plazaMaxX: number;
+  /** East-West main sidewalk Z span outside the central plaza */
+  corridorMinZ: number;
+  corridorMaxZ: number;
+  /** Narrowed Z minimum along the west storefront (`x in [-17.65, -9.35]`) */
+  westStorefrontMinX: number;
+  westStorefrontMaxX: number;
+  westStorefrontMinZ: number;
+  /** Sidewalk furniture/kiosk AABBs smoothly pushed out on XZ */
+  obstacles: SidewalkObstacleBox[];
+  /** Ground Y elevation of the sidewalk surface */
+  groundY: number;
+}
+
+/**
+ * TrafficCycleComponent: Drives `Carro_Grupo` along the left lateral avenue on a
+ * continuous 30s cycle (8s straight-line drive with active headlights, 22s hidden out of frame).
+ */
+export interface TrafficCycleComponent {
+  /** Total loop period in seconds (30s) */
+  cycleDuration: number;
+  /** Active visible driving window in seconds (8s; remaining 22s stays hidden) */
+  activeDuration: number;
+  /** Straight-line X/Y lane coordinates on the left lateral avenue */
+  laneX: number;
+  laneY: number;
+  /** Start and end Z coordinates traversed at constant speed during `activeDuration` */
+  startZ: number;
+  endZ: number;
+  /** Fixed vehicle yaw heading along the avenue */
+  headingYaw: number;
+  /** Optional phase offset in seconds */
+  timeOffset: number;
+  /** Attached headlight & taillight light sources moving with `Carro_Grupo` */
+  headlightLeft?: THREE.SpotLight;
+  headlightRight?: THREE.SpotLight;
+  streetThrowLight?: THREE.PointLight;
+  taillightGlow?: THREE.PointLight;
+  /** Atmosphere-calibrated peak intensities for the active pass */
+  baseSpotIntensity: number;
+  basePointIntensity: number;
+  baseTailIntensity: number;
+  /** Optional headlight cover materials pulsed while active */
+  headlightMaterials?: THREE.MeshStandardMaterial[];
 }
 
 export interface RenderableComponent {
@@ -81,31 +175,8 @@ export interface RenderableComponent {
   disposeOnDestroy?: boolean;
 }
 
-export interface NeonBeaconComponent {
-  /** Emissive material driven by neon pulse/strobe */
-  emissiveMaterial?: THREE.MeshStandardMaterial;
-  baseEmissiveIntensity: number;
-  pulseSpeed: number;
-  pulseAmplitude: number;
-  phase: number;
-  /** Optional cyber-sign glitch flicker probability [0..1] */
-  glitchRate?: number;
-}
-
-export interface PatrolPathComponent {
-  originX: number;
-  originY: number;
-  originZ: number;
-  amplitudeX: number;
-  amplitudeY: number;
-  amplitudeZ: number;
-  speed: number;
-  phase: number;
-  faceTangent: boolean;
-}
-
 export interface LifecycleTagComponent {
-  role: 'avatar' | 'mascot' | 'core' | 'beacon' | 'vehicle' | 'prop';
+  role: 'avatar' | 'mascot' | 'environment' | 'vehicle' | 'prop';
   label: string;
 }
 
@@ -119,36 +190,76 @@ export interface DepthLayerComponent {
   contrastPriority: number;
 }
 
-export interface WindSwayComponent {
-  /** Base rotation X/Y/Z before wind oscillation */
-  baseRotX: number;
-  baseRotY: number;
-  baseRotZ: number;
-  /** Roll/pitch sway amplitudes in radians */
-  swayAmpZ: number;
-  swayAmpX: number;
-  /** Wind harmonic frequency & spatial phase */
-  frequency: number;
-  phase: number;
-  /** Gust sensitivity multiplier */
-  gustFactor: number;
-}
-
 export interface InputStateComponent {
   /** Normalized pointer coordinates [-1..1] driving this entity */
   pointerX: number;
   pointerY: number;
   pointerActive: boolean;
   isDragging: boolean;
-  /** Normalized movement intent [-1..1] from future keyboard/gamepad hooks */
+  /** Normalized planar movement intent [-1..1] from WASD keyboard hooks */
   moveX: number;
   moveZ: number;
-  /** Multiplier for pointer -> rotation target mapping */
+  /** Multiplier for pointer -> rotation target mapping (mascot mode) */
   yawSensitivity: number;
   pitchSensitivity: number;
-  /** Optional movement speed & radius clamp for playground avatar */
+  /** Planar walking speed (m/s) & optional fallback radius clamp */
   moveSpeed: number;
   boundsRadius: number;
+}
+
+export interface NavigationTargetComponent {
+  /** Target world X coordinate on the ground plane */
+  targetX: number;
+  /** Target world Z coordinate on the ground plane */
+  targetZ: number;
+  /** Whether click/tap ground navigation is currently active */
+  active: boolean;
+  /** Ground walking speed in world units per second */
+  moveSpeed: number;
+  /** Arrival stop threshold in world units */
+  arrivalRadius: number;
+  /** Outer walkable bounds clamping */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface CameraFollowComponent {
+  /** Fixed-direction 3rd-person camera position offset relative to `Player_Rig` */
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  /** Look-at target offset relative to `Player_Rig` */
+  lookAtOffsetX: number;
+  lookAtOffsetY: number;
+  lookAtOffsetZ: number;
+  /** Smooth lerp rate (1/s) accompanying `Player_Rig` */
+  followSharpness: number;
+  /** Respects UI `setAutoOrbit` toggle when true; strictly fixed direction when false */
+  autoOrbit: boolean;
+  orbitAngle: number;
+  orbitSpeed: number;
+  /** Smoothed look-at state & initial snap flag */
+  currentLookX?: number;
+  currentLookY?: number;
+  currentLookZ?: number;
+  initialized: boolean;
+}
+
+/**
+ * ForegroundOccludersComponent: Runtime line-of-sight occlusion metadata for foreground
+ * obstacles in `Cidade_Sketchfab_model` (the two plaza trees & hanging front sign) so they
+ * never block `Player_Rig` or the central plaza vista without modifying `.glb` on disk.
+ */
+export interface ForegroundOccludersComponent {
+  groups: ForegroundOccluderGroup[];
+  centralFocusX: number;
+  centralFocusY: number;
+  centralFocusZ: number;
+  playerClearanceRadius: number;
+  centralNdcHalfWidth: number;
+  centralNdcHalfHeight: number;
 }
 
 export interface ComponentMap {
@@ -156,13 +267,16 @@ export interface ComponentMap {
   Velocity: VelocityComponent;
   RotationTarget: RotationTargetComponent;
   AnimationState: AnimationStateComponent;
+  CharacterAnimation: CharacterAnimationComponent;
+  SidewalkBounds: SidewalkBoundsComponent;
+  TrafficCycle: TrafficCycleComponent;
+  ForegroundOccluders: ForegroundOccludersComponent;
   Renderable: RenderableComponent;
-  NeonBeacon: NeonBeaconComponent;
-  PatrolPath: PatrolPathComponent;
-  WindSway: WindSwayComponent;
   DepthLayer: DepthLayerComponent;
   LifecycleTag: LifecycleTagComponent;
   InputState: InputStateComponent;
+  NavigationTarget: NavigationTargetComponent;
+  CameraFollow: CameraFollowComponent;
 }
 
 export type ComponentName = keyof ComponentMap;
@@ -175,13 +289,16 @@ export class World {
     Velocity: new Map(),
     RotationTarget: new Map(),
     AnimationState: new Map(),
+    CharacterAnimation: new Map(),
+    SidewalkBounds: new Map(),
+    TrafficCycle: new Map(),
+    ForegroundOccluders: new Map(),
     Renderable: new Map(),
-    NeonBeacon: new Map(),
-    PatrolPath: new Map(),
-    WindSway: new Map(),
     DepthLayer: new Map(),
     LifecycleTag: new Map(),
     InputState: new Map(),
+    NavigationTarget: new Map(),
+    CameraFollow: new Map(),
   };
 
   public createEntity(): EntityId {
@@ -190,64 +307,50 @@ export class World {
     return id;
   }
 
-  /**
-   * Destroys a single entity, optionally detaching & disposing its WebGL `Renderable`
-   * (`Object3D`, `PointLight`, geometries, materials, and textures) with zero leaks.
-   */
-  public destroyEntity(id: EntityId, disposeGpu = true): boolean {
-    if (!this.entities.has(id)) return false;
+  public hasEntity(id: EntityId): boolean {
+    return this.entities.has(id);
+  }
 
-    if (disposeGpu) {
-      const renderable = this.stores.Renderable.get(id);
-      if (renderable && renderable.disposeOnDestroy !== false) {
-        this.disposeRenderableResources(renderable);
-      }
-    }
-
-    for (const key of Object.keys(this.stores) as ComponentName[]) {
-      this.stores[key].delete(id);
-    }
-    this.entities.delete(id);
-    return true;
+  public getEntityCount(): number {
+    return this.entities.size;
   }
 
   public addComponent<K extends ComponentName>(
-    entity: EntityId,
+    id: EntityId,
     name: K,
     data: ComponentMap[K]
-  ): ComponentMap[K] {
-    if (!this.entities.has(entity)) {
-      throw new Error(`[ECS World] Entity ${entity} does not exist.`);
+  ): this {
+    if (!this.entities.has(id)) {
+      throw new Error(`[ECS World] Cannot add component "${name}" to non-existent entity ${id}`);
     }
-    this.stores[name].set(entity, data);
-    return data;
+    this.stores[name].set(id, data);
+    return this;
   }
 
   public getComponent<K extends ComponentName>(
-    entity: EntityId,
+    id: EntityId,
     name: K
   ): ComponentMap[K] | undefined {
-    return this.stores[name].get(entity);
+    return this.stores[name].get(id);
   }
 
-  public hasComponent<K extends ComponentName>(entity: EntityId, name: K): boolean {
-    return this.stores[name].has(entity);
+  public hasComponent<K extends ComponentName>(id: EntityId, name: K): boolean {
+    return this.stores[name].has(id);
   }
 
-  public removeComponent<K extends ComponentName>(entity: EntityId, name: K): void {
-    this.stores[name].delete(entity);
+  public removeComponent<K extends ComponentName>(id: EntityId, name: K): boolean {
+    return this.stores[name].delete(id);
   }
 
   /**
-   * Queries all active entities possessing every requested component type.
-   * Iterates the smallest component store first for O(min_store) lookup.
+   * Returns all EntityIds that possess EVERY requested component name.
    */
   public query(...required: ComponentName[]): EntityId[] {
     if (required.length === 0) {
       return Array.from(this.entities);
     }
 
-    let smallestStore: Map<EntityId, unknown> = this.stores[required[0]!];
+    let smallestStore = this.stores[required[0]!];
     for (let i = 1; i < required.length; i++) {
       const candidate = this.stores[required[i]!];
       if (candidate.size < smallestStore.size) {
@@ -256,88 +359,124 @@ export class World {
     }
 
     const result: EntityId[] = [];
-    for (const entityId of smallestStore.keys()) {
-      let match = true;
+    for (const id of smallestStore.keys()) {
+      let matchesAll = true;
       for (let i = 0; i < required.length; i++) {
-        if (!this.stores[required[i]!].has(entityId)) {
-          match = false;
+        if (!this.stores[required[i]!].has(id)) {
+          matchesAll = false;
           break;
         }
       }
-      if (match) {
-        result.push(entityId);
-      }
-    }
-    return result;
-  }
-
-  public getEntityCount(): number {
-    return this.entities.size;
-  }
-
-  /**
-   * Queries all entities belonging to a specific depth layer (`'foreground' | 'midground' | 'background' | 'sky'`).
-   */
-  public queryByLayer(layer: SceneDepthLayerName): EntityId[] {
-    const result: EntityId[] = [];
-    for (const [id, comp] of this.stores.DepthLayer.entries()) {
-      if (comp.layer === layer) {
+      if (matchesAll) {
         result.push(id);
       }
     }
+
     return result;
   }
 
   /**
-   * Destroys all entities matching a given `LifecycleTag.role` and cleanly disposes their WebGL resources.
+   *Destroys a single entity, detaching and disposing any associated `AnimationMixer`,
+   * attached `SpotLight` / `PointLight` rigs, and `Renderable` Three.js GPU resources.
    */
-  public destroyEntitiesByRole(role: LifecycleTagComponent['role'], disposeGpu = true): number {
-    const toDestroy: EntityId[] = [];
-    for (const [id, tag] of this.stores.LifecycleTag.entries()) {
-      if (tag.role === role) {
-        toDestroy.push(id);
-      }
-    }
-    let count = 0;
-    for (const id of toDestroy) {
-      if (this.destroyEntity(id, disposeGpu)) {
-        count++;
-      }
-    }
-    return count;
-  }
+  public destroyEntity(id: EntityId, disposeGpu = true): boolean {
+    if (!this.entities.has(id)) return false;
 
-  /**
-   * Disposes all GPU-backed `Renderable` components and clears all entity/component stores.
-   */
-  public clear(disposeGpu = true): void {
-    if (disposeGpu) {
-      for (const renderable of this.stores.Renderable.values()) {
-        if (renderable.disposeOnDestroy !== false) {
-          this.disposeRenderableResources(renderable);
+    const charAnim = this.stores.CharacterAnimation.get(id);
+    if (charAnim) {
+      if (charAnim.disposeListener) {
+        charAnim.disposeListener();
+      }
+      LifecycleManager.disposeMixer(charAnim.mixer, charAnim.root);
+    }
+
+    const traffic = this.stores.TrafficCycle.get(id);
+    if (traffic) {
+      const lights: Array<THREE.Light | undefined> = [
+        traffic.headlightLeft,
+        traffic.headlightRight,
+        traffic.streetThrowLight,
+        traffic.taillightGlow,
+      ];
+      for (const light of lights) {
+        if (!light) continue;
+        if ((light as THREE.SpotLight).target?.parent) {
+          (light as THREE.SpotLight).target.parent!.remove((light as THREE.SpotLight).target);
+        }
+        if (light.shadow?.map) {
+          light.shadow.map.dispose();
+        }
+        if (light.parent) {
+          light.parent.remove(light);
+        }
+        if (typeof light.dispose === 'function') {
+          light.dispose();
         }
       }
     }
-    for (const key of Object.keys(this.stores) as ComponentName[]) {
-      this.stores[key].clear();
-    }
-    this.entities.clear();
-  }
 
-  private disposeRenderableResources(renderable: RenderableComponent): void {
-    if (renderable.pointLight) {
-      if (renderable.pointLight.parent) {
-        renderable.pointLight.parent.remove(renderable.pointLight);
-      }
-      if (renderable.pointLight.shadow?.map) {
-        renderable.pointLight.shadow.map.dispose();
-      }
-    }
-    if (renderable.object3D) {
-      if (renderable.object3D.parent) {
-        renderable.object3D.parent.remove(renderable.object3D);
+    const renderable = this.stores.Renderable.get(id);
+    if (renderable && disposeGpu && renderable.disposeOnDestroy !== false) {
+      if (renderable.pointLight) {
+        if (renderable.pointLight.shadow?.map) {
+          renderable.pointLight.shadow.map.dispose();
+        }
+        if (renderable.pointLight.parent) {
+          renderable.pointLight.parent.remove(renderable.pointLight);
+        }
+        renderable.pointLight.dispose();
       }
       LifecycleManager.disposeObject3D(renderable.object3D);
     }
+
+    for (const store of Object.values(this.stores)) {
+      store.delete(id);
+    }
+
+    return this.entities.delete(id);
+  }
+
+  /**
+   * Returns all EntityIds assigned to a specific depth layer (`foreground` | `midground` | `background` | `sky`).
+   */
+  public queryByLayer(layer: SceneDepthLayerName): EntityId[] {
+    const matches: EntityId[] = [];
+    for (const [id, comp] of this.stores.DepthLayer.entries()) {
+      if (comp.layer === layer) {
+        matches.push(id);
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Destroys all entities matching a given `LifecycleTag.role`.
+   */
+  public destroyEntitiesByRole(
+    role: LifecycleTagComponent['role'],
+    disposeGpu = true
+  ): number {
+    const toRemove: EntityId[] = [];
+    for (const [id, tag] of this.stores.LifecycleTag.entries()) {
+      if (tag.role === role) {
+        toRemove.push(id);
+      }
+    }
+    for (const id of toRemove) {
+      this.destroyEntity(id, disposeGpu);
+    }
+    return toRemove.length;
+  }
+
+  /**
+   * Clears all entities and component stores, disposing GPU objects cleanly.
+   */
+  public clear(disposeGpu = true): void {
+    const allIds = Array.from(this.entities);
+    for (const id of allIds) {
+      this.destroyEntity(id, disposeGpu);
+    }
+    this.entities.clear();
+    this.nextEntityId = 1;
   }
 }

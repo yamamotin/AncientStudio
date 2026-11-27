@@ -12,6 +12,7 @@ const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
 const html = read('index.html');
 const pipeline = read('assets/js/pipeline.js');
 const main = read('assets/js/main.js');
+const css = read('assets/css/style.css');
 const apiClient = read('assets/js/api-client.js');
 const i18n = read('assets/js/i18n.js');
 const legacyApi = read('assets/js/api.js');
@@ -96,6 +97,15 @@ test('client hardening: no credentials, abortable requests and DOM-safe renderin
   }
 
   includesAll(main, ["querySelectorAll('input[data-sensitive]')", "'pagehide'", 'visibilitychange']);
+
+  // CPF typed in the public PROJUDI form: masked when unfocused, never persisted.
+  assert.match(html, /id="projudi-cpf"[^>]*data-sensitive="true"/);
+  assert.match(html, /id="projudi-cpf"[^>]*aria-describedby="projudi-cpf-note"/);
+  assert.match(html, /id="projudi-cpf-note"[^>]*data-i18n="etl.cpfNote"/);
+  assert.ok(pt['etl.cpfNote'] && en['etl.cpfNote'], 'CPF hygiene note is translated');
+  includesAll(css, ['input[data-sensitive]:not(:focus)', 'text-security: disc']);
+  assert.doesNotMatch(main, /localStorage\.setItem\([^)]*cpf/i);
+  assert.doesNotMatch(main, /sessionStorage\.setItem\([^)]*cpf/i);
   assert.doesNotMatch(main, /localStorage\.setItem\([^)]*token/i);
   includesAll(html, ['data-sensitive="true"', 'type="password"']);
 });

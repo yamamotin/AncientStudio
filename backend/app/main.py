@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from api.connectors import create_public_connectors
 from app.api.deps import (
     get_cache_backend,
     get_embedding_provider,
@@ -17,6 +18,7 @@ from app.api.deps import (
     get_n8n_client,
     get_page_fetcher,
     get_pipeline_inspector,
+    get_public_connectors,
     get_rag_index_store,
     get_worker_registry,
 )
@@ -208,6 +210,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     event_bus = EventBus()
     job_queue = create_job_queue(active)
     rag_index_store = RAGIndexStore()
+    public_connectors = create_public_connectors(
+        timeout_seconds=active.connector_timeout_seconds,
+        transparencia_api_key=active.transparencia_api_key,
+    )
     worker_registry = _build_default_worker_registry(
         app,
         active,
@@ -242,6 +248,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.event_bus = event_bus
     app.state.job_queue = job_queue
     app.state.rag_index_store = rag_index_store
+    app.state.public_connectors = public_connectors
     app.state.worker_registry = worker_registry
     app.state.worker_runner = worker_runner
     app.state.rate_limiter = scoped_rate_limiter
@@ -253,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_event_bus] = lambda: event_bus
     app.dependency_overrides[get_job_queue] = lambda: job_queue
     app.dependency_overrides[get_rag_index_store] = lambda: rag_index_store
+    app.dependency_overrides[get_public_connectors] = lambda: public_connectors
     app.dependency_overrides[get_worker_registry] = lambda: worker_registry
 
     # Starlette executes middlewares in reverse registration order (outermost registered last).
@@ -265,6 +273,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
     register_error_handlers(app)
     app.include_router(v1_router, prefix="/api")
+
+    @app.get("/api-status.json", include_in_schema=False)
+    def runtime_api_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "service": "fastapi-backend",
+            "version": active.api_version,
+        }
 
     static_dir = REPO_ROOT if (REPO_ROOT / "index.html").is_file() else None
     if static_dir is not None:

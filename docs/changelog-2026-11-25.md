@@ -144,6 +144,9 @@ nenhum código de contorno foi adicionado ao frontend.
   está bloqueado; `AbortController` com timeout de 8 s; leitura de
   `x-ratelimit-remaining`/`x-ratelimit-reset`; aviso informativo com link do Actions
   em caso de rate-limit ou falha de rede.
+- **Rename interno:** as classes CSS `.playground-*` viraram `.gateway-*`, a âncora
+  `#playground` virou `#gateway` (inclusive no gatilho de carregamento tardio de
+  `main.js`) e o rótulo do menu passou a `02 gateway`.
 - **Segurança no cliente:** nenhum token (`GITHUB_TOKEN`, `VERCEL_TOKEN`, chaves) no
   bundle; `credentials: 'omit'` e nenhum header `Authorization`; renderização somente
   com `createElement`/`textContent`; `safeRunUrl()` como allowlist estrita de
@@ -153,6 +156,9 @@ nenhum código de contorno foi adicionado ao frontend.
   `#workflow-token` marcado `data-sensitive`, nunca persistido e apagado em `pagehide`
   e ao ocultar a aba; `AbortController` em **todas** as chamadas `fetch` do frontend
   (8 s GitHub, 10 s `/api/v1`, 5 s `api-status.json`, 4 s dicionário i18n).
+- **CPF da consulta pública PROJUDI:** campo marcado `data-sensitive`, sem autocomplete,
+  mascarado fora de foco (`-webkit-text-security`), nunca gravado em storage, limpo em
+  `pagehide`/aba oculta e não ecoado na resposta — máscara LGPD definitiva no servidor.
 - **CSP:** `<meta http-equiv="Content-Security-Policy">` com
   `default-src 'self'`, `object-src 'none'`, `script-src 'self'`, `style-src 'self'`,
   `img-src 'self' data:`, `font-src 'self'`, `connect-src 'self' https://api.github.com`,

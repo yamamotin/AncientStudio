@@ -1,4 +1,4 @@
-/* Real integration layer for the FastAPI backend.
+/* Real integration layer for the FastAPI and Python stdlib backends.
    No mocked responses live here: every method performs an HTTP request to /api/v1
    and preserves the real status code, problem+json body and network errors. */
 window.TP = window.TP || {};
@@ -67,7 +67,9 @@ window.TP = window.TP || {};
       data: data,
       status: response.status,
       ms: Math.round(ended - started),
-      source: 'api',
+      source: '/api/v1',
+      method: init.method,
+      route: '/api/v1' + path,
       headers: response.headers
     };
 
@@ -82,15 +84,51 @@ window.TP = window.TP || {};
     return path + (path.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(key);
   }
 
+  function buildQuery(params) {
+    var entries = Object.keys(params || {}).filter(function (k) {
+      return params[k] !== undefined && params[k] !== null && params[k] !== '';
+    });
+    if (!entries.length) return '';
+    var search = new URLSearchParams();
+    entries.forEach(function (k) { search.set(k, String(params[k])); });
+    return '?' + search.toString();
+  }
+
   TP.apiClient = {
     request: request,
     health: function () { return request('/health'); },
     build: function () { return request('/build'); },
+    extract: function (payload) {
+      return payload ? request('/extract', { method: 'POST', body: payload }) : request('/extract');
+    },
     listDatasets: function () { return request('/etl/datasets'); },
     datasetSummary: function (dataset) { return request('/etl/datasets/' + encodeURIComponent(dataset) + '/summary'); },
     datasetRecords: function (dataset, params) {
-      var query = params ? '?' + new URLSearchParams(params).toString() : '';
-      return request('/etl/datasets/' + encodeURIComponent(dataset) + '/records' + query);
+      return request('/etl/datasets/' + encodeURIComponent(dataset) + '/records' + buildQuery(params));
+    },
+    bcbIndicadores: function (ultimos) {
+      return request('/bcb/indicadores' + buildQuery({ ultimos: ultimos }));
+    },
+    bcbInstituicoes: function (busca, limite) {
+      return request('/bcb/instituicoes' + buildQuery({ busca: busca, limite: limite }));
+    },
+    siscomexNcm: function (q, limite) {
+      return request('/siscomex/ncm' + buildQuery({ q: q, limite: limite }));
+    },
+    transparenciaMunicipio: function (cidade, uf) {
+      return request('/transparencia/municipio' + buildQuery({ cidade: cidade, uf: uf }));
+    },
+    projudiConsulta: function (payload) {
+      return request('/projudi/processos/consulta', { method: 'POST', body: payload || {} });
+    },
+    projudiProcesso: function (numeroProcesso) {
+      return request('/projudi/processos/' + encodeURIComponent(numeroProcesso || ''));
+    },
+    projudiResumo: function (numeroProcesso, payload) {
+      return request('/projudi/processos/' + encodeURIComponent(numeroProcesso || '') + '/resumo', {
+        method: 'POST',
+        body: payload || {}
+      });
     },
     submitInvoice: function (payload) {
       return request('/gateway/invoices/submit', { method: 'POST', body: payload });
@@ -101,6 +139,9 @@ window.TP = window.TP || {};
         body: payload,
         headers: signatureHeaders || {}
       });
+    },
+    parseLegacyInvoice: function (payload) {
+      return request('/invoices/parse', { method: 'POST', body: payload || {} });
     },
     runWorkflow: function (workflowId, payload, apiKey) {
       return request('/workflows/' + encodeURIComponent(workflowId) + '/run', {
