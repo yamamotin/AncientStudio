@@ -2,13 +2,18 @@
 
 from app.api.v1 import (
     ai_workflows,
+    bcb,
     etl,
     gateway,
     health,
     jobs,
     pipelines,
+    playground,
+    projudi,
     rag,
     scraping,
+    siscomex,
+    transparencia,
     workflows,
 )
 from fastapi import APIRouter
@@ -17,6 +22,11 @@ router = APIRouter(prefix="/v1")
 router.include_router(health.router)
 router.include_router(gateway.router)
 router.include_router(etl.router)
+router.include_router(bcb.router)
+router.include_router(siscomex.router)
+router.include_router(transparencia.router)
+router.include_router(projudi.router)
+router.include_router(playground.router)
 router.include_router(workflows.router)
 router.include_router(jobs.router)
 router.include_router(scraping.router)

@@ -17,7 +17,7 @@ ignore = ["B008"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-pythonpath = ["."]
+pythonpath = [".", ".."]
 markers = [
     "unit: fast isolated unit tests for core, cache, queue, workers, and domain services",
     "integration: HTTP API and cross-module contract integration tests",

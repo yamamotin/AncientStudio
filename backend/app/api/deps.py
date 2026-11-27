@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from api.connectors import PublicConnectorsRegistry, create_public_connectors
 from app.cache import CacheBackend, IdempotencyStore, create_cache_backend
 from app.core.config import Settings, get_settings
 from app.core.security import ApiKeyVerifier, ApiPrincipal, Scope
@@ -83,6 +84,15 @@ def get_embedding_provider(
 
 def get_rag_index_store() -> RAGIndexStore:
     return RAGIndexStore()
+
+
+def get_public_connectors(
+    settings: Settings = Depends(get_settings),
+) -> PublicConnectorsRegistry:
+    return create_public_connectors(
+        timeout_seconds=settings.connector_timeout_seconds,
+        transparencia_api_key=settings.transparencia_api_key,
+    )
 
 
 def get_etl_service(cache: CacheBackend = Depends(get_cache_backend)) -> ETLService:
