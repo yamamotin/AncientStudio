@@ -126,8 +126,20 @@ O mecanismo é único: `[data-collapsible]` + `[data-collapse-toggle]` + `.colla
 montada e expandida**. Ela não tem `data-collapsible`, não tem botão de recolher/expandir e
 não tem `#scene-body` recortável; por isso o `engine-adapter.js` monta o palco assim que a
 seção entra no viewport, sem depender de um clique para "abrir". Os controles da cena
-continuam intactos: barra de fonte/célula com `[ restaurar ]`, presets `[ Dia ]`,
-`[ Noite ]`, `[ Com chuva ]`, `[ pause ]`, `[ tela cheia ]` e zoom por scroll do mouse.
+continuam intactos: barra de fonte/célula (slider + leitura em px, sem o antigo botão
+`[ restaurar ]`), presets `[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`, `[ pause ]`,
+`[ tela cheia ]` e zoom por scroll do mouse.
+
+**Exceção deliberada — `#stack` (STACK // NEOFETCH):** a seção do pinguim também fica
+**sempre expandida**: não tem `data-collapsible`, `data-collapsed`, botão de recolher nem
+`collapse-body`, então o palco Tux e a tabela de specs ficam visíveis sem interação. Só
+`#pipeline` e `#gateway` continuam recolhíveis.
+
+**Campos das APIs:** todos os inputs da seção de APIs começam **vazios** — sem
+`placeholder` e sem `value` padrão (inclusive o CPF de exemplo, que não existe mais no
+markup). A validação continua: `maxlength`/`min`/`max`/`inputmode`, `data-sensitive` nos
+campos sigilosos, o guard local `FIELD_REQUIRED` (422 no card da própria API, campo focado
+com `aria-invalid`) e a validação mod-11/módulo-97 no cliente e no servidor.
 
 | Peça | Papel |
 | --- | --- |

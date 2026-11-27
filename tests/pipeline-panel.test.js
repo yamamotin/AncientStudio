@@ -141,20 +141,27 @@ test('monitoring screen: executive summary, filtered noise and collapsible shell
 
 test('every collapsible section has a toggle wired to an existing body', () => {
   const sections = html.match(/<section[^>]*data-collapsible[^>]*>/g) || [];
-  assert.equal(sections.length, 3, 'pipeline, gateway and stack are collapsible');
+  assert.equal(sections.length, 2, 'only pipeline and gateway are collapsible');
   const bodies = new Set();
   const controls = html.match(/aria-controls="([a-z-]+)"/g) || [];
   controls.forEach((attr) => bodies.add(attr.split('"')[1]));
-  for (const id of ['pipeline-body', 'gateway-body', 'stack-body']) {
+  for (const id of ['pipeline-body', 'gateway-body']) {
     assert.ok(bodies.has(id), `toggle targets ${id}`);
     assert.ok(html.includes(`id="${id}"`), `${id} exists in the document`);
   }
-  // Tall sections are compact by default; only the compact stack stays open.
+  // Tall sections are compact by default.
   assert.match(html, /<section id="gateway"[^>]*data-collapsed="true"/);
-  assert.match(html, /<section id="stack"[^>]*data-collapsed="false"/);
   assert.match(html, /<section id="pipeline"[^>]*data-collapsed="true"/);
 
-  // The 3D scene is the exception: always mounted and expanded, no collapse control.
+  // The penguin/neofetch section is always expanded: no collapsible hooks at all.
+  const stack = html.slice(html.indexOf('<section id="stack"'), html.indexOf('<!-- CAPTCHA challenge dialog'));
+  assert.match(stack, /<section id="stack" class="section" aria-labelledby="stack-title">/);
+  assert.doesNotMatch(stack, /data-collapsible|data-collapsed|collapse-toggle|collapse-body|panel-head-actions/);
+  assert.doesNotMatch(stack, /\[\s*(recolher|expandir|collapse|expand)\s*\]/i, 'no collapse label in the stack');
+  assert.doesNotMatch(html, /aria-controls="stack-body"/, 'no toggle targets the stack body');
+  assert.ok(stack.includes('id="stack-body"'), 'the stack body still exists, just never clamped');
+
+  // The 3D scene stays the other exception: always mounted and expanded, no collapse control.
   const scene = html.slice(html.indexOf('<section id="scene"'), html.indexOf('<!-- 6. NEOFETCH STACK'));
   assert.doesNotMatch(scene, /data-collapsible|data-collapsed|collapse-toggle|aria-controls="scene-body"/);
   assert.doesNotMatch(scene, /class="[^"]*collapse-body/);

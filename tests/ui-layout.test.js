@@ -102,9 +102,10 @@ test('the temporary penguin font slider is gone and the penguin is fixed at 4px'
   assert.ok(!html.includes('penguinFont'), 'no penguinFont i18n keys remain in the markup');
   assert.ok(!html.includes('data-temporary'), 'the temporary container is gone');
   assert.equal((html.match(/<script src="assets\/js\/penguin-font\.js"/g) || []).length, 0);
-  // The stack section itself is untouched: fixed (no scene-style collapse removal),
-  // seven spec rows and the penguin stage in place.
+  // The stack section stays open at all times now: no collapse hooks, but the seven spec
+  // rows and the penguin stage are untouched.
   includesAll(stack, ['id="penguin-stage"', 'class="penguin-fallback"', 'id="stack-body"']);
+  assert.doesNotMatch(stack, /data-collapsible|data-collapsed|collapse-toggle|collapse-body|\[\s*recolher\s*\]/i);
   assert.equal((stack.match(/<dt/g) || []).length, 7);
   assert.equal((stack.match(/<dd/g) || []).length, 7);
   assert.ok(!stack.includes('type="range"'), 'no range input is left in the penguin section');
@@ -157,6 +158,64 @@ test('the removed mascot hooks leave the public scene contract intact', () => {
   // Main-scene cell sizing still resets through the documented path.
   includesAll(adapter, ['function resetCellSize()', 'function setCellSize(px)']);
   assert.equal((adapter.match(/if \(isMascot\) return state\.mountCellSize;/g) || []).length, 2, 'setCellSize/resetCellSize keep ignoring the mascot');
+});
+
+test('API gateway fields ship empty: no placeholder, no default value, labels and validation intact', () => {
+  const gateway = html.slice(html.indexOf('<section id="gateway"'), html.indexOf('<section id="console"'));
+  const API_INPUTS = [
+    'etl-cidade', 'etl-uf', 'projudi-cpf', 'projudi-numero', 'projudi-captcha',
+    'bcb-ultimos', 'bcb-busca', 'siscomex-query', 'resumo-numero', 'resumo-texto', 'workflow-token'
+  ];
+  for (const id of API_INPUTS) {
+    const tag = gateway.match(new RegExp(`<input id="${id}"[^>]*>`));
+    assert.ok(tag, `#${id} exists in the API section`);
+    assert.equal(/(placeholder|value)=/.test(tag[0]), false, `#${id} keeps neither a placeholder nor a default value`);
+  }
+  // Nothing is pre-filled at runtime either (no JS value assignment, no localStorage seed).
+  for (const id of API_INPUTS) {
+    assert.equal(main.includes("'" + id + "').value ="), false, `#${id} is never pre-filled by main.js`);
+    assert.equal(main.includes('"' + id + '").value ='), false, `#${id} is never pre-filled by main.js`);
+  }
+  assert.doesNotMatch(main, /value\s*=\s*'Paranavaí'|'Nubank'|111\.444\.777-35/, 'no sample payload is hard-coded in main.js');
+
+  // Labels stay: every field sits inside a <label class="field-group"> with a visible span.
+  const fieldGroups = gateway.match(/<label class="field-group[^"]*">[\s\S]*?<\/label>/g) || [];
+  assert.ok(fieldGroups.length >= API_INPUTS.length, 'every API input keeps its label wrapper');
+  for (const group of fieldGroups) {
+    assert.match(group, /<span[^>]*>[^<]+<\/span>/, 'each field keeps a visible label');
+  }
+
+  // Input validation/constraints survive the cleanup.
+  includesAll(gateway, [
+    'id="etl-uf" class="select-control" type="text" maxlength="2"',
+    'id="projudi-cpf" class="select-control" type="text" inputmode="numeric"',
+    'id="bcb-ultimos" class="select-control" type="number" min="1" max="30"',
+    'id="workflow-token" class="select-control" type="password"',
+    'data-sensitive="true"'
+  ]);
+
+  // No i18n placeholder key is left for these inputs.
+  for (const dictionary of [pt, en]) {
+    const stale = Object.keys(dictionary).filter((key) => /placeholder/i.test(key));
+    assert.deepEqual(stale, ['api.placeholder', 'captcha.answerPlaceholder'], `unexpected placeholder keys: ${stale}`);
+  }
+
+  // A blank required field is validated in the UI instead of firing a doomed request.
+  includesAll(main, [
+    'function firstEmptyField(ids)',
+    'function renderFieldRequired(input, metaId, outputId)',
+    "t('api.fieldRequired', { field: fieldLabelOf(input) })",
+    "code: 'FIELD_REQUIRED'",
+    "['etl-cidade', 'etl-uf']",
+    "['projudi-cpf']",
+    "['projudi-numero']",
+    "['siscomex-query']",
+    "['resumo-numero', 'resumo-texto']"
+  ]);
+  for (const dictionary of [pt, en]) {
+    assert.ok(dictionary['api.fieldRequired'] && dictionary['api.fieldRequiredTitle']);
+  }
+  includesAll(i18n, ['"api.fieldRequired"', '"api.fieldRequiredTitle"']);
 });
 
 test('the interactive console sits right after the API gateway', () => {

@@ -1163,7 +1163,7 @@ test('Mouse scroll-wheel zoom: smooth damping, safe min/max bounds, WASD & autoO
   assert.ok(removedListeners.has('wheel'), 'wheel listener explicitly removed via removeEventListener');
 });
 
-test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px low-end steps, reset, RGSS shader & bilingual i18n', async () => {
+test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px low-end steps, no reset button, RGSS shader & bilingual i18n', async () => {
   const htmlSrc = readFileSync(path.join(root, 'index.html'), 'utf8');
   const mainSrc = readFileSync(path.join(root, 'assets/js/main.js'), 'utf8');
   const adapterSrc = readFileSync(path.join(root, 'assets/js/engine-adapter.js'), 'utf8');
@@ -1175,15 +1175,21 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
   const titlePos = htmlSrc.indexOf('id="scene-title"');
   const toolbarPos = htmlSrc.indexOf('class="scene-toolbar"');
   const sliderPos = htmlSrc.indexOf('id="scene-cell-size"');
-  const resetPos = htmlSrc.indexOf('id="scene-cell-reset"');
   const stagePos = htmlSrc.indexOf('id="ascii-scene"');
   assert.ok(titlePos > 0 && toolbarPos > titlePos && toolbarPos < stagePos, 'Toolbar sits directly below scene title and above 3D stage');
-  assert.ok(sliderPos > toolbarPos && resetPos > sliderPos && resetPos < stagePos, 'Slider and Reset button sit inside scene toolbar');
+  assert.ok(sliderPos > toolbarPos && sliderPos < stagePos, 'Slider sits inside scene toolbar');
 
-  for (const key of ['scene.fontGroupAria', 'scene.fontSizeLabel', 'scene.fontSizeAria', 'scene.fontReset', 'scene.fontResetAria']) {
+  // The `[ restaurar ]` button was removed: only the slider and its readout remain.
+  assert.equal(htmlSrc.indexOf('id="scene-cell-reset"'), -1, 'no reset button in the scene toolbar');
+  assert.doesNotMatch(htmlSrc, /\[\s*restaurar\s*\]/i, 'no reset label left in the markup');
+  assert.ok(!ptJson['scene.fontReset'] && !ptJson['scene.fontResetAria'], 'pt-br reset keys pruned');
+  assert.ok(!enJson['scene.fontReset'] && !enJson['scene.fontResetAria'], 'en reset keys pruned');
+
+  for (const key of ['scene.fontGroupAria', 'scene.fontSizeLabel', 'scene.fontSizeAria']) {
     assert.ok(ptJson[key] && enJson[key], `Missing translation for ${key}`);
   }
-  includesAll(mainSrc, ['scene-cell-size', 'scene-cell-value', 'scene-cell-reset', 'resetCellSize', 'setCellSize', 'cleanupSceneUiListeners']);
+  includesAll(mainSrc, ['scene-cell-size', 'scene-cell-value', 'resetCellSize', 'setCellSize', 'cleanupSceneUiListeners']);
+  assert.doesNotMatch(mainSrc, /scene-cell-reset|onCellReset/, 'no dead wiring for the removed button');
 
   // 2. Micro cell stop table: min=2.0px, 0.25px steps in [2.0..6.0], 0.50px in (6.0..max], capped at mount max
   const sandbox = createBundleSandbox({
@@ -1392,16 +1398,15 @@ test('3D scene section is always mounted and expanded: no collapse control, cont
   assert.doesNotMatch(scene, /\[\s*(expandir|recolher|expand|collapse)\s*\]/i, 'no collapse label inside the scene');
   assert.doesNotMatch(mainSrc, /scene-body|#scene[^'"]*collapse-toggle/i);
 
-  // 2. Scene controls stay untouched: font/shader toolbar with reset, presets, pause,
-  //    fullscreen and the wheel-zoom hint.
+  // 2. Scene controls stay untouched: font/shader toolbar (slider + readout, no reset
+  //    button), presets, pause, fullscreen and the wheel-zoom hint.
+  assert.doesNotMatch(scene, /scene-cell-reset|scene\.fontReset/, 'the reset button is gone');
   includesAll(scene, [
     'id="ascii-scene"',
     'class="scene-stage"',
     'class="scene-toolbar"',
     'id="scene-cell-size"',
     'id="scene-cell-value"',
-    'id="scene-cell-reset"',
-    'scene.fontReset',
     'data-scene-mode="day"',
     'data-scene-mode="night"',
     'data-scene-mode="rain"',

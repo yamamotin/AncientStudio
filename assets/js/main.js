@@ -258,9 +258,14 @@ window.TP = window.TP || {};
       }
     }
 
-    function bindConnectorAction(button, metaId, outputId, liveCall, staticCall) {
+    function bindConnectorAction(button, metaId, outputId, liveCall, staticCall, required) {
       if (!button || !client) return;
       button.addEventListener('click', async function () {
+        var emptyField = firstEmptyField(required);
+        if (emptyField) {
+          renderFieldRequired(emptyField, metaId, outputId);
+          return;
+        }
         button.disabled = true;
         // The previous answer is retired the moment a new query starts.
         prepareResponse(metaId, outputId);
@@ -294,12 +299,66 @@ window.TP = window.TP || {};
       return el ? el.value.trim() : (fallback || '');
     }
 
+    /* The connector fields ship empty (no placeholder, no pre-filled value), so an empty
+       required input is validated here instead of letting a doomed request leave the
+       browser. The verdict is rendered in the same contextual response card as any other
+       422, the field keeps its label and gets aria-invalid until it is edited. */
+    function fieldLabelOf(input) {
+      var wrap = input && input.closest ? input.closest('label') : null;
+      var span = wrap ? wrap.querySelector('span') : null;
+      var text = span && span.textContent ? span.textContent.trim() : '';
+      return text || (input && input.id ? input.id : '');
+    }
+
+    function markInvalid(input, invalid) {
+      if (!input) return;
+      if (invalid) input.setAttribute('aria-invalid', 'true');
+      else input.removeAttribute('aria-invalid');
+    }
+
+    function renderFieldRequired(input, metaId, outputId) {
+      var detail = t('api.fieldRequired', { field: fieldLabelOf(input) });
+      markInvalid(input, true);
+      if (typeof input.focus === 'function') input.focus();
+      activateResponse(metaId, outputId);
+      var meta = document.getElementById(metaId);
+      var output = document.getElementById(outputId);
+      if (meta) meta.textContent = '// ' + detail;
+      if (output) {
+        output.textContent = JSON.stringify({
+          ok: false,
+          status: 422,
+          code: 'FIELD_REQUIRED',
+          title: t('api.fieldRequiredTitle'),
+          detail: detail
+        }, null, 2);
+      }
+    }
+
+    function firstEmptyField(ids) {
+      var list = ids || [];
+      for (var i = 0; i < list.length; i += 1) {
+        var input = document.getElementById(list[i]);
+        if (input && !String(input.value || '').trim()) return input;
+      }
+      return null;
+    }
+
+    // Editing a field clears the invalid state (no persisted state, no re-focus loop).
+    document.addEventListener('input', function (event) {
+      var target = event && event.target;
+      if (target && target.getAttribute && target.getAttribute('aria-invalid') === 'true') {
+        markInvalid(target, false);
+      }
+    });
+
     bindConnectorAction(
       transparenciaBtn,
       'extract-meta',
       'extract-output',
-      function () { return client.transparenciaMunicipio(valOf('etl-cidade', 'Paranavaí'), valOf('etl-uf', 'PR')); },
-      function () { return TP.api.transparenciaMunicipio(valOf('etl-cidade', 'Paranavaí'), valOf('etl-uf', 'PR')); }
+      function () { return client.transparenciaMunicipio(valOf('etl-cidade'), valOf('etl-uf')); },
+      function () { return TP.api.transparenciaMunicipio(valOf('etl-cidade'), valOf('etl-uf')); },
+      ['etl-cidade', 'etl-uf']
     );
 
     bindConnectorAction(
@@ -325,7 +384,8 @@ window.TP = window.TP || {};
         var cap = valOf('projudi-captcha', '');
         if (cap) req.captcha_token = cap;
         return TP.api.projudiConsulta(req);
-      }
+      },
+      ['projudi-cpf']
     );
 
     bindConnectorAction(
@@ -340,7 +400,8 @@ window.TP = window.TP || {};
         var hasCaptcha = Boolean(params.captcha_token || params.session_cookie);
         return client.projudiProcesso(valOf('projudi-numero'), hasCaptcha ? params : undefined);
       },
-      function () { return TP.api.projudiProcesso(valOf('projudi-numero')); }
+      function () { return TP.api.projudiProcesso(valOf('projudi-numero')); },
+      ['projudi-numero']
     );
 
     bindConnectorAction(
@@ -364,7 +425,8 @@ window.TP = window.TP || {};
       'invoice-meta',
       'invoice-output',
       function () { return client.siscomexNcm(valOf('siscomex-query', '')); },
-      function () { return TP.api.siscomexNcm(valOf('siscomex-query', '')); }
+      function () { return TP.api.siscomexNcm(valOf('siscomex-query', '')); },
+      ['siscomex-query']
     );
 
     bindConnectorAction(
@@ -381,7 +443,8 @@ window.TP = window.TP || {};
         return TP.api.projudiResumo(valOf('resumo-numero'), {
           texto_processo: valOf('resumo-texto')
         });
-      }
+      },
+      ['resumo-numero', 'resumo-texto']
     );
 
     if (extract && client) {
@@ -646,7 +709,6 @@ window.TP = window.TP || {};
     var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-scene-mode]'));
     var cellSlider = document.getElementById('scene-cell-size');
     var cellOutput = document.getElementById('scene-cell-value');
-    var cellReset = document.getElementById('scene-cell-reset');
     var help = document.querySelector('.scene-help');
     var activeMode = 'night';
 
@@ -697,7 +759,7 @@ window.TP = window.TP || {};
       if (stage) stage.setAttribute('data-mode', engineReady ? 'engine' : 'fallback');
       if (engineReady && badge) badge.textContent = 'ENGINE';
       else if (badge && badge.textContent !== 'NO WEBGL') badge.textContent = 'FALLBACK';
-      [toggle, cellSlider, cellReset].concat(modeButtons).forEach(function (control) {
+      [toggle, cellSlider].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
       if (engineReady) syncCellControlFromEngine();
@@ -766,13 +828,6 @@ window.TP = window.TP || {};
       syncCellReadout(applied, range.min, range.max);
     }
 
-    function onCellReset() {
-      if (typeof scene.resetCellSize !== 'function') return;
-      var restored = scene.resetCellSize();
-      var range = typeof scene.getCellSizeRange === 'function' ? scene.getCellSizeRange() : null;
-      syncCellReadout(restored, range ? range.min : undefined, range ? range.max : undefined);
-    }
-
     function cleanupSceneUiListeners() {
       stage.removeEventListener('tp:scene-mode', onSceneMode);
       stage.removeEventListener('tp:scene-status', onSceneStatus);
@@ -781,7 +836,6 @@ window.TP = window.TP || {};
         cellSlider.removeEventListener('input', onCellInput);
         cellSlider.removeEventListener('keydown', onCellKeyDown);
       }
-      if (cellReset) cellReset.removeEventListener('click', onCellReset);
       window.removeEventListener('pagehide', cleanupSceneUiListeners);
     }
 
@@ -790,9 +844,6 @@ window.TP = window.TP || {};
     if (cellSlider) {
       cellSlider.addEventListener('input', onCellInput);
       cellSlider.addEventListener('keydown', onCellKeyDown);
-    }
-    if (cellReset) {
-      cellReset.addEventListener('click', onCellReset);
     }
     window.addEventListener('pagehide', cleanupSceneUiListeners);
 

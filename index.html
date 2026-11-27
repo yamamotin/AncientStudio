@@ -186,11 +186,11 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="etl.cidadeLabel">Município</span>
-                <input id="etl-cidade" class="select-control" type="text" value="Paranavaí" autocomplete="off">
+                <input id="etl-cidade" class="select-control" type="text" autocomplete="off">
               </label>
               <label class="field-group field-group--compact">
                 <span data-i18n="etl.ufLabel">UF</span>
-                <input id="etl-uf" class="select-control" type="text" maxlength="2" value="PR" autocomplete="off">
+                <input id="etl-uf" class="select-control" type="text" maxlength="2" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -213,7 +213,7 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="etl.cpfLabel">CPF (validação mod-11)</span>
-                <input id="projudi-cpf" class="select-control" type="text" value="111.444.777-35" inputmode="numeric" autocomplete="off" spellcheck="false" data-sensitive="true" aria-describedby="projudi-cpf-note">
+                <input id="projudi-cpf" class="select-control" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" data-sensitive="true" aria-describedby="projudi-cpf-note">
               </label>
               <label class="field-group field-group--compact">
                 <span data-i18n="etl.tribunalLabel">Tribunal</span>
@@ -223,11 +223,11 @@
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="etl.processoLabel">Processo CNJ (20 dígitos)</span>
-                <input id="projudi-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
+                <input id="projudi-numero" class="select-control" type="text" autocomplete="off">
               </label>
               <label class="field-group field-group--wide">
                 <span>reCAPTCHA Token (TJPR)</span>
-                <input id="projudi-captcha" class="select-control" type="text" placeholder="g-recaptcha-response (consulta.tjpr.jus.br)" autocomplete="off" data-sensitive>
+                <input id="projudi-captcha" class="select-control" type="text" autocomplete="off" data-sensitive>
               </label>
             </div>
             <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.</p>
@@ -256,11 +256,11 @@
             <div class="gateway-fields">
               <label class="field-group field-group--compact">
                 <span data-i18n="fintech.ultimosLabel">Períodos SGS</span>
-                <input id="bcb-ultimos" class="select-control" type="number" min="1" max="30" value="5">
+                <input id="bcb-ultimos" class="select-control" type="number" min="1" max="30">
               </label>
               <label class="field-group">
                 <span data-i18n="fintech.buscaLabel">Instituição ou ISPB</span>
-                <input id="bcb-busca" class="select-control" type="text" value="Nubank" autocomplete="off">
+                <input id="bcb-busca" class="select-control" type="text" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -283,7 +283,7 @@
             <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="fintech.ncmLabel">Descrição do produto ou código NCM</span>
-                <input id="siscomex-query" class="select-control" type="text" value="GPU" placeholder="GPU, computadores portateis, 8471.80.00" autocomplete="off">
+                <input id="siscomex-query" class="select-control" type="text" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -317,11 +317,11 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="workflow.resumoProcessoLabel">Processo CNJ</span>
-                <input id="resumo-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
+                <input id="resumo-numero" class="select-control" type="text" autocomplete="off">
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="workflow.resumoTextoLabel">Texto / Movimentação para triagem</span>
-                <input id="resumo-texto" class="select-control" type="text" value="Deferida tutela de urgência; autos conclusos para sentença." autocomplete="off">
+                <input id="resumo-texto" class="select-control" type="text" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -343,7 +343,7 @@
             <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="workflow.token">X-API-Key (token do backend)</span>
-                <input id="workflow-token" class="select-control" type="password" autocomplete="new-password" spellcheck="false" data-sensitive="true" placeholder="X-API-Key" aria-describedby="workflow-meta">
+                <input id="workflow-token" class="select-control" type="password" autocomplete="new-password" spellcheck="false" data-sensitive="true" aria-describedby="workflow-meta">
               </label>
             </div>
             <div class="gateway-actions">
@@ -400,7 +400,6 @@
           <label for="scene-cell-size" data-i18n="scene.fontSizeLabel">Fonte / célula</label>
           <input id="scene-cell-size" type="range" min="2" max="8" step="0.01" value="8" disabled aria-label="Tamanho da fonte e célula ASCII em pixels" data-i18n-attr="aria-label:scene.fontSizeAria">
           <output id="scene-cell-value" for="scene-cell-size">8px</output>
-          <button id="scene-cell-reset" class="cmd-button cmd-button--small" type="button" disabled aria-label="Restaurar tamanho inicial da fonte ASCII" data-i18n="scene.fontReset" data-i18n-attr="aria-label:scene.fontResetAria">[ restaurar ]</button>
         </div>
       </div>
       <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>
@@ -426,14 +425,11 @@
     </section>
 
     <!-- 6. NEOFETCH STACK -->
-    <section id="stack" class="section collapsible" data-collapsible data-collapsed="false" aria-labelledby="stack-title">
+    <section id="stack" class="section" aria-labelledby="stack-title">
       <div class="panel-head">
         <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
-        <div class="panel-head-actions">
-          <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="stack-body">[ recolher ]</button>
-        </div>
       </div>
-      <div id="stack-body" class="collapse-body">
+      <div id="stack-body">
       <div class="neofetch">
         <div>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback" aria-hidden="true">
