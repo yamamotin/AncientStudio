@@ -54,7 +54,7 @@ only when ready.
 
 ## Playground systems
 
-`[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
+`[ CENA 3D INTERATIVA ]` / `[ INTERACTIVE SCENE 3D ]` runs `AsciiSceneEngine` in `mode: 'playground'` with
 the unified Cyberpunk Neo-Sector boulevard (`MapLoader` + `PlaygroundSceneBuilder`
 + `PlaygroundEntityFactory`), elevated maglev viaduct and train, neon towers and
 holograms, cyber-trees animated by `WindSystem`, patrolling drones/hover-vehicles,

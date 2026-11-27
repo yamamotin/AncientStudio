@@ -22,15 +22,29 @@ test('index.html keeps relative, file://-safe asset paths', () => {
 
 function assertNoAbsoluteAssetPaths(source) {
   const { assert } = require('./helpers/assert');
-  const remoteAssets = source.match(/(?:src|href)="https?:\/\/[^"]+"/g) || [];
-  const allowed = remoteAssets.filter((tag) => tag.includes('linkedin.com/'));
-  assert.equal(remoteAssets.length, allowed.length, 'no remote runtime assets');
+  const remoteSources = source.match(/src="https?:\/\/[^"]+"/g) || [];
+  assert.deepEqual(remoteSources, [], 'no remote runtime assets');
+
+  // Only the professional profile links may be absolute; runtime assets stay local.
+  const allowedHosts = ['https://www.linkedin.com/', 'https://github.com/yamamotin/AncientStudio/actions'];
+  const remoteLinks = source.match(/href="https?:\/\/[^"]+"/g) || [];
+  remoteLinks.forEach((link) => {
+    assert.ok(allowedHosts.some((host) => link.includes(host)), `unexpected remote link: ${link}`);
+  });
+
+  const externalAnchors = source.match(/<a\b[^>]*href="https?:\/\/[^"]+"[^>]*>/g) || [];
+  assert.ok(externalAnchors.length > 0, 'external anchors exist');
+  externalAnchors.forEach((anchor) => {
+    assert.match(anchor, /rel="noopener noreferrer"/, `missing rel=noopener: ${anchor}`);
+  });
 }
 
 test('required sections and real identity are present', () => {
   includesAll(html, [
     '| ____|  _ \\ / _ \\',
-    'ASCII REALMS // SCENE',
+    '[ CENA 3D INTERATIVA ]',
+    '[ API GATEWAY // INTEGRAÇÕES ]',
+    '[ LIVE CI/CD &amp; DOCKER PIPELINE ]',
     'STACK // NEOFETCH',
     'assets/img/eron-portrait-ascii.png',
     'id="penguin-stage"',

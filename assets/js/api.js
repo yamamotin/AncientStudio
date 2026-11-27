@@ -65,6 +65,13 @@ window.TP = window.TP || {};
       options.headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(payload || {});
     }
+    var Controller = window.AbortController;
+    var controller = typeof Controller === 'function' ? new Controller() : null;
+    var timer = null;
+    if (controller) {
+      options.signal = controller.signal;
+      timer = window.setTimeout(function () { controller.abort(); }, 10000);
+    }
     try {
       var response = await fetch(path, options);
       var data = await response.json();
@@ -73,6 +80,8 @@ window.TP = window.TP || {};
       return { data: data, ms: Math.round(ended - started), source: 'api' };
     } catch (error) {
       return null;
+    } finally {
+      if (timer) window.clearTimeout(timer);
     }
   }
 
@@ -109,10 +118,8 @@ window.TP = window.TP || {};
         document_type: 'NF-e',
         event_id: 'evt-demo-3522'
       });
-    },
-    runPipeline: function (forceFailure) {
-      if (mode !== 'api') return Promise.resolve(null);
-      return request('/api/v1/pipeline/run', 'POST', { force_failure: Boolean(forceFailure) });
     }
+    // No pipeline runner here: the CI/CD panel reads public GitHub Actions
+    // metadata only (assets/js/pipeline.js) and never triggers builds.
   };
 })(window.TP);
