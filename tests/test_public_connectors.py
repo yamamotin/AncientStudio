@@ -9,6 +9,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import api.server as stdlib_server
 from api.connectors import (
     ConnectorCaptchaRequiredError,
     ConnectorNotFoundError,
@@ -32,7 +33,6 @@ from api.connectors import (
     validate_cpf_or_cnpj,
     validate_uf,
 )
-import api.server as stdlib_server
 
 
 class FakeRouteTransport:
@@ -1455,6 +1455,7 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
         self,
     ) -> None:
         import base64
+
         from api.connectors import create_public_connectors
         from api.connectors.captcha import CaptchaChallengeStore
 
