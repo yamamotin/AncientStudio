@@ -132,7 +132,7 @@
   "scene.fontSizeLabel": "Font / cell",
   "scene.fontSizeAria": "ASCII font and cell size in pixels",
   "workflow.tokenHygiene": "// the key lives only in this tab memory and is wiped on exit",
-  "etl.cpfNote": "// CPF validated server-side (mod-11) and masked: never stored in the browser or echoed in the response.",
+  "etl.cpfNote": "// CPF stays visible while you type, validated server-side (mod-11): never stored in the browser or echoed in the response.",
   "common.expand": "[ expand ]",
   "common.collapse": "[ collapse ]",
   "pipeline.summaryAria": "Pipeline executive summary",
@@ -169,7 +169,5 @@
   "captcha.unavailable": "// the verification dialog could not be opened: reload the page and try again",
   "api.close": "[ close ]",
   "api.closeAria": "Close this API response",
-  "brightness.short": "brightness",
-  "scene.reflectionLabel": "Reflection",
-  "scene.reflectionAria": "Scene reflection intensity"
+  "brightness.short": "brightness"
 }

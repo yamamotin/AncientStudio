@@ -145,6 +145,29 @@ function statusEvents(events) {
   return events.filter((event) => event.type === 'tp:scene-status').map((event) => event.detail);
 }
 
+test('the scene defaults to rain with reflection fixed at 100%', async () => {
+  const state = { mounts: 0, throwOnMount: false };
+  const box = createAdapterSandbox({ ASCIIRealms: fakeEngine(state) });
+
+  // No preset passed: the adapter must fall back to rain ("Chuva").
+  const controller = box.sandbox.TP.scene.create(box.container, {});
+  assert.equal(await controller.mount(), true);
+  assert.equal(controller.getPreset(), 'rain', 'rain is the default atmosphere');
+
+  // Reflection is 100% out of the box and survives preset changes (no UI slider anymore).
+  assert.equal(controller.getReflection(), 1);
+  controller.setPreset('day');
+  assert.equal(controller.getReflection(), 1, 'reflection stays fixed while presets change');
+  assert.equal(controller.setReflection(0.35), 0.35, 'the adapter API can still override it');
+  assert.equal(controller.setReflection(2), 1, 'and stays clamped to 100%');
+
+  // An explicit option is honoured (used by main.js to pin the fixed look).
+  const pinned = box.sandbox.TP.scene.create(box.container, { preset: 'rain', reflectionStrength: 1 });
+  assert.equal(pinned.getReflection(), 1);
+  pinned.destroy();
+  controller.destroy();
+});
+
 test('a real GPU driver that only trips failIfMajorPerformanceCaveat still mounts the scene', async () => {
   const state = { mounts: 0, throwOnMount: false };
   // Driver behaviour: the strict request is refused, the plain one returns a real GPU.

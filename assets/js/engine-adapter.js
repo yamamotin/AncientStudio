@@ -1,7 +1,7 @@
 /* Integration layer for the modular ASCII Engine (`ascii-engine.bundle.js`).
    Connects:
    1. `#ascii-scene` -> Pre-built 3D Urban GLB scene (`./assets/models/cena_completa.glb` + `./assets/draco/`, `mode: 'playground'`)
-      with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Com chuva")
+      with three cohesive atmosphere states: `day` ("Dia"), `night` ("Noite"), and `rain` ("Chuva", the default)
    2. `#penguin-stage` -> High-contrast 3D articulated Tux mascot (`mode: 'mascot'`)
    Zero framework dependencies and zero external CDNs. The playground keeps scroll-safe passive pointer input
    and WASD + E character controls; the mascot has no pointer interaction and spins on its own via a single RAF loop. */
@@ -13,12 +13,13 @@ window.TP = window.TP || {};
   var controllers = [];
 
   // The UI exposes one Cyber-Noir + Entropism scene with three modes: day, night and rain.
-  var DEFAULT_MODE = 'night';
+  // Rain ("Chuva") is the default atmosphere; the reflection lookup is a fixed 100% look.
+  var DEFAULT_MODE = 'rain';
   var SCENE_MODES = ['day', 'night', 'rain'];
   var MIN_CELL_PX = 2.0;
   var MAX_CELL_PX = 21.0;
   var DEFAULT_CELL_PX = 2.25;
-  var DEFAULT_REFLECTION = 0.25;
+  var DEFAULT_REFLECTION = 1;
   var FINE_CELL_THRESHOLD_PX = 6.0;
   var FINE_CELL_STEP_PX = 0.25;
   var COARSE_CELL_STEP_PX = 0.5;
@@ -236,7 +237,11 @@ window.TP = window.TP || {};
       mountCellSize: Number(options && options.config && options.config.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX),
       currentCellSize: Number(options && options.config && options.config.cellSize) || (isMascot ? 8 : DEFAULT_CELL_PX),
       customCellActive: false,
-      reflectionStrength: DEFAULT_REFLECTION,
+      reflectionStrength: (function () {
+        var requested = Number(options && options.reflectionStrength);
+        if (!Number.isFinite(requested)) return DEFAULT_REFLECTION;
+        return Math.max(0, Math.min(1, requested));
+      })(),
       // Diagnostics: why the stage is still on the static skeleton (null once mounted).
       failure: null,
       attempts: 0,
@@ -443,10 +448,13 @@ window.TP = window.TP || {};
               mode: 'mascot',
               atmosphere: 'night',
               palette: {
-                background: '#13222E',
+                // Antarctic ice scenario for `[ STACK // NEOFETCH ]`: pale polar-sky wall
+                // (#D6EAF6) over a brighter snow shelf (#F2FAFF), matching
+                // MascotStageBuilder's MASCOT_BACKDROP_HEX / MASCOT_FLOOR_HEX.
+                background: '#D6EAF6',
                 warmLight: '#9AD0F0',
                 warmCore: '#FF9F1C',
-                coolAmbient: '#1D2B36',
+                coolAmbient: '#F2FAFF',
                 foliageAccent: '#2B4254',
                 cursorLight: '#9AD0F0'
               },
@@ -622,6 +630,7 @@ window.TP = window.TP || {};
         return state.reflectionStrength;
       },
       getReflection: function () { return state.reflectionStrength; },
+      getPreset: function () { return state.preset; },
       resetCellSize: resetCellSize,
       getCellSize: function () { return state.currentCellSize; },
       getMaxCellSize: function () { return isMascot ? state.mountCellSize : MAX_CELL_PX; },

@@ -127,7 +127,7 @@ montada e expandida**. Ela não tem `data-collapsible`, não tem botão de recol
 não tem `#scene-body` recortável; por isso o `engine-adapter.js` monta o palco assim que a
 seção entra no viewport, sem depender de um clique para "abrir". Os controles da cena
 continuam intactos: barra de fonte/célula (slider + leitura em px, sem o antigo botão
-`[ restaurar ]`), presets `[ Dia ]`, `[ Noite ]`, `[ Com chuva ]`, `[ pause ]`,
+`[ restaurar ]`), presets `[ Dia ]`, `[ Noite ]`, `[ Chuva ]` (padrão), `[ pause ]`,
 `[ tela cheia ]` e zoom por scroll do mouse.
 
 **Exceção deliberada — `#stack` (STACK // NEOFETCH):** a seção do pinguim também fica

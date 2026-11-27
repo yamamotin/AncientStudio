@@ -122,10 +122,24 @@ test('scene modes replace the old preset selector with day, night and rain', () 
   }
   assert.deepEqual(
     [pt['scene.day'], pt['scene.night'], pt['scene.rain']],
-    ['[ Dia ]', '[ Noite ]', '[ Com chuva ]']
+    ['[ Dia ]', '[ Noite ]', '[ Chuva ]']
   );
+  assert.deepEqual([en['scene.day'], en['scene.night'], en['scene.rain']], ['[ Day ]', '[ Night ]', '[ Rain ]']);
+  // Rain is the default atmosphere: it is the pressed preset in the markup.
+  assert.match(html, /<button[^>]*data-scene-mode="rain"[^>]*aria-pressed="true"/);
+  assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1, 'only one preset is pressed at a time');
   assert.doesNotMatch(main, /scene-cycle|scene-preset|setCycle/);
   includesAll(main, ['data-scene-mode', 'scene.setPreset(activeMode)', 'aria-pressed']);
+
+  // Reflection is fixed at 100% and the slider was removed together with its wiring.
+  assert.doesNotMatch(html, /scene-reflection/, 'no reflection slider remains');
+  assert.doesNotMatch(main, /scene-reflection|onReflectionInput|reflectionSlider|reflectionOutput/);
+  includesAll(main, ['FIXED_REFLECTION = 1', 'scene.setReflection(FIXED_REFLECTION)']);
+  for (const dictionary of [pt, en]) {
+    assert.equal(dictionary['scene.reflectionLabel'], undefined);
+    assert.equal(dictionary['scene.reflectionAria'], undefined);
+  }
+  assert.doesNotMatch(i18n, /scene\.reflection(Label|Aria)/);
 });
 
 test('page brightness is a 50%-100% top-bar slider with an amplified curve', () => {

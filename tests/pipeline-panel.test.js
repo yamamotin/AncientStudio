@@ -210,12 +210,14 @@ test('client hardening: no credentials, abortable requests and DOM-safe renderin
 
   includesAll(main, ["querySelectorAll('input[data-sensitive]')", "'pagehide'", 'visibilitychange']);
 
-  // CPF typed in the public PROJUDI form: masked when unfocused, never persisted.
-  assert.match(html, /id="projudi-cpf"[^>]*data-sensitive="true"/);
+  // CPF typed in the public PROJUDI form: readable on purpose (never a password field),
+  // wiped when the tab hides and never persisted; only real secrets get the visual mask.
+  assert.match(html, /id="projudi-cpf"[^>]*type="text"[^>]*data-sensitive="true"/);
   assert.match(html, /id="projudi-cpf"[^>]*aria-describedby="projudi-cpf-note"/);
   assert.match(html, /id="projudi-cpf-note"[^>]*data-i18n="etl.cpfNote"/);
   assert.ok(pt['etl.cpfNote'] && en['etl.cpfNote'], 'CPF hygiene note is translated');
-  includesAll(css, ['input[data-sensitive]:not(:focus)', 'text-security: disc']);
+  assert.equal(/id="projudi-cpf"[^>]*data-mask/.test(html), false, 'the CPF is not masked as a secret');
+  includesAll(css, ['input[data-mask]:not(:focus)', 'text-security: disc']);
   assert.doesNotMatch(main, /localStorage\.setItem\([^)]*cpf/i);
   assert.doesNotMatch(main, /sessionStorage\.setItem\([^)]*cpf/i);
   assert.doesNotMatch(main, /localStorage\.setItem\([^)]*token/i);
