@@ -168,7 +168,7 @@ test('a real GPU driver that only trips failIfMajorPerformanceCaveat still mount
   assert.equal(box.contextCalls[0].attrs.failIfMajorPerformanceCaveat, true);
   assert.equal(box.contextCalls[1].attrs.failIfMajorPerformanceCaveat, undefined);
   assert.deepEqual({ ...controller.getStatus() }, {
-    mode: 'engine', reason: null, mounted: true, attempts: 1, cellSize: 6.5
+    mode: 'engine', reason: null, mounted: true, attempts: 1, cellSize: 2.25
   });
   assert.equal(box.timers.length, 0, 'a mounted scene never schedules retries');
 });
@@ -190,7 +190,7 @@ test('a software rasterizer keeps the static fallback and says why', async () =>
   assert.equal(box.container.getAttribute('data-mode'), 'fallback');
   assert.equal(box.timers.length, 0, 'no retry storm on a permanently unsupported device');
   assert.deepEqual({ ...statusEvents(box.events).pop() }, {
-    mode: 'fallback', reason: 'webgl-software', mounted: false, attempts: 1, cellSize: 8
+    mode: 'fallback', reason: 'webgl-software', mounted: false, attempts: 1, cellSize: 2.25
   });
 });
 
@@ -220,7 +220,7 @@ test('a missing engine bundle schedules a bounded retry and recovers on ascii-re
   assert.equal(controller.getMode(), 'engine');
   assert.equal(state.mounts, 1);
   assert.deepEqual({ ...controller.getStatus() }, {
-    mode: 'engine', reason: null, mounted: true, attempts: 1, cellSize: 6.5
+    mode: 'engine', reason: null, mounted: true, attempts: 1, cellSize: 2.25
   });
 });
 

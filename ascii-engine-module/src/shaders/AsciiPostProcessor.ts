@@ -152,6 +152,7 @@ export class AsciiPostProcessor {
         uDofStrength: { value: config.dofStrength },
         uDaylight: { value: config.atmosphere === 'day' ? 1.0 : 0.0 },
         uWetness: { value: AsciiPostProcessor.resolveWetness(config) },
+        uReflectionStrength: { value: THREE.MathUtils.clamp(config.reflectionStrength ?? 0.35, 0, 1) },
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 140.0 },
         uVolumeWrapStrength: { value: config.mode === 'mascot' ? 0.0 : 1.0 },
@@ -295,6 +296,7 @@ export class AsciiPostProcessor {
     this.compositeMaterial.uniforms.uDofStrength!.value = config.dofStrength;
     this.compositeMaterial.uniforms.uDaylight!.value = config.atmosphere === 'day' ? 1.0 : 0.0;
     this.compositeMaterial.uniforms.uWetness!.value = AsciiPostProcessor.resolveWetness(config);
+    this.compositeMaterial.uniforms.uReflectionStrength!.value = THREE.MathUtils.clamp(config.reflectionStrength ?? 0.35, 0, 1);
     this.compositeMaterial.uniforms.uVolumeWrapStrength!.value =
       config.mode === 'mascot' ? 0.0 : 1.0;
     this.compositeMaterial.uniforms.uNormalReliefStrength!.value =

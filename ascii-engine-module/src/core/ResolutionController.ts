@@ -287,18 +287,18 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
   let cellPhysH: number;
   let cellPhysW: number;
   if (isMicroOrManualCell) {
-    cellPhysH = Math.max(2.0, Math.round(cellCss * effectiveDpr * 4) / 4);
-    cellPhysW = Math.max(1.25, Math.round(cellPhysH * MONOSPACE_ASPECT * 4) / 4);
+    cellPhysH = Math.max(2.0, cellCss * effectiveDpr);
+    cellPhysW = Math.max(1.25, cellPhysH * MONOSPACE_ASPECT);
   } else {
     cellPhysH = Math.max(6, Math.round(cellCss * effectiveDpr));
     cellPhysW = Math.max(4, Math.round(cellPhysH * MONOSPACE_ASPECT));
   }
 
   // 5. Enforce column guardrails:
-  //    - Default auto mode caps 4K+ at 680 cols; micro/manual mode expands safely to 2400 cols
+  //    - Default auto mode caps 4K+ at 680 cols; micro/manual mode expands safely to 4096 cols
   //      (Pass 4 composite fragment cost is O(physicalWidth * physicalHeight), independent of columns)
   const maxCols =
-    input.config.mode === 'mascot' ? 88 : isMicroOrManualCell ? 2400 : 680;
+    input.config.mode === 'mascot' ? 88 : isMicroOrManualCell ? 4096 : 680;
   const minCols = input.config.mode === 'mascot' ? 24 : 42;
 
   const tentativeCols = Math.floor(physicalWidth / cellPhysW);
@@ -310,7 +310,7 @@ export function computeAdaptiveResolution(input: ResolutionInput): ResolutionPro
       cellPhysW = Math.max(4, Math.ceil(physicalWidth / maxCols));
       cellPhysH = Math.max(6, Math.round(cellPhysW / MONOSPACE_ASPECT));
     }
-  } else if (tentativeCols < minCols && physicalWidth >= minCols * 4) {
+  } else if (!isMicroOrManualCell && tentativeCols < minCols && physicalWidth >= minCols * 4) {
     cellPhysW = Math.max(4, Math.floor(physicalWidth / minCols));
     cellPhysH = Math.max(6, Math.round(cellPhysW / MONOSPACE_ASPECT));
   }

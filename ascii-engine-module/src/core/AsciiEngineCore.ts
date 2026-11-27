@@ -121,6 +121,8 @@ export class AsciiEngineCore {
       initialConfig?.mode === 'mascot'
         ? mergeEngineConfig(DEFAULT_ENGINE_CONFIG, {
             fov: 38,
+            cellSize: 8,
+            autoResponsiveDensity: true,
             enableKeyboard: false,
             bloomIntensity: 0.08,
             dofStrength: 0.0,
@@ -496,6 +498,7 @@ export class AsciiEngineCore {
       partialConfig.palette !== undefined ||
       prevShadows !== this.config.enableShadows ||
       partialConfig.windStrength !== undefined ||
+      partialConfig.reflectionStrength !== undefined ||
       partialConfig.cursorLightIntensity !== undefined;
 
     if (atmosphereOrLightChanged) {
