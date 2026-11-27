@@ -709,12 +709,13 @@ window.TP = window.TP || {};
     var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-scene-mode]'));
     var cellSlider = document.getElementById('scene-cell-size');
     var cellOutput = document.getElementById('scene-cell-value');
-    var reflectionSlider = document.getElementById('scene-reflection');
-    var reflectionOutput = document.getElementById('scene-reflection-value');
     var help = document.querySelector('.scene-help');
-    var activeMode = 'night';
+    // Rain is the default atmosphere ("Chuva"); reflection is fixed at 100% and has no
+    // slider in the UI. Both stay overridable through the adapter API.
+    var activeMode = 'rain';
+    var FIXED_REFLECTION = 1;
 
-    var scene = TP.scene.create(stage, { preset: activeMode });
+    var scene = TP.scene.create(stage, { preset: activeMode, reflectionStrength: FIXED_REFLECTION });
     var penguin = penguinStage
       ? TP.scene.create(penguinStage, {
           preset: 'night',
@@ -761,17 +762,13 @@ window.TP = window.TP || {};
       if (stage) stage.setAttribute('data-mode', engineReady ? 'engine' : 'fallback');
       if (engineReady && badge) badge.textContent = 'ENGINE';
       else if (badge && badge.textContent !== 'NO WEBGL') badge.textContent = 'FALLBACK';
-      [toggle, cellSlider, reflectionSlider].concat(modeButtons).forEach(function (control) {
+      [toggle, cellSlider].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
       if (engineReady) {
         syncCellControlFromEngine();
-        if (reflectionSlider && typeof scene.getReflection === 'function') {
-          var reflectionPercent = Math.round(scene.getReflection() * 100);
-          reflectionSlider.value = String(reflectionPercent);
-          reflectionSlider.setAttribute('aria-valuetext', reflectionPercent + '%');
-          if (reflectionOutput) reflectionOutput.textContent = reflectionPercent + '%';
-        }
+        // Reflection is a fixed 100% look: re-assert it after every preset/mount change.
+        if (typeof scene.setReflection === 'function') scene.setReflection(FIXED_REFLECTION);
       }
       if (help) {
         help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
@@ -836,16 +833,6 @@ window.TP = window.TP || {};
       syncCellReadout(applied, range.min, range.max);
     }
 
-    function onReflectionInput() {
-      if (!reflectionSlider || typeof scene.setReflection !== 'function') return;
-      var value = scene.setReflection(Number(reflectionSlider.value) / 100);
-      var percent = Math.round(value * 100);
-      reflectionSlider.value = String(percent);
-      reflectionSlider.setAttribute('aria-valuetext', percent + '%');
-      if (reflectionOutput) reflectionOutput.textContent = percent + '%';
-    }
-
-
     function cleanupSceneUiListeners() {
       stage.removeEventListener('tp:scene-mode', onSceneMode);
       stage.removeEventListener('tp:scene-status', onSceneStatus);
@@ -854,7 +841,6 @@ window.TP = window.TP || {};
         cellSlider.removeEventListener('input', onCellInput);
         cellSlider.removeEventListener('keydown', onCellKeyDown);
       }
-      if (reflectionSlider) reflectionSlider.removeEventListener('input', onReflectionInput);
       window.removeEventListener('pagehide', cleanupSceneUiListeners);
     }
 
@@ -864,7 +850,6 @@ window.TP = window.TP || {};
       cellSlider.addEventListener('input', onCellInput);
       cellSlider.addEventListener('keydown', onCellKeyDown);
     }
-    if (reflectionSlider) reflectionSlider.addEventListener('input', onReflectionInput);
     window.addEventListener('pagehide', cleanupSceneUiListeners);
 
     if (toggle) {
@@ -880,6 +865,7 @@ window.TP = window.TP || {};
       button.addEventListener('click', function () {
         activeMode = button.getAttribute('data-scene-mode');
         scene.setPreset(activeMode);
+        if (typeof scene.setReflection === 'function') scene.setReflection(FIXED_REFLECTION);
         modeButtons.forEach(function (other) {
           other.setAttribute('aria-pressed', String(other === button));
         });
@@ -957,8 +943,10 @@ window.TP = window.TP || {};
     }
   }
 
-  // Secrets typed in the UI are masked, never persisted and wiped when the tab
-  // stops being visible: no localStorage/sessionStorage write exists for them.
+  // Sensitive values are never persisted and are wiped when the tab stops being
+  // visible: no localStorage/sessionStorage write exists for them. Only fields marked
+  // with [data-mask] (X-API-Key, CAPTCHA tokens) are treated as secrets for the visual
+  // mask and for password-manager hints; the CPF stays visible and keeps autocomplete="off".
   function initSensitiveInputs() {
     var fields = Array.prototype.slice.call(document.querySelectorAll('input[data-sensitive]'));
 
@@ -969,9 +957,16 @@ window.TP = window.TP || {};
     }
 
     fields.forEach(function (field) {
-      field.setAttribute('autocomplete', 'new-password');
+      var masked = field.hasAttribute('data-mask') || field.type === 'password';
+      if (masked) {
+        field.setAttribute('autocomplete', 'new-password');
+        field.setAttribute('data-lpignore', 'true');
+      } else {
+        // Visible value (e.g. CPF): keep browsers from treating it as a password.
+        field.setAttribute('autocomplete', field.getAttribute('autocomplete') || 'off');
+        field.removeAttribute('data-lpignore');
+      }
       field.setAttribute('spellcheck', 'false');
-      field.setAttribute('data-lpignore', 'true');
     });
 
     if (!fields.length) return;

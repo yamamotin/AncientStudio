@@ -246,7 +246,8 @@ test('engine uses passive pointer listeners (no scroll blocking)', () => {
 
 test('playground exposes exactly three scene modes and removes legacy procedural cyberpunk builders', () => {
   includesAll(adapter, [
-    "DEFAULT_MODE = 'night'",
+    "DEFAULT_MODE = 'rain'",
+    'var DEFAULT_REFLECTION = 1',
     "SCENE_MODES = ['day', 'night', 'rain']",
     "mode !== 'rain'",
     'atmosphere: atmosphere',
@@ -346,18 +347,18 @@ test('neofetch fallback is static ASCII art and Tux 3D mascot stage stays intact
     'data-pointer-locked',
     'data-auto-spin',
     'getScene',
-    "background: '#13222E'",
-    "coolAmbient: '#1D2B36'",
+    "background: '#D6EAF6'",
+    "coolAmbient: '#F2FAFF'",
     'blockBlendWeight: 0.0',
     'enableShadows: true'
   ]);
-  includesAll(cssSrc, ['#13222E', '#1D2B36', 'pointer-events: none']);
+  includesAll(cssSrc, ['#D6EAF6', '#F2FAFF', 'pointer-events: none']);
   includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
   const sandbox = createBundleSandbox();
   const pkg = sandbox.ASCIIRealms;
-  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#13222E');
-  assert.equal(pkg.MASCOT_FLOOR_HEX, '#1D2B36');
+  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#D6EAF6');
+  assert.equal(pkg.MASCOT_FLOOR_HEX, '#F2FAFF');
 
   const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
     mode: 'mascot',
@@ -388,6 +389,56 @@ test('neofetch fallback is static ASCII art and Tux 3D mascot stage stays intact
   ecs.clear(true);
   pkg.LifecycleManager.disposeObject3D(stage.scene);
   assert.equal(stage.scene.children.length, 0);
+});
+
+test('[ STACK // NEOFETCH ] scenario is Antarctic ice: pale wall, snow shelf and legible ink', () => {
+  const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
+  const mascotBuilderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
+    'utf8'
+  );
+
+  // 1. Engine palette: pale polar sky above, brighter snow shelf below, ice-tinted horizon.
+  includesAll(mascotBuilderSrc, [
+    "export const MASCOT_BACKDROP_HEX = '#D6EAF6'",
+    "export const MASCOT_FLOOR_HEX = '#F2FAFF'",
+    'Antarctic ice',
+    'clamp(verticalFalloff * 0.585 + studioPool * 0.075, 0.505, 0.685)',
+    'clamp(0.79 + depthGrade * 0.07 + exp(-radialDist * radialDist * 1.1) * 0.06, 0.78, 0.93)',
+    'backdropBase * 0.60'
+  ]);
+  assert.doesNotMatch(mascotBuilderSrc, /#13222E|#1D2B36/, 'the old dark slate stage is gone');
+
+  // 2. CSS substrate for the fallback and for the stage before/behind the canvas.
+  includesAll(cssSrc, [
+    'background-color: #D6EAF6',
+    'linear-gradient(180deg, #D6EAF6 0%, #E4F3FB 62%, #F2FAFF 68.5%, #F2FAFF 100%)',
+    'rgba(94, 146, 178, 0.16)',
+    'color: #0E2A3C'
+  ]);
+
+  // 3. Contrast math: the ASCII composite must land in an icy mid-to-light band while the
+  //    snow floor stays brighter than the wall, so dark Tux keeps a readable silhouette.
+  const srgbToLinear = (channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  const hexToLinear = (hex) => {
+    const value = hex.replace('#', '');
+    return [0, 2, 4].map((offset) => srgbToLinear(parseInt(value.slice(offset, offset + 2), 16) / 255));
+  };
+  const gamma = (linear) => linear.map((channel) => channel ** (1 / 2.2));
+  const luma = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+
+  const wallBase = gamma(hexToLinear('#D6EAF6'));
+  const floorBase = gamma(hexToLinear('#F2FAFF'));
+  const wallMean = luma(wallBase.map((channel) => channel * 0.505));
+  const wallBright = luma(wallBase.map((channel) => channel * 0.685));
+  const floorMean = luma(floorBase.map((channel) => channel * 0.79));
+
+  assert.ok(wallMean > 0.42, `ice wall must read as light, not slate (${wallMean.toFixed(3)})`);
+  assert.ok(wallBright < 0.68, `ice wall must stay below a white-out (${wallBright.toFixed(3)})`);
+  assert.ok(floorMean > wallBright, 'the snow shelf stays brighter than the wall');
+  assert.ok(floorMean - 0.075 > 0.5, 'snow shelf keeps a visible separation from the dark Tux coat');
+  const tuxCoat = luma(hexToLinear('#080D14'));
+  assert.ok(wallMean > tuxCoat * 3, 'pale ice wall keeps a strong silhouette against the dark coat');
 });
 
 test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Player_Rig (WASD + NLA Idle/Walking/Casting + clamp), CameraFollow, Carro_Grupo 30s light cycle, and presets', async () => {
@@ -1487,6 +1538,13 @@ test('3D scene section is always mounted and expanded: no collapse control, cont
     'id="scene-fullscreen"',
     'data-i18n="scene.presetHelp"'
   ]);
+  // The reflection slider is gone: 100% is a fixed look, rain is the pressed default.
+  assert.doesNotMatch(scene, /scene-reflection/, 'no reflection slider in the toolbar');
+  assert.match(scene, /<button[^>]*data-scene-mode="rain"[^>]*aria-pressed="true"/);
+  assert.match(scene, /<button[^>]*data-scene-mode="night"[^>]*aria-pressed="false"/);
+  assert.doesNotMatch(mainSrc, /scene-reflection|onReflectionInput/);
+  includesAll(mainSrc, ["var activeMode = 'rain'", 'FIXED_REFLECTION = 1', 'scene.setReflection(FIXED_REFLECTION)']);
+  includesAll(adapter, ["var DEFAULT_MODE = 'rain'", 'var DEFAULT_REFLECTION = 1']);
   // The stage is a direct child of the section, not wrapped in a clampable body.
   assert.ok(scene.indexOf('id="ascii-scene"') > scene.indexOf('class="scene-toolbar"'));
   assert.equal(scene.indexOf('id="scene-body"'), -1, 'no #scene-body wrapper remains');

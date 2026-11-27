@@ -161,8 +161,8 @@ solid volumetric readability.
 engine-side tools added on that date.
 
 `[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (`fov: 38°`)
-using `MascotStageBuilder` (`#13222E` backdrop + `#1D2B36` floor with soft
-PCF/contact shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
+using `MascotStageBuilder` (Antarctic ice scenario: `#D6EAF6` backdrop + `#F2FAFF` snow
+floor with soft PCF/contact shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
 (`includeShowcaseRig: false`, unified smooth vertex-colored torso quantized
 strictly through pure ASCII glyphs with `blockBlendWeight: 0.0`). While the engine
 is still loading, or if it fails, `assets/js/neofetch.js` shows a cute **static**

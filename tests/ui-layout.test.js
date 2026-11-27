@@ -125,20 +125,37 @@ test('the temporary penguin font slider is gone and the penguin is fixed at 4px'
   assert.doesNotMatch(neofetch, /fontPx = 9\.5|fontPx = 8\.5|fontPx = 8\.0|fontPx = 8\.8/, 'no adaptive font sizes remain');
 });
 
-test('the penguin outline is lighter and readable on the dark stage', () => {
+test('the penguin fallback ink is readable on the Antarctic ice stage', () => {
   const fallback = css.slice(css.indexOf('.penguin-fallback {'), css.indexOf('}', css.indexOf('.penguin-fallback {')));
-  // A light text color plus a white/mint halo instead of the old flat green glow.
-  assert.match(fallback, /color:\s*#E9FFF6/, 'the typos are drawn in a light ink');
+  // Dark polar ink over the pale snow shelf, lifted by a white halo (no flat green glow).
+  assert.match(fallback, /color:\s*#0E2A3C/, 'the art is drawn in dark polar ink');
   includesAll(fallback, [
     'text-shadow:',
-    'rgba(255, 255, 255, 0.9)',
-    'rgba(180, 255, 220, 0.5)'
+    'rgba(255, 255, 255, 0.95)',
+    'rgba(232, 246, 255, 0.85)'
   ]);
-  assert.doesNotMatch(fallback, /color:\s*var\(--green\)/, 'the flat dark green ink was replaced');
+  assert.doesNotMatch(fallback, /color:\s*var\(--green\)/, 'the flat dark green ink stays gone');
 
-  // The live mascot gets the same light halo through CSS only (shaders untouched).
+  // The live mascot keeps a cold CSS-only halo (engine shaders untouched).
   const halo = css.slice(css.indexOf('#penguin-stage canvas {'), css.indexOf('}', css.indexOf('#penguin-stage canvas {')));
-  includesAll(halo, ['filter: drop-shadow(', 'rgba(255, 255, 255, 0.55)', 'rgba(150, 255, 205, 0.22)']);
+  includesAll(halo, ['filter: drop-shadow(', 'rgba(12, 32, 46, 0.42)', 'rgba(255, 255, 255, 0.75)']);
+
+  // Stage substrate is ice, and the dark ink keeps real contrast against it.
+  const stage = css.slice(css.indexOf('#penguin-stage {'), css.indexOf('}', css.indexOf('#penguin-stage {')));
+  includesAll(stage, ['#D6EAF6', '#F2FAFF', 'E4F3FB']);
+  const relativeLuminance = (hex) => {
+    const value = hex.replace('#', '');
+    const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+    const [r, g, b] = channels.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  assert.ok(contrast('#0E2A3C', '#D6EAF6') >= 7, 'fallback ink keeps at least AAA contrast on the ice wall');
+  assert.ok(contrast('#0E2A3C', '#F2FAFF') >= 7, 'fallback ink keeps at least AAA contrast on the snow shelf');
+
   // Rotation and lifecycle stay owned by the engine adapter.
   includesAll(adapter, ["getObjectByName('TuxMascotRoot')", 'startMascotSpin']);
 });
@@ -216,6 +233,46 @@ test('API gateway fields ship empty: no placeholder, no default value, labels an
     assert.ok(dictionary['api.fieldRequired'] && dictionary['api.fieldRequiredTitle']);
   }
   includesAll(i18n, ['"api.fieldRequired"', '"api.fieldRequiredTitle"']);
+});
+
+test('CPF field stays readable: never a password field, never visually masked', () => {
+  const gateway = html.slice(html.indexOf('<section id="gateway"'), html.indexOf('<!-- 5. INTERACTIVE SCENE 3D'));
+  const tag = gateway.match(/<input id="projudi-cpf"[^>]*>/);
+  assert.ok(tag, '#projudi-cpf exists');
+  const cpfTag = tag[0];
+
+  assert.match(cpfTag, /type="text"/, 'CPF uses a visible text input');
+  assert.equal(/type="password"/.test(cpfTag), false, 'CPF is never a password input');
+  assert.equal(/data-mask/.test(cpfTag), false, 'CPF is not covered by the secret mask');
+  assert.match(cpfTag, /inputmode="numeric"/, 'numeric keypad on mobile');
+  assert.match(cpfTag, /maxlength="14"/, 'formatted CPF length (000.000.000-00)');
+  assert.match(cpfTag, /autocomplete="off"/, 'no autofill/password manager for the CPF');
+  assert.match(cpfTag, /data-sensitive="true"/, 'still wiped when the tab hides, never persisted');
+  assert.match(cpfTag, /aria-describedby="projudi-cpf-note"/);
+
+  // Masking CSS is scoped to real secrets only (X-API-Key / CAPTCHA tokens).
+  assert.match(css, /input\[data-mask\]:not\(:focus\)\s*\{[^}]*-webkit-text-security: disc/);
+  assert.doesNotMatch(css, /input\[data-sensitive\]:not\(:focus\)\s*\{[^}]*text-security/, 'CPF must not be masked just for being sensitive');
+  for (const id of ['projudi-captcha', 'workflow-token', 'captcha-token']) {
+    const secret = html.match(new RegExp(`<input id="${id}"[^>]*>`));
+    assert.ok(secret && /data-mask/.test(secret[0]), `#${id} stays a masked secret`);
+  }
+
+  // main.js only applies password-manager hints to masked/password fields.
+  includesAll(main, [
+    "field.hasAttribute('data-mask') || field.type === 'password'",
+    "field.setAttribute('autocomplete', 'new-password')",
+    "querySelectorAll('input[data-sensitive]')"
+  ]);
+  assert.doesNotMatch(main, /localStorage\.setItem\([^)]*cpf|sessionStorage\.setItem\([^)]*cpf/i);
+
+  // The helper text no longer claims the CPF is masked.
+  for (const dictionary of [pt, en]) {
+    assert.doesNotMatch(dictionary['etl.cpfNote'], /mascarad|masked/i);
+    assert.match(dictionary['etl.cpfNote'], /mod-11/);
+  }
+  assert.match(html, /id="projudi-cpf-note"[^>]*>\/\/ CPF visível no campo/);
+  assert.doesNotMatch(i18n, /e mascarado:|and masked:/);
 });
 
 test('the interactive console sits right after the API gateway', () => {

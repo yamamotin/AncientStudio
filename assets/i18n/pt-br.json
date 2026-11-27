@@ -99,7 +99,7 @@
   "scene.exitFullscreenAria": "Restaurar a seção Cena 3D Interativa",
   "scene.day": "[ Dia ]",
   "scene.night": "[ Noite ]",
-  "scene.rain": "[ Com chuva ]",
+  "scene.rain": "[ Chuva ]",
   "brightness.label": "Brilho da página",
   "pipeline.refresh": "[ atualizar ]",
   "pipeline.loading": "// carregando execuções públicas do GitHub Actions…",
@@ -132,7 +132,7 @@
   "scene.fontSizeLabel": "Fonte / célula",
   "scene.fontSizeAria": "Tamanho da fonte e célula ASCII em pixels",
   "workflow.tokenHygiene": "// a chave fica apenas na memória desta aba e é apagada ao sair",
-  "etl.cpfNote": "// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.",
+  "etl.cpfNote": "// CPF visível no campo, validado no servidor (mod-11): não é salvo no navegador nem ecoado na resposta.",
   "common.expand": "[ expandir ]",
   "common.collapse": "[ recolher ]",
   "pipeline.summaryAria": "Resumo executivo do pipeline",
@@ -169,7 +169,5 @@
   "captcha.unavailable": "// a janela de verificação não pôde ser aberta: recarregue a página e tente novamente",
   "api.close": "[ fechar ]",
   "api.closeAria": "Fechar a resposta desta API",
-  "brightness.short": "brilho",
-  "scene.reflectionLabel": "Reflexo",
-  "scene.reflectionAria": "Intensidade do reflexo na cena"
+  "brightness.short": "brilho"
 }

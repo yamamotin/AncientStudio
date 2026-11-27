@@ -213,7 +213,7 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="etl.cpfLabel">CPF (validação mod-11)</span>
-                <input id="projudi-cpf" class="select-control" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" data-sensitive="true" aria-describedby="projudi-cpf-note">
+                <input id="projudi-cpf" class="select-control" type="text" inputmode="numeric" maxlength="14" autocomplete="off" spellcheck="false" data-sensitive="true" aria-describedby="projudi-cpf-note">
               </label>
               <label class="field-group field-group--compact">
                 <span data-i18n="etl.tribunalLabel">Tribunal</span>
@@ -227,10 +227,10 @@
               </label>
               <label class="field-group field-group--wide">
                 <span>reCAPTCHA Token (TJPR)</span>
-                <input id="projudi-captcha" class="select-control" type="text" autocomplete="off" data-sensitive>
+                <input id="projudi-captcha" class="select-control" type="text" autocomplete="off" data-sensitive data-mask>
               </label>
             </div>
-            <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.</p>
+            <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF visível no campo, validado no servidor (mod-11): não é salvo no navegador nem ecoado na resposta.</p>
             <div class="gateway-actions">
               <button id="projudi-consulta-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.projudiConsultaBtn">POST /api/v1/projudi/processos/consulta</button>
               <button id="projudi-detalhe-button" class="cmd-button" type="button" data-i18n="etl.projudiDetalheBtn">GET /api/v1/projudi/processos/{numero}</button>
@@ -343,7 +343,7 @@
             <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="workflow.token">X-API-Key (token do backend)</span>
-                <input id="workflow-token" class="select-control" type="password" autocomplete="new-password" spellcheck="false" data-sensitive="true" aria-describedby="workflow-meta">
+                <input id="workflow-token" class="select-control" type="password" autocomplete="new-password" spellcheck="false" data-sensitive="true" data-mask aria-describedby="workflow-meta">
               </label>
             </div>
             <div class="gateway-actions">
@@ -401,11 +401,6 @@
           <input id="scene-cell-size" type="range" min="2" max="21" step="0.01" value="2.25" disabled aria-label="Tamanho da fonte e célula ASCII em pixels" data-i18n-attr="aria-label:scene.fontSizeAria">
           <output id="scene-cell-value" for="scene-cell-size">2.25px</output>
         </div>
-        <div class="scene-font-control">
-          <label for="scene-reflection" data-i18n="scene.reflectionLabel">Reflexo</label>
-          <input id="scene-reflection" type="range" min="0" max="100" step="1" value="25" disabled aria-label="Intensidade do reflexo na cena" data-i18n-attr="aria-label:scene.reflectionAria">
-          <output id="scene-reflection-value" for="scene-reflection">25%</output>
-        </div>
       </div>
       <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>
       <p class="sr-only" data-i18n="scene.aria">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
@@ -419,8 +414,8 @@
       </div>
       <div class="scene-controls" role="group" aria-label="Modos do cenário" data-i18n-attr="aria-label:scene.presetLabel">
         <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="day" aria-pressed="false" data-i18n="scene.day">[ Dia ]</button>
-        <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="night" aria-pressed="true" data-i18n="scene.night">[ Noite ]</button>
-        <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="rain" aria-pressed="false" data-i18n="scene.rain">[ Com chuva ]</button>
+        <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="night" aria-pressed="false" data-i18n="scene.night">[ Noite ]</button>
+        <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="rain" aria-pressed="true" data-i18n="scene.rain">[ Chuva ]</button>
       </div>
       <div class="scene-controls">
         <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pausar ]</button>
@@ -485,7 +480,7 @@
         <p id="captcha-prompt" class="captcha-prompt" data-i18n="captcha.promptFallback">Digite os caracteres do desafio exibido na imagem</p>
       </div>
       <label class="captcha-label" for="captcha-token" data-i18n="captcha.answerLabel">Resposta do desafio</label>
-      <input id="captcha-token" class="select-control" type="text" autocomplete="off" spellcheck="false" maxlength="4096" data-sensitive="true" placeholder="digite a resposta exibida na imagem" data-i18n-attr="placeholder:captcha.answerPlaceholder">
+      <input id="captcha-token" class="select-control" type="text" autocomplete="off" spellcheck="false" maxlength="4096" data-sensitive="true" data-mask placeholder="digite a resposta exibida na imagem" data-i18n-attr="placeholder:captcha.answerPlaceholder">
       <p id="captcha-error" class="captcha-error" role="alert" hidden></p>
       <div class="captcha-actions">
         <button id="captcha-submit" class="cmd-button cmd-button--primary" type="submit" data-i18n="captcha.submit">[ enviar ]</button>

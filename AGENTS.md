@@ -56,12 +56,20 @@ o que ficou pendente e por quê.
 ## 3. Regras de produto já estabelecidas (não regredir)
 
 - Cena 3D **sempre ativa e expandida** (`#scene` sem `data-collapsible`, sem botão de
-  recolher), com zoom por scroll e slider de fonte/célula + reflexo; o botão
-  `[ restaurar ]` foi removido.
+  recolher), com zoom por scroll e slider de fonte/célula; o preset padrão é **chuva**
+  (`[ Chuva ]`), o reflexo é **fixo em 100%** (o slider de reflexo foi removido) e o botão
+  `[ restaurar ]` não existe.
 - `[ STACK // NEOFETCH ]` (`#stack`) **sempre expandida**, sem toggle; o pinguim fica fixo
   em `4px` com contorno mais claro.
 - Campos da seção de APIs abrem **vazios** (sem `placeholder`, sem `value` padrão),
   mantendo rótulos e validação (constraints + guard local `FIELD_REQUIRED` 422).
+- O CPF (`#projudi-cpf`) é um campo **visível** (`type="text"`, `inputmode="numeric"`,
+  `maxlength="14"`, `autocomplete="off"`): nunca `type="password"` nem máscara visual. O
+  mascaramento (`[data-mask]` + `text-security`) fica só para segredos reais (X-API-Key e
+  tokens de CAPTCHA); o CPF segue sem persistência e é apagado ao esconder a aba.
+- `[ STACK // NEOFETCH ]` usa o cenário de **gelo da Antártida**: parede `#D6EAF6`, piso de
+  neve `#F2FAFF` (`MascotStageBuilder` + `#penguin-stage`) e tinta polar escura `#0E2A3C`
+  no fallback ASCII, sempre com contraste alto para o Tux.
 - Popup de CAPTCHA compacto, com a **imagem do desafio** acima do campo
   (`captcha_image`/`image_data_uri`/`image_base64`/`image_endpoint`/`image_url`), sem
   redirecionar para o portal oficial; nada de tokens/CPF persistidos ou ecoados.

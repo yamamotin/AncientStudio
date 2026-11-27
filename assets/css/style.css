@@ -528,9 +528,10 @@ h2 {
 }
 .tech-doc-body li { margin-bottom: var(--space-2); overflow-wrap: anywhere; }
 
-/* Sensitive inputs (X-API-Key, CPF): never persisted, wiped when the tab hides,
-   and visually masked when unfocused in engines that support text-security. */
-input[data-sensitive]:not(:focus) {
+/* Sensitive inputs: never persisted and wiped when the tab hides. Only fields that
+   are real secrets (X-API-Key, CAPTCHA tokens) are visually masked via [data-mask];
+   the CPF stays readable while typing, so it is never treated as a password field. */
+input[data-mask]:not(:focus) {
   -webkit-text-security: disc;
   text-security: disc;
 }
@@ -852,24 +853,29 @@ body.scene-fullscreen-active { overflow: hidden; }
 #penguin-stage canvas,
 #penguin-stage * { pointer-events: none; }
 
-/* Lighter outline/halo for the live mascot: a CSS drop-shadow keeps the render
-   untouched (same cells, same colors, same rotation) while lifting the edges off
-   the dark stage. */
+/* Cold halo for the live mascot: a CSS drop-shadow keeps the render untouched (same
+   cells, same colors, same rotation) while separating the dark Tux silhouette from the
+   bright Antarctic ice stage behind it. */
 #penguin-stage canvas {
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 5px rgba(150, 255, 205, 0.22));
+  filter: drop-shadow(0 1px 1px rgba(12, 32, 46, 0.42)) drop-shadow(0 0 6px rgba(255, 255, 255, 0.75));
 }
 
+/* `[ STACK // NEOFETCH ]` scenario: Antarctic ice. Pale polar-sky wall (#D6EAF6) over a
+   brighter snow shelf (#F2FAFF), with soft blue crevasse lines instead of a dark CRT grid.
+   Same structure as before (no markup change), only the substrate colors. */
 #penguin-stage {
-  background-color: #13222E;
+  background-color: #D6EAF6;
   background-image:
+    radial-gradient(120% 90% at 50% 8%, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 62%),
     repeating-linear-gradient(
       0deg,
-      rgba(55, 81, 102, 0.14) 0px,
-      rgba(55, 81, 102, 0.14) 1px,
+      rgba(94, 146, 178, 0.16) 0px,
+      rgba(94, 146, 178, 0.16) 1px,
       transparent 1px,
       transparent 9px
     ),
-    linear-gradient(180deg, #13222E 0%, #13222E 68%, #1D2B36 68.5%, #1D2B36 100%);
+    linear-gradient(180deg, #D6EAF6 0%, #E4F3FB 62%, #F2FAFF 68.5%, #F2FAFF 100%);
+  box-shadow: inset 0 -18px 26px -18px rgba(78, 128, 160, 0.55);
 }
 
 .penguin-fallback {
@@ -877,17 +883,17 @@ body.scene-fullscreen-active { overflow: hidden; }
   place-items: center;
   min-height: inherit;
   padding: var(--space-2);
-  /* Fixed size (no slider anymore): 4px, with a lighter outline so the art stays
-     readable over the dark stage. */
-  color: #E9FFF6;
+  /* Fixed size (no slider anymore): 4px of dark polar ink over the ice stage, with a
+     white halo so the ASCII art stays readable on the bright snow. */
+  color: #0E2A3C;
   font-size: var(--penguin-font-px, 4px);
   line-height: 1.06;
   text-align: left;
   white-space: pre;
   text-shadow:
-    0 0 1px rgba(255, 255, 255, 0.9),
-    0 0 4px rgba(180, 255, 220, 0.5),
-    0 0 10px rgba(0, 255, 65, 0.28);
+    0 0 1px rgba(255, 255, 255, 0.95),
+    0 0 4px rgba(232, 246, 255, 0.85),
+    0 1px 2px rgba(255, 255, 255, 0.9);
   user-select: none;
 }
 

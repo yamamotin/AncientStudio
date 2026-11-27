@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import type { EngineConfig } from '../types';
 
 /**
- * Color-theory reference palette for `[ STACK // NEOFETCH ]`:
- * - Backdrop (`#13222E` / `rgb(19, 34, 46)`): dark desaturated slate/petrol blue with higher value
- *   than Tux's charcoal-black coat (`#080D14`) and cool chromatic contrast against his amber beak.
- * - Floor (`#1D2B36` / `rgb(29, 43, 54)`): medium-low value, low-saturation blue-slate that separates
- *   cleanly from the backdrop wall and frames both dark and bright parts of Tux.
+ * Color-theory reference palette for `[ STACK // NEOFETCH ]` — Antarctic ice (`gelo polar`):
+ * - Backdrop (`#D6EAF6` / `rgb(214, 234, 246)`): pale polar-sky ice blue, cool and light so Tux's
+ *   charcoal-black coat (`#080D14`) reads as a crisp silhouette and his amber beak stays the only
+ *   warm accent. The shader scales it down into a legible ASCII stipple band (0.50 – 0.74), never a
+ *   flat white wall.
+ * - Floor (`#F2FAFF` / `rgb(242, 250, 255)`): brighter snow/ice shelf that separates from the
+ *   backdrop wall, keeps the contact shadow readable and lets the yaw-synced reflection quantize
+ *   through the same ASCII pipeline.
  */
-export const MASCOT_BACKDROP_HEX = '#13222E';
-export const MASCOT_FLOOR_HEX = '#1D2B36';
+export const MASCOT_BACKDROP_HEX = '#D6EAF6';
+export const MASCOT_FLOOR_HEX = '#F2FAFF';
 
 export interface BuiltMascotStage {
   scene: THREE.Scene;
@@ -45,12 +48,13 @@ const MASCOT_BACKDROP_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     // Calibrated directly for the single canonical ASCII composite pass:
-    // maps #13222E into calm atmospheric ASCII stipple (',' ':' ';') over the dark slate substrate
+    // maps the pale Antarctic ice backdrop (#D6EAF6) into a calm, cold ASCII stipple
+    // (',' ':' ';') that stays below the snow floor value and above Tux's dark coat.
     vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
     vec2 focus = vec2(vWorldPos.x * 0.24, (vWorldPos.y - 1.05) * 0.34);
     float studioPool = exp(-dot(focus, focus) * 1.45);
     float verticalFalloff = clamp(1.04 - max(vWorldPos.y, 0.0) * 0.055, 0.88, 1.04);
-    float radianceScale = clamp(verticalFalloff * 0.255 + studioPool * 0.070, 0.24, 0.33);
+    float radianceScale = clamp(verticalFalloff * 0.585 + studioPool * 0.075, 0.505, 0.685);
 
     gl_FragColor = vec4(backdropBase * radianceScale, 1.0);
   }
@@ -129,10 +133,10 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
     vec3 floorBase = pow(max(uFloorColor, vec3(0.0001)), vec3(1.0 / 2.2));
     vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
 
-    // 1. Calibrated #1D2B36 floor radiance so the canonical ASCII ramp selects horizontal weave ('~' '+' '_' '-')
+    // 1. Calibrated #F2FAFF ice-shelf radiance so the canonical ASCII ramp selects horizontal weave ('~' '+' '_' '-')
     float radialDist = length(relXz * vec2(0.38, 0.46));
     float depthGrade = clamp((vWorldPos.z - uHorizonZ) / 6.2, 0.0, 1.0);
-    float floorLight = clamp(0.71 + depthGrade * 0.09 + exp(-radialDist * radialDist * 1.1) * 0.08, 0.70, 0.88);
+    float floorLight = clamp(0.79 + depthGrade * 0.07 + exp(-radialDist * radialDist * 1.1) * 0.06, 0.78, 0.93);
     vec3 color = floorBase * floorLight;
 
     // 2. Soft grounding shadow under Tux (5-tap PCF directional shadow + smooth elliptical contact AO)
@@ -202,7 +206,7 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
     color += uReflectRimColor * (fresnel * 0.018);
 
     float horizonSeam = smoothstep(uHorizonZ + 0.045, uHorizonZ - 0.005, vWorldPos.z);
-    color = mix(color, backdropBase * 0.26, horizonSeam);
+    color = mix(color, backdropBase * 0.60, horizonSeam);
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -225,8 +229,8 @@ function getMascotShadowPlaceholder(): THREE.DataTexture {
 /**
  * MascotStageBuilder: Builds the minimalist, pure-ASCII-calibrated 3D showcase stage
  * around Tux for `[ STACK // NEOFETCH ]`:
- * 1. Continuous backdrop plane (`#13222E` / `rgb(19, 34, 46)`)
- * 2. Horizontal ground floor plane (`#1D2B36` / `rgb(29, 43, 54)`)
+ * 1. Continuous backdrop plane (`#D6EAF6` / `rgb(214, 234, 246)`, Antarctic ice)
+ * 2. Horizontal ground floor plane (`#F2FAFF` / `rgb(242, 250, 255)`, polar snow)
  * 3. Balanced studio lighting (soft main key + front-right fill + cool hemi + discreet rim lights)
  * 4. Soft PCF + contact shadow & diffused yaw-synced floor reflection quantized through the single ASCII pipeline
  */
@@ -240,7 +244,7 @@ export class MascotStageBuilder {
 
     const horizonZ = -3.35;
 
-    // 1. Minimalist Continuous Backdrop Plane (#13222E)
+    // 1. Minimalist Continuous Backdrop Plane (#D6EAF6, Antarctic ice)
     const backdropMaterial = new THREE.ShaderMaterial({
       vertexShader: MASCOT_BACKDROP_VERTEX_SHADER,
       fragmentShader: MASCOT_BACKDROP_FRAGMENT_SHADER,
@@ -256,7 +260,7 @@ export class MascotStageBuilder {
     backdropMesh.userData.skipObjectOutline = true;
     scene.add(backdropMesh);
 
-    // 2. Minimalist Horizontal Floor Plane (#1D2B36) with Soft Shadow & Controlled Reflection
+    // 2. Minimalist Horizontal Floor Plane (#F2FAFF, polar snow) with Soft Shadow & Controlled Reflection
     const dummyShadowTex = getMascotShadowPlaceholder();
     const floorMaterial = new THREE.ShaderMaterial({
       vertexShader: MASCOT_FLOOR_VERTEX_SHADER,
