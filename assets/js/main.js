@@ -696,8 +696,6 @@ window.TP = window.TP || {};
       section.classList.toggle('is-scene-fullscreen', next);
       section.setAttribute('data-fullscreen-view', next ? 'true' : 'false');
       document.body.classList.toggle('scene-fullscreen-active', next);
-      // Fullscreen means "show the whole scene": lift any collapsed clamp.
-      if (next && TP.collapse) TP.collapse.expand(section);
       syncLabels();
 
       if (!next && document.fullscreenElement === section && typeof document.exitFullscreen === 'function') {

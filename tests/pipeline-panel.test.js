@@ -141,19 +141,24 @@ test('monitoring screen: executive summary, filtered noise and collapsible shell
 
 test('every collapsible section has a toggle wired to an existing body', () => {
   const sections = html.match(/<section[^>]*data-collapsible[^>]*>/g) || [];
-  assert.ok(sections.length >= 4, 'pipeline, gateway, scene and stack are collapsible');
+  assert.equal(sections.length, 3, 'pipeline, gateway and stack are collapsible');
   const bodies = new Set();
   const controls = html.match(/aria-controls="([a-z-]+)"/g) || [];
   controls.forEach((attr) => bodies.add(attr.split('"')[1]));
-  for (const id of ['pipeline-body', 'gateway-body', 'scene-body', 'stack-body']) {
+  for (const id of ['pipeline-body', 'gateway-body', 'stack-body']) {
     assert.ok(bodies.has(id), `toggle targets ${id}`);
     assert.ok(html.includes(`id="${id}"`), `${id} exists in the document`);
   }
   // Tall sections are compact by default; only the compact stack stays open.
-  assert.match(html, /<section id="scene"[^>]*data-collapsed="true"/);
   assert.match(html, /<section id="gateway"[^>]*data-collapsed="true"/);
   assert.match(html, /<section id="stack"[^>]*data-collapsed="false"/);
   assert.match(html, /<section id="pipeline"[^>]*data-collapsed="true"/);
+
+  // The 3D scene is the exception: always mounted and expanded, no collapse control.
+  const scene = html.slice(html.indexOf('<section id="scene"'), html.indexOf('<!-- 5. NEOFETCH STACK'));
+  assert.doesNotMatch(scene, /data-collapsible|data-collapsed|collapse-toggle|aria-controls="scene-body"/);
+  assert.doesNotMatch(scene, /class="[^"]*collapse-body/);
+  assert.doesNotMatch(html, /id="scene-body"/);
 });
 
 const pipelineCode = pipeline

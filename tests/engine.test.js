@@ -1303,4 +1303,59 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
   ctrl.destroy();
 });
 
+test('3D scene section is always mounted and expanded: no collapse control, controls preserved', () => {
+  const htmlSrc = readFileSync(path.join(root, 'index.html'), 'utf8');
+  const mainSrc = readFileSync(path.join(root, 'assets/js/main.js'), 'utf8');
+  const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
+
+  const start = htmlSrc.indexOf('<section id="scene"');
+  const end = htmlSrc.indexOf('<!-- 5. NEOFETCH STACK');
+  assert.ok(start > 0 && end > start, '#scene section is delimited in the document');
+  const scene = htmlSrc.slice(start, end);
+
+  // 1. No collapse affordance and no clamped/inert body for the scene.
+  assert.match(scene, /<section id="scene" class="section" aria-labelledby="scene-title">/);
+  assert.doesNotMatch(scene, /data-collapsible|data-collapsed|collapse-toggle|collapse-body|scene-body/);
+  assert.doesNotMatch(scene, /\[\s*(expandir|recolher|expand|collapse)\s*\]/i, 'no collapse label inside the scene');
+  assert.doesNotMatch(mainSrc, /scene-body|#scene[^'"]*collapse-toggle/i);
+
+  // 2. Scene controls stay untouched: font/shader toolbar with reset, presets, pause,
+  //    fullscreen and the wheel-zoom hint.
+  includesAll(scene, [
+    'id="ascii-scene"',
+    'class="scene-stage"',
+    'class="scene-toolbar"',
+    'id="scene-cell-size"',
+    'id="scene-cell-value"',
+    'id="scene-cell-reset"',
+    'scene.fontReset',
+    'data-scene-mode="day"',
+    'data-scene-mode="night"',
+    'data-scene-mode="rain"',
+    'id="scene-toggle"',
+    'id="scene-fullscreen"',
+    'data-i18n="scene.presetHelp"'
+  ]);
+  // The stage is a direct child of the section, not wrapped in a clampable body.
+  assert.ok(scene.indexOf('id="ascii-scene"') > scene.indexOf('class="scene-toolbar"'));
+  assert.equal(scene.indexOf('id="scene-body"'), -1, 'no #scene-body wrapper remains');
+
+  // 3. No scene-specific collapse CSS and no runtime clamp for the scene.
+  assert.doesNotMatch(cssSrc, /#scene[^{]*collapse-body/);
+  assert.doesNotMatch(cssSrc, /#scene[^{]*data-collapsed/);
+  assertsNoSceneCollapse(mainSrc);
+
+  // 4. The adapter mounts without waiting for an expand gesture: the scene is
+  //    wired during init and the deferred adapter observes the stage subtree.
+  includesAll(mainSrc, ['initScene()', 'initSceneFullscreen()', 'scheduleEngineAdapterLoad']);
+  includesAll(adapter, ['ResizeObserver', 'instance.resize']);
+});
+
+function assertsNoSceneCollapse(mainSrc) {
+  // The generic collapse module stays for the other sections, but nothing in it
+  // references the 3D scene any more.
+  assert.ok(mainSrc.includes('function initCollapsibles()'), 'generic collapse module kept');
+  assert.ok(mainSrc.includes("querySelectorAll('[data-collapsible]')"), 'collapse module is opt-in via markup');
+  assert.doesNotMatch(mainSrc, /TP\.collapse\.expand\(section\)/, 'fullscreen no longer expands a clamped scene');
+}
 

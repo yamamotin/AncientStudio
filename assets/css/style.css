@@ -362,13 +362,6 @@ h2 {
   background: linear-gradient(180deg, transparent, var(--bg) 85%);
 }
 
-/* Fullscreen is an explicit "show it all" gesture. */
-#scene.is-scene-fullscreen > .collapse-body,
-#scene:fullscreen > .collapse-body { max-height: none; }
-
-#scene.is-scene-fullscreen > .collapse-body::after,
-#scene:fullscreen > .collapse-body::after { content: none; }
-
 .collapse-toggle[aria-expanded="true"] { color: var(--muted); }
 
 /* Executive monitoring summary (reliability / automation / release hygiene). */

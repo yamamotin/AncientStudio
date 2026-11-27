@@ -118,10 +118,16 @@ A seção deixou de ser uma lista de links e virou uma **tela de monitoramento c
 - **Sem fabricação de dados:** o cliente nunca inventa status, imagens ou contagens; se a
   API não responde, os cartões mostram o último valor carregado ou `—`.
 
-A mesma política de altura compacta vale para as seções altas do portfólio: `#gateway` e
-`#scene` abrem recolhidas (o palco 3D continua renderizando, apenas recortado) e `#stack`,
-que é curta, abre expandida. O mecanismo é único:
-`[data-collapsible]` + `[data-collapse-toggle]` + `.collapse-body`.
+A mesma política de altura compacta vale para as seções altas do portfólio que não são o
+palco 3D: `#pipeline` e `#gateway` abrem recolhidas e `#stack`, que é curta, abre expandida.
+O mecanismo é único: `[data-collapsible]` + `[data-collapse-toggle]` + `.collapse-body`.
+
+**Exceção deliberada — `#scene`:** a cena 3D é o ativo visual principal e fica **sempre
+montada e expandida**. Ela não tem `data-collapsible`, não tem botão de recolher/expandir e
+não tem `#scene-body` recortável; por isso o `engine-adapter.js` monta o palco assim que a
+seção entra no viewport, sem depender de um clique para "abrir". Os controles da cena
+continuam intactos: barra de fonte/célula com `[ restaurar ]`, presets `[ Dia ]`,
+`[ Noite ]`, `[ Com chuva ]`, `[ pause ]`, `[ tela cheia ]` e zoom por scroll do mouse.
 
 | Peça | Papel |
 | --- | --- |
@@ -133,11 +139,12 @@ que é curta, abre expandida. O mecanismo é único:
 
 Detalhes de implementação relevantes:
 
-- Recolher **não** destrói nem remede a cena 3D: o corpo é apenas recortado por
-  `max-height`, a engine mantém o mesmo contrato público (`engine-adapter.js`,
-  `ascii-engine.bundle.js`) e o `ResizeObserver` do adapter continua válido.
-- Entrar em fullscreen na cena chama `TP.collapse.expand(#scene)`, porque fullscreen é o
-  gesto explícito de "mostrar tudo".
+- Recolher uma seção **não** destrói nem remede a cena 3D quando ela está envolvida: o
+  mecanismo só recorta por `max-height`, mantém o contrato público (`engine-adapter.js`,
+  `ascii-engine.bundle.js`) e o `ResizeObserver` do adapter válido. A cena em si nunca é
+  envolvida — ver a exceção abaixo.
+- O fullscreen da cena não mexe mais no mecanismo de colapso: desde que a seção passou a
+  ser sempre expandida, não existe clamp para suspender.
 - Rótulos traduzidos em pt-br **e** en (`common.expand` / `common.collapse`), presentes nos
   dois JSON e no dicionário embutido `BUNDLED`.
 
@@ -247,7 +254,8 @@ Cobertura específica do painel em `tests/pipeline-panel.test.js`:
 5. títulos das seções e proibição de `playground|simulator|simulador|sandbox` em pt-br/en;
 6. política CSP e `referrer` no `index.html`;
 7. ausência de links por execução (`pipeline.runLink` / `pipeline.openActions`), presença
-   do resumo executivo e do controle de recolher/expandir;
+   do resumo executivo e do controle de recolher/expandir nas seções recolhíveis — e
+   ausência total desse controle na cena 3D (`tests/engine.test.js`);
 8. paridade das novas chaves i18n (`common.expand`, `common.collapse`,
    `pipeline.summary.*`) entre pt-br, en e o dicionário embutido.
 
@@ -265,7 +273,9 @@ The section is now a compact, collapsible monitoring screen: an always-visible e
 summary (latest run, reliability, Docker image hygiene, monitored workflows) plus a
 filtered run list inside a collapsed body, with a single `[ refresh ]` action and an
 `[ expand ]` / `[ collapse ]` control translated in every locale. Per-run `[ open run ]`
-links and the `[ open actions ]` button were removed on purpose.
+links and the `[ open actions ]` button were removed on purpose. The 3D scene section is
+the documented exception: it is always mounted and expanded, with no collapse control, so
+the engine never waits for an expand gesture.
 
 The technical documentation link now opens `docs/ci-cd-pipeline.html`, a self-contained
 static rendering served correctly by GitHub Pages and Vercel (raw `.md` was being
