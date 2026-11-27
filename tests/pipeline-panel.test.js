@@ -108,7 +108,7 @@ test('monitoring screen: executive summary, filtered noise and collapsible shell
     'pipeline.summary.dockerLabel', 'pipeline.summary.workflowsLabel',
     'pipeline.summary.stateValue', 'pipeline.summary.reliabilityValue',
     'pipeline.summary.dockerValue', 'pipeline.summary.workflowsValue',
-    'pipeline.summary.none', 'pipeline.filtersNote', 'pipeline.doc.lastRun',
+    'pipeline.summary.none', 'pipeline.summary.dockerScheduled', 'pipeline.filtersNote', 'pipeline.doc.lastRun',
     'pipeline.doc.frontFilter']) {
     assert.ok(pt[key], `pt-br has ${key}`);
     assert.ok(en[key], `en has ${key}`);
@@ -149,8 +149,11 @@ test('every collapsible section has a toggle wired to an existing body', () => {
     assert.ok(bodies.has(id), `toggle targets ${id}`);
     assert.ok(html.includes(`id="${id}"`), `${id} exists in the document`);
   }
-  assert.match(html, /<section id="scene"[^>]*data-collapsed="false"/);
+  // Tall sections are compact by default; only the compact stack stays open.
+  assert.match(html, /<section id="scene"[^>]*data-collapsed="true"/);
   assert.match(html, /<section id="gateway"[^>]*data-collapsed="true"/);
+  assert.match(html, /<section id="stack"[^>]*data-collapsed="false"/);
+  assert.match(html, /<section id="pipeline"[^>]*data-collapsed="true"/);
 });
 
 const pipelineCode = pipeline

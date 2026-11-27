@@ -297,13 +297,18 @@ window.TP = window.TP || {};
       setSlot('Reliability', t('pipeline.summary.none'), null);
     }
 
-    var retention = state.runs.filter(function (run) { return /vcr|retention/i.test(run.name); })[0] || null;
+    // Only a real retention outcome is interesting; a scheduled-but-skipped run
+    // is noise, so fall back to the documented policy line.
+    var retention = state.runs.filter(function (run) {
+      return /vcr|retention/i.test(run.name) &&
+        (run.conclusion === 'success' || run.conclusion === 'failure' || run.conclusion === 'timed_out');
+    })[0] || null;
     setSlot('Docker', retention
       ? t('pipeline.summary.dockerValue', {
           status: statusLabel(retention),
           time: formatClockUtc(retention.updatedAt)
         })
-      : t('pipeline.summary.none'), retention);
+      : t('pipeline.summary.dockerScheduled'), null);
 
     setSlot('Workflows', state.workflows.length
       ? t('pipeline.summary.workflowsValue', { count: state.workflows.length })

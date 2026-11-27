@@ -133,7 +133,7 @@
   "pipeline.summaryAria": "Resumo executivo do pipeline",
   "pipeline.summary.stateLabel": "Última execução",
   "pipeline.summary.reliabilityLabel": "Confiabilidade",
-  "pipeline.summary.dockerLabel": "Imagens Docker · 3 últimas",
+  "pipeline.summary.dockerLabel": "Imagens Docker",
   "pipeline.summary.workflowsLabel": "Workflows monitorados",
   "pipeline.summary.stateValue": "{status} · {time}",
   "pipeline.summary.reliabilityValue": "{ok}/{total} · {percent}% sucesso",
@@ -142,5 +142,6 @@
   "pipeline.summary.none": "—",
   "pipeline.filtersNote": "// execuções internas (auto-merge, skipped) ocultadas neste resumo",
   "pipeline.doc.lastRun": "[ última execução no GitHub ]",
-  "pipeline.doc.frontFilter": "O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar só o que importa ao cliente."
+  "pipeline.doc.frontFilter": "O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar só o que importa ao cliente.",
+  "pipeline.summary.dockerScheduled": "3 últimas · agendado diariamente"
 }

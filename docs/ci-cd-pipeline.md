@@ -118,9 +118,10 @@ A seção deixou de ser uma lista de links e virou uma **tela de monitoramento c
 - **Sem fabricação de dados:** o cliente nunca inventa status, imagens ou contagens; se a
   API não responde, os cartões mostram o último valor carregado ou `—`.
 
-A mesma política de altura compacta vale para as seções altas do portfólio: `#gateway`
-(abre recolhida), `#scene` e `#stack` (abrem expandidas e podem ser recolhidas). O
-mecanismo é único: `[data-collapsible]` + `[data-collapse-toggle]` + `.collapse-body`.
+A mesma política de altura compacta vale para as seções altas do portfólio: `#gateway` e
+`#scene` abrem recolhidas (o palco 3D continua renderizando, apenas recortado) e `#stack`,
+que é curta, abre expandida. O mecanismo é único:
+`[data-collapsible]` + `[data-collapse-toggle]` + `.collapse-body`.
 
 | Peça | Papel |
 | --- | --- |

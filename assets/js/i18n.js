@@ -141,7 +141,7 @@ window.TP = window.TP || {};
     "pipeline.summaryAria": "Resumo executivo do pipeline",
     "pipeline.summary.stateLabel": "Última execução",
     "pipeline.summary.reliabilityLabel": "Confiabilidade",
-    "pipeline.summary.dockerLabel": "Imagens Docker · 3 últimas",
+    "pipeline.summary.dockerLabel": "Imagens Docker",
     "pipeline.summary.workflowsLabel": "Workflows monitorados",
     "pipeline.summary.stateValue": "{status} · {time}",
     "pipeline.summary.reliabilityValue": "{ok}/{total} · {percent}% sucesso",
@@ -150,7 +150,8 @@ window.TP = window.TP || {};
     "pipeline.summary.none": "—",
     "pipeline.filtersNote": "// execuções internas (auto-merge, skipped) ocultadas neste resumo",
     "pipeline.doc.lastRun": "[ última execução no GitHub ]",
-    "pipeline.doc.frontFilter": "O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar só o que importa ao cliente."
+    "pipeline.doc.frontFilter": "O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar só o que importa ao cliente.",
+    "pipeline.summary.dockerScheduled": "3 últimas · agendado diariamente"
   },
   "en": {
     "skip": "Skip to content",
@@ -287,7 +288,7 @@ window.TP = window.TP || {};
     "pipeline.summaryAria": "Pipeline executive summary",
     "pipeline.summary.stateLabel": "Latest run",
     "pipeline.summary.reliabilityLabel": "Reliability",
-    "pipeline.summary.dockerLabel": "Docker images · latest 3",
+    "pipeline.summary.dockerLabel": "Docker images",
     "pipeline.summary.workflowsLabel": "Monitored workflows",
     "pipeline.summary.stateValue": "{status} · {time}",
     "pipeline.summary.reliabilityValue": "{ok}/{total} · {percent}% success",
@@ -296,7 +297,8 @@ window.TP = window.TP || {};
     "pipeline.summary.none": "—",
     "pipeline.filtersNote": "// internal runs (auto-merge, skipped) hidden from this summary",
     "pipeline.doc.lastRun": "[ latest run on GitHub ]",
-    "pipeline.doc.frontFilter": "The summary ignores irrelevant internal runs (auto-merge and skipped runs) so only client-facing signal stands out."
+    "pipeline.doc.frontFilter": "The summary ignores irrelevant internal runs (auto-merge and skipped runs) so only client-facing signal stands out.",
+    "pipeline.summary.dockerScheduled": "latest 3 · scheduled daily"
   }
 };
 
