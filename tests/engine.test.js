@@ -721,7 +721,7 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, rainConfig, ecsWorld);
   vfx.applyConfig(rainConfig);
   assert.equal(vfx.isRainActive(), true, 'Rain particles active in rain mode');
-  assert.ok(prepared.materials.roads[0].roughness < 0.25, 'Mirror-wet reflective asphalt in rain mode');
+  assert.ok(prepared.materials.roads[0].roughness > 0.7, 'Rain asphalt stays moderately rough rather than mirror-bright');
   const rainRoadNormalX = prepared.materials.roads[0].normalScale.x;
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(stage, rainConfig, ecsWorld);
   assert.AlmostEqual(
@@ -837,7 +837,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     cssWidth: 360,
     cssHeight: 300,
     devicePixelRatio: 3.0,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
+    config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 8, autoResponsiveDensity: true },
     isCoarsePointer: true
   });
   assert.equal(mobileRes.tier, 'mobile');
@@ -848,7 +848,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     cssWidth: 840,
     cssHeight: 500,
     devicePixelRatio: 2.0,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
+    config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 8, autoResponsiveDensity: true },
     isCoarsePointer: false
   });
   assert.equal(desktopRes.tier, 'desktop');
@@ -866,7 +866,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     cssWidth: 1280,
     cssHeight: 720,
     devicePixelRatio: 2.0,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
+    config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 8, autoResponsiveDensity: true },
     isCoarsePointer: false
   });
   assert.equal(hdRes.tier, 'hd');
@@ -884,7 +884,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     cssWidth: 1600,
     cssHeight: 900,
     devicePixelRatio: 1.5,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
+    config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 8, autoResponsiveDensity: true },
     isCoarsePointer: false
   });
   assert.equal(uhdRes.tier, 'uhd');
@@ -897,7 +897,7 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     cssWidth: 3840,
     cssHeight: 1600,
     devicePixelRatio: 2.0,
-    config: pkg.DEFAULT_ENGINE_CONFIG,
+    config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: 8, autoResponsiveDensity: true },
     isCoarsePointer: false
   });
   assert.ok(extreme4k.columns <= 680);
@@ -1002,6 +1002,33 @@ test('modern 3D-wrapping ASCII shader, adaptive resolution guardrails, and per-o
     'atan(domGrad.x, -domGrad.y)',
     'isSparkleHighlight'
   ]);
+});
+
+test('tree-planter sidewalk pockets clamp smoothly without entering planters', () => {
+  const pkg = createBundleSandbox().ASCIIRealms;
+  const bounds = pkg.DEFAULT_URBAN_SIDEWALK_BOUNDS;
+  for (const [startX, direction] of [[-5.4, -1], [0.4, 1]]) {
+    let previous = { x: startX, z: 1.0 };
+    for (let i = 0; i < 30; i++) {
+      const next = pkg.clampToSidewalkBounds(previous.x + direction * 0.1, previous.z, bounds);
+      assert.ok(Math.hypot(next.x - previous.x, next.z - previous.z) <= 0.101, 'no sideways teleport at plaza/tree transition');
+      previous = next;
+    }
+    assert.ok(Math.abs(previous.x - startX) > 2.5, 'walkway beside tree remains accessible');
+  }
+  for (const [x, z] of [[-9, 3], [4, 3]]) {
+    const result = pkg.clampToSidewalkBounds(x, z, bounds);
+    assert.ok(bounds.obstacles.every(b => !(result.x > b.minX && result.x < b.maxX && result.z > b.minZ && result.z < b.maxZ)), 'outside all planter obstacles');
+    assert.ok(Math.abs(result.x - x) < 4.1 && Math.abs(result.z - z) <= 1.25);
+  }
+  for (const x of [-18, -16, -10, -8, -5.6, -5.5, 0.5, 0.6, 7.7, 8, 10.5]) {
+    for (const z of [-3.3, -2.5, -1.92, 0, 1.7, 2.2, 4.1]) {
+      const result = pkg.clampToSidewalkBounds(x, z, bounds);
+      assert.ok(bounds.obstacles.every(b => !(result.x > b.minX && result.x < b.maxX && result.z > b.minZ && result.z < b.maxZ)));
+      const second = pkg.clampToSidewalkBounds(result.x, result.z, bounds);
+      assert.ok(Math.hypot(second.x - result.x, second.z - result.z) < 1e-8, 'clamp is stable at obstacle and sidewalk edges');
+    }
+  }
 });
 
 test('Mouse scroll-wheel zoom: smooth damping, safe min/max bounds, WASD & autoOrbit coexistence, and destroy() cleanup', () => {
@@ -1188,8 +1215,8 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
   for (const key of ['scene.fontGroupAria', 'scene.fontSizeLabel', 'scene.fontSizeAria']) {
     assert.ok(ptJson[key] && enJson[key], `Missing translation for ${key}`);
   }
-  includesAll(mainSrc, ['scene-cell-size', 'scene-cell-value', 'resetCellSize', 'setCellSize', 'cleanupSceneUiListeners']);
-  assert.doesNotMatch(mainSrc, /scene-cell-reset|onCellReset/, 'no dead wiring for the removed button');
+  includesAll(mainSrc, ['scene-cell-size', 'scene-cell-value', 'setCellSize', 'cleanupSceneUiListeners']);
+  assert.doesNotMatch(mainSrc, /scene-cell-reset|onCellReset|resetCellSize/, 'no dead wiring for the removed button');
 
   // 2. Micro cell stop table: min=2.0px, 0.25px steps in [2.0..6.0], 0.50px in (6.0..max], capped at mount max
   const sandbox = createBundleSandbox({
@@ -1250,6 +1277,15 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
     }
   }
 
+  for (const width of [300, 1000, 3840]) for (const dpr of [1, 1.25, 2]) {
+    for (const px of [2.25, 12, 21]) {
+      const profile = pkg.computeAdaptiveResolution({ cssWidth: width, cssHeight: 320, devicePixelRatio: dpr,
+        config: { ...pkg.DEFAULT_ENGINE_CONFIG, cellSize: px, autoResponsiveDensity: false }, isCoarsePointer: false });
+      assert.equal(profile.activeCellSize, px, `${width}px DPR ${dpr} uses ${px}px cells`);
+      assert.ok(profile.renderTargetWidth <= 4096 && profile.renderTargetWidth * profile.renderTargetHeight <= 3840 * 2160);
+    }
+  }
+
   // Verify AsciiPostProcessor updates uCellPixelSize down to 2.0px without recreating atlas texture after mount sizing
   const post = new pkg.AsciiPostProcessor(pkg.DEFAULT_ENGINE_CONFIG);
   post.applyConfig(pkg.DEFAULT_ENGINE_CONFIG, false, 1200, 680, 2.0, false);
@@ -1265,6 +1301,8 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
   assert.equal(microProf.activeCellSize, 2.25);
   assert.equal(post.sceneTarget.width, microProf.renderTargetWidth);
   assert.equal(post.normalTarget.height, microProf.renderTargetHeight);
+  post.applyConfig({ ...pkg.DEFAULT_ENGINE_CONFIG, reflectionStrength: 0.8 }, false, 1200, 680, 2, false);
+  assert.equal(post.compositeMaterial.uniforms.uReflectionStrength.value, 0.8);
   assert.equal(post.compositeMaterial.uniforms.uResolution.value.x, microProf.physicalWidth);
   assert.AlmostEqual(post.bloomMaterial.uniforms.uTexelSize.value.x, 1 / post.bloomTarget.width, 1e-8);
   assert.doesNotMatch(adapter, /new PointerEvent\(/);
@@ -1367,14 +1405,22 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
 
   const range = ctrl.getCellSizeRange();
   assert.equal(range.min, 2.0, 'Adapter min cell size is 2.0px');
-  assert.equal(range.max, 6.25, 'Adapter max cell size locks to mounted activeCellSize (6.25px)');
-  assert.equal(ctrl.setCellSize(12), 6.25, 'Cannot exceed mounted max cell size');
-  assert.equal(ctrl.setCellSize(2.25), 2.25, 'Applies 2.25px micro cell size');
+  assert.equal(range.max, 21, 'Adapter allows up to 21px');
+  assert.equal(range.current, 2.25);
+  assert.equal(ctrl.setCellSize(99), 21, 'Cannot exceed 21px');
+  assert.equal(ctrl.setCellSize(12), 12);
+  assert.equal(ctrl.setCellSize(3.25), 3.25);
   assert.equal(mountCount, 1, 'WebGL engine is never remounted when changing cell size');
-  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 2.25, autoResponsiveDensity: false });
+  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 3.25, autoResponsiveDensity: false });
 
-  assert.equal(ctrl.resetCellSize(), 6.25, 'Reset restores mounted cell size');
-  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 8, autoResponsiveDensity: true });
+  assert.equal(ctrl.resetCellSize(), 2.25, 'Reset restores default cell size');
+  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 2.25, autoResponsiveDensity: false });
+  assert.equal(ctrl.setReflection(0.8), 0.8);
+  assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { reflectionStrength: 0.8 });
+  ctrl.setPreset('rain');
+  assert.equal(ctrl.getReflection(), 0.8, 'Reflection slider survives preset changes');
+  assert.equal(ctrl.setReflection(-1), 0);
+  assert.equal(ctrl.setReflection(2), 1);
   assert.ok(ctrl.getScene().isScene, 'Public getScene() contract preserved');
   activeConfig.callbacks.onLoadError(new Error('decoder failure'));
   assert.equal(ctrl.getMode(), 'fallback');
@@ -1511,6 +1557,11 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   const baseCfg = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG);
   const stage = pkg.UrbanGlbSceneBuilder.createStage(baseCfg, ecsWorld, prepared);
   assert.ok(stage.ambientFill && stage.ambientFill.isAmbientLight, 'Dedicated UrbanAmbientFillLight present');
+  const roadA = prepared.nodes.cidade.getObjectByName('Cidade_Object_64');
+  const roadB = prepared.nodes.cidade.getObjectByName('Cidade_Object_67');
+  assert.equal(roadA.material, roadB.material, 'Both adjoining asphalt halves share a material');
+  assert.equal(roadA.material.roughnessMap, null, 'Baked roughness map no longer creates inconsistent specular patches');
+  assert.ok(prepared.materials.character.every(m => m.color.r < 0.5 && m.roughness >= 0.7));
 
   pkg.UrbanGlbSceneBuilder.applyAtmosphere(
     stage,
@@ -1554,8 +1605,8 @@ test('day, night, and rain presets produce distinct legible 3D illumination, com
   const rainLamp = stage.urbanLightRig.streetLampWest.intensity;
 
   // Verify clear preset hierarchy: day wide sunlight >> storm/night, night local lamps >> day, rain fog > night > day
-  assert.ok(dayKey > nightKey * 2.0, `Day solar key (${dayKey}) > 2x night moonlight (${nightKey})`);
-  assert.ok(dayHemi > nightHemi * 1.5 && dayAmb > nightAmb * 1.8, 'Day sky/ambient fill markedly brighter than night');
+  assert.ok(dayKey > nightKey * 1.5 && dayKey < 4.0, `Day key (${dayKey}) remains stronger but avoids previous overexposure`);
+  assert.ok(dayHemi > nightHemi && dayAmb > nightAmb, 'Day sky/ambient fill brighter than night');
   assert.ok(dayRoadScale > 10.0 && nightRoadScale > 5.0 && dayRoadScale > nightRoadScale * 1.7, 'real_road 0.0084 linear albedo compensated cleanly in both day and night');
   assert.ok(rainAmb > nightAmb && rainLamp > nightLamp && nightLamp > 15.0, 'Rain storm fill and wet lamp reflections stronger than dry night');
   assert.ok(dayFog < nightFog && nightFog < rainFog, `Fog density hierarchy preserved: day (${dayFog}) < night (${nightFog}) < rain (${rainFog})`);

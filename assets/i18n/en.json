@@ -169,5 +169,7 @@
   "captcha.unavailable": "// the verification dialog could not be opened: reload the page and try again",
   "api.close": "[ close ]",
   "api.closeAria": "Close this API response",
-  "brightness.short": "brightness"
+  "brightness.short": "brightness",
+  "scene.reflectionLabel": "Reflection",
+  "scene.reflectionAria": "Scene reflection intensity"
 }

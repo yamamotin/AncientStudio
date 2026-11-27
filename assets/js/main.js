@@ -709,6 +709,8 @@ window.TP = window.TP || {};
     var modeButtons = Array.prototype.slice.call(document.querySelectorAll('[data-scene-mode]'));
     var cellSlider = document.getElementById('scene-cell-size');
     var cellOutput = document.getElementById('scene-cell-value');
+    var reflectionSlider = document.getElementById('scene-reflection');
+    var reflectionOutput = document.getElementById('scene-reflection-value');
     var help = document.querySelector('.scene-help');
     var activeMode = 'night';
 
@@ -724,7 +726,7 @@ window.TP = window.TP || {};
 
     function formatCellPx(px) {
       var num = Number(px);
-      if (!Number.isFinite(num)) return '8px';
+      if (!Number.isFinite(num)) return '2.25px';
       return Number(num.toFixed(2)) + 'px';
     }
 
@@ -759,10 +761,18 @@ window.TP = window.TP || {};
       if (stage) stage.setAttribute('data-mode', engineReady ? 'engine' : 'fallback');
       if (engineReady && badge) badge.textContent = 'ENGINE';
       else if (badge && badge.textContent !== 'NO WEBGL') badge.textContent = 'FALLBACK';
-      [toggle, cellSlider].concat(modeButtons).forEach(function (control) {
+      [toggle, cellSlider, reflectionSlider].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
-      if (engineReady) syncCellControlFromEngine();
+      if (engineReady) {
+        syncCellControlFromEngine();
+        if (reflectionSlider && typeof scene.getReflection === 'function') {
+          var reflectionPercent = Math.round(scene.getReflection() * 100);
+          reflectionSlider.value = String(reflectionPercent);
+          reflectionSlider.setAttribute('aria-valuetext', reflectionPercent + '%');
+          if (reflectionOutput) reflectionOutput.textContent = reflectionPercent + '%';
+        }
+      }
       if (help) {
         help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
       }
@@ -822,11 +832,19 @@ window.TP = window.TP || {};
       else if (key === 'Home') nextIdx = 0;
       else if (key === 'End') nextIdx = stops.length - 1;
 
-      var applied = nextIdx === stops.length - 1 && typeof scene.resetCellSize === 'function'
-        ? scene.resetCellSize()
-        : scene.setCellSize(stops[nextIdx]);
+      var applied = scene.setCellSize(stops[nextIdx]);
       syncCellReadout(applied, range.min, range.max);
     }
+
+    function onReflectionInput() {
+      if (!reflectionSlider || typeof scene.setReflection !== 'function') return;
+      var value = scene.setReflection(Number(reflectionSlider.value) / 100);
+      var percent = Math.round(value * 100);
+      reflectionSlider.value = String(percent);
+      reflectionSlider.setAttribute('aria-valuetext', percent + '%');
+      if (reflectionOutput) reflectionOutput.textContent = percent + '%';
+    }
+
 
     function cleanupSceneUiListeners() {
       stage.removeEventListener('tp:scene-mode', onSceneMode);
@@ -836,6 +854,7 @@ window.TP = window.TP || {};
         cellSlider.removeEventListener('input', onCellInput);
         cellSlider.removeEventListener('keydown', onCellKeyDown);
       }
+      if (reflectionSlider) reflectionSlider.removeEventListener('input', onReflectionInput);
       window.removeEventListener('pagehide', cleanupSceneUiListeners);
     }
 
@@ -845,6 +864,7 @@ window.TP = window.TP || {};
       cellSlider.addEventListener('input', onCellInput);
       cellSlider.addEventListener('keydown', onCellKeyDown);
     }
+    if (reflectionSlider) reflectionSlider.addEventListener('input', onReflectionInput);
     window.addEventListener('pagehide', cleanupSceneUiListeners);
 
     if (toggle) {
