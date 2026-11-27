@@ -1,6 +1,6 @@
 'use strict';
 
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -8,6 +8,7 @@ const { assert, includesAll } = require('./helpers/assert');
 
 const root = path.resolve(__dirname, '..');
 const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
+const exists = (relative) => existsSync(path.join(root, relative));
 
 const html = read('index.html');
 const pipeline = read('assets/js/pipeline.js');
@@ -49,23 +50,110 @@ function loadPipeline() {
 
 test('pipeline panel is fed by the public read-only GitHub Actions API', () => {
   const api = loadPipeline();
-  assert.equal(api.config.runsUrl, 'https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=6');
+  assert.equal(api.config.runsUrl, 'https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=10');
   assert.equal(api.config.workflowsUrl, 'https://api.github.com/repos/yamamotin/AncientStudio/actions/workflows');
-  assert.equal(api.config.actionsPage, 'https://github.com/yamamotin/AncientStudio/actions');
   assert.equal(api.config.cacheTtl, 300000);
   assert.equal(api.config.requestTimeout, 8000);
   assert.equal(api.config.refreshCooldown, 4000);
+  assert.equal(api.config.maxRuns, 6);
 
   includesAll(html, [
     'id="pipeline-runs"',
     'id="pipeline-status"',
     'id="pipeline-refresh"',
-    'href="https://github.com/yamamotin/AncientStudio/actions"',
     'rel="noopener noreferrer"',
     'class="tech-doc"',
     'data-i18n="pipeline.doc.securityTitle"'
   ]);
   assert.doesNotMatch(html, /pipeline-success|pipeline-failure|rca-box|rca-button|SANDBOX|SIMULATOR/);
+});
+
+test('monitoring screen: executive summary, filtered noise and collapsible shell', () => {
+  const api = loadPipeline();
+
+  // The list of runs is no longer a wall of external links.
+  const pipelineSection = html.slice(
+    html.indexOf('<section id="pipeline"'),
+    html.indexOf('<!-- 3. API GATEWAY')
+  );
+  assert.doesNotMatch(pipelineSection, /open run|abrir run|open actions|abrir actions/i);
+  for (const key of ['pipeline.runLink', 'pipeline.openActions']) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(pt, key), `${key} retired from pt-br`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(en, key), `${key} retired from en`);
+  }
+  assert.doesNotMatch(pipeline, /runLink|openActions/);
+
+  // Executive summary cards are always visible, outside the collapsed body.
+  includesAll(pipelineSection, [
+    'id="pipeline-summary"',
+    'id="pipeline-summary-state"',
+    'id="pipeline-summary-reliability"',
+    'id="pipeline-summary-docker"',
+    'id="pipeline-summary-workflows"',
+    'id="pipeline-filter-note"',
+    'id="pipeline-last-run-link"'
+  ]);
+  assert.ok(
+    pipelineSection.indexOf('id="pipeline-summary"') < pipelineSection.indexOf('id="pipeline-body"'),
+    'summary sits outside the collapsible body'
+  );
+
+  // Collapsible contract: markup, translated labels and clamping CSS.
+  assert.match(pipelineSection, /<section id="pipeline"[^>]*data-collapsible data-collapsed="true"/);
+  assert.match(pipelineSection, /data-collapse-toggle aria-controls="pipeline-body"/);
+  includesAll(css, ['.collapse-body', '.monitor-summary', '.monitor-card', 'data-collapsed="true"']);
+  assert.doesNotMatch(css, /collapse-body[^{]*\{[^}]*display:\s*none/);
+  for (const key of ['common.expand', 'common.collapse', 'pipeline.summaryAria',
+    'pipeline.summary.stateLabel', 'pipeline.summary.reliabilityLabel',
+    'pipeline.summary.dockerLabel', 'pipeline.summary.workflowsLabel',
+    'pipeline.summary.stateValue', 'pipeline.summary.reliabilityValue',
+    'pipeline.summary.dockerValue', 'pipeline.summary.workflowsValue',
+    'pipeline.summary.none', 'pipeline.summary.dockerScheduled', 'pipeline.filtersNote', 'pipeline.doc.lastRun',
+    'pipeline.doc.frontFilter']) {
+    assert.ok(pt[key], `pt-br has ${key}`);
+    assert.ok(en[key], `en has ${key}`);
+    assert.ok(i18n.includes(JSON.stringify(pt[key]).slice(1, -1)), `BUNDLED mirrors ${key}`);
+    assert.ok(i18n.includes(JSON.stringify(en[key]).slice(1, -1)), `BUNDLED mirrors en ${key}`);
+  }
+  includesAll(main, ['data-collapsible', 'data-collapse-toggle', 'TP.collapse', 'tp:languagechange']);
+  assert.match(main, /body\.inert = next/);
+
+  // Internal noise is filtered instead of rendered.
+  const run = (name, conclusion, status = 'completed') => ({
+    name, conclusion, status, html_url: 'https://github.com/yamamotin/AncientStudio/actions/runs/1'
+  });
+  assert.equal(api.isMeaningful(run('Auto-merge verified PRs', 'success')), false);
+  assert.equal(api.isMeaningful(run('CI/CD — backend, Docker and deploy', 'skipped')), false);
+  assert.equal(api.isMeaningful(run('VCR Image Retention Cleanup', 'cancelled')), false);
+  assert.equal(api.isMeaningful(run('CI/CD — backend, Docker and deploy', 'success')), true);
+  assert.equal(api.isMeaningful(run('Deploy static site to GitHub Pages', '', 'in_progress')), true);
+  assert.equal(api.isMeaningful(null), false);
+
+  // Technical documentation link: rendered HTML, not a raw Markdown asset.
+  assert.match(pipelineSection, /id="pipeline-doc-link" href="docs\/ci-cd-pipeline\.html"/);
+  assert.ok(exists('docs/ci-cd-pipeline.html'), 'docs/ci-cd-pipeline.html exists');
+  assert.ok(exists('docs/ci-cd-pipeline.md'), 'docs/ci-cd-pipeline.md stays the source');
+  const docHtml = read('docs/ci-cd-pipeline.html');
+  assert.match(docHtml, /<!DOCTYPE html>/);
+  assert.doesNotMatch(docHtml, /<script/i);
+  includesAll(docHtml, ['[ voltar ao portfólio ]', 'ci-cd-pipeline.md', '<table>']);
+});
+
+test('every collapsible section has a toggle wired to an existing body', () => {
+  const sections = html.match(/<section[^>]*data-collapsible[^>]*>/g) || [];
+  assert.ok(sections.length >= 4, 'pipeline, gateway, scene and stack are collapsible');
+  const bodies = new Set();
+  const controls = html.match(/aria-controls="([a-z-]+)"/g) || [];
+  controls.forEach((attr) => bodies.add(attr.split('"')[1]));
+  for (const id of ['pipeline-body', 'gateway-body', 'scene-body', 'stack-body']) {
+    assert.ok(bodies.has(id), `toggle targets ${id}`);
+    assert.ok(html.includes(`id="${id}"`), `${id} exists in the document`);
+  }
+  // Tall sections are compact by default; only the compact stack stays open.
+  assert.match(html, /<section id="scene"[^>]*data-collapsed="true"/);
+  assert.match(html, /<section id="gateway"[^>]*data-collapsed="true"/);
+  assert.match(html, /<section id="stack"[^>]*data-collapsed="false"/);
+  assert.match(html, /<section id="pipeline"[^>]*data-collapsed="true"/);
 });
 
 const pipelineCode = pipeline

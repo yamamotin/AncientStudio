@@ -1,4 +1,4 @@
-"""Municipal public governance tracking routes (IBGE + TSE + optional CGU)."""
+"""Municipal transparency & fiscal routes (IBGE + TSE + Siconfi DCA + optional CGU)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/transparencia", tags=["transparencia-municipal"])
 @router.get(
     "/municipio",
     response_model=ConnectorEnvelope,
-    summary="Lookup Mayor, Vice-Mayor, and elected Councilors via IBGE + TSE Open Data",
+    summary="Municipal governance, GDP, Siconfi budget execution, and TSE campaign finance in BRL",
 )
 def get_transparencia_municipio(
     cidade: str = Query(default="", max_length=120),

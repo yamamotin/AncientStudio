@@ -78,53 +78,91 @@
     </section>
 
     <!-- 2. LIVE CI/CD & DOCKER PIPELINE (public GitHub Actions metadata, read-only) -->
-    <section id="pipeline" class="panel" aria-labelledby="pipeline-title">
+    <section id="pipeline" class="panel collapsible" data-collapsible data-collapsed="true" aria-labelledby="pipeline-title">
       <div class="panel-head">
         <h2 id="pipeline-title" data-i18n="pipeline.title">[ LIVE CI/CD &amp; DOCKER PIPELINE ]</h2>
-        <span id="pipeline-source" class="badge" data-i18n="pipeline.badge">GITHUB ACTIONS</span>
+        <div class="panel-head-actions">
+          <span id="pipeline-source" class="badge" data-i18n="pipeline.badge">GITHUB ACTIONS</span>
+          <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="pipeline-body">[ expandir ]</button>
+        </div>
       </div>
       <p class="muted" data-i18n="pipeline.hint">Execuções reais de yamamotin/AncientStudio lidas da API pública do GitHub Actions: somente leitura, sem token e com cache de 5 minutos.</p>
-      <div class="pipeline-actions">
-        <button id="pipeline-refresh" class="cmd-button cmd-button--primary" type="button" data-i18n="pipeline.refresh">[ atualizar ]</button>
-        <a id="pipeline-actions-link" class="cmd-button" href="https://github.com/yamamotin/AncientStudio/actions" target="_blank" rel="noopener noreferrer" data-i18n="pipeline.openActions">[ abrir actions ]</a>
-      </div>
-      <p id="pipeline-status" class="response-meta" role="status" aria-live="polite">// carregando execuções públicas do GitHub Actions…</p>
-      <ul id="pipeline-runs" class="run-list" aria-labelledby="pipeline-title"></ul>
-      <noscript>
-        <p class="muted">// JavaScript desativado: abra as execuções reais em https://github.com/yamamotin/AncientStudio/actions</p>
-      </noscript>
-      <details class="tech-doc">
-        <summary data-i18n="pipeline.docsSummary">[ documentação técnica ]</summary>
-        <div class="tech-doc-body">
-          <h3 data-i18n="pipeline.doc.archTitle">Arquitetura real dos workflows</h3>
-          <ul>
-            <li data-i18n="pipeline.doc.archCi">ci.yml — CI — Backend, ASCII 3D Engine &amp; Portfolio Integrity: typecheck, build do bundle ASCII, contrato do engine, node --test e unittest do backend.</li>
-            <li data-i18n="pipeline.doc.archCicd">ci-cd.yml — Ruff + pytest no backend, build da imagem Docker e deploy de produção na Vercel.</li>
-            <li data-i18n="pipeline.doc.archPages">pages.yml — publicação estática no GitHub Pages com verificação de paridade (não bloqueante) entre Pages e Vercel.</li>
-            <li data-i18n="pipeline.doc.archVcr">vcr-cleanup.yml — retenção das 3 imagens mais recentes dockerfile no Vercel Container Registry, com modo dry_run.</li>
-          </ul>
-          <h3 data-i18n="pipeline.doc.frontTitle">Como o frontend consome os dados</h3>
-          <ul>
-            <li data-i18n="pipeline.doc.frontApi">Duas chamadas GET públicas: /actions/runs (até 6 execuções) e /actions/workflows (nomes e paths), sem autenticação.</li>
-            <li data-i18n="pipeline.doc.frontCache">Cache de 5 minutos em localStorage (memória por fallback) e AbortController com timeout de 8 s por requisição.</li>
-            <li data-i18n="pipeline.doc.frontFallback">Em falha ou rate-limit o painel mantém os últimos dados e exibe aviso com link direto para o Actions.</li>
-          </ul>
-          <h3 data-i18n="pipeline.doc.securityTitle">Controles de segurança no cliente</h3>
-          <ul>
-            <li data-i18n="pipeline.doc.securityDom">Somente createElement + textContent; nenhum innerHTML com dado externo, com limite de tamanho e remoção de caracteres de controle.</li>
-            <li data-i18n="pipeline.doc.securityUrl">href aceito apenas para https://github.com/yamamotin/AncientStudio/actions/runs/&lt;id&gt;; links externos com rel="noopener noreferrer".</li>
-            <li data-i18n="pipeline.doc.securitySecrets">Zero segredos: nenhum token em JS, credentials: 'omit' e nenhum header Authorization.</li>
-            <li data-i18n="pipeline.doc.securityCsp">CSP restritiva via meta http-equiv, com connect-src limitado a 'self' e https://api.github.com.</li>
-            <li data-i18n="pipeline.doc.securityFlood">Botão de atualizar bloqueado durante a requisição e cooldown de 4 s contra clique duplo ou flood.</li>
-          </ul>
-          <p class="muted"><a href="docs/ci-cd-pipeline.md" target="_blank" rel="noopener noreferrer" data-i18n="pipeline.doc.reference">Referência completa: docs/ci-cd-pipeline.md</a></p>
+
+      <!-- Executive summary: reliability, automation and release hygiene, filled with
+           real values from the public API (never fabricated client-side). -->
+      <div id="pipeline-summary" class="monitor-summary" role="group" data-i18n-attr="aria-label:pipeline.summaryAria" aria-label="Resumo executivo do pipeline">
+        <div class="monitor-card">
+          <span class="monitor-label" data-i18n="pipeline.summary.stateLabel">Última execução</span>
+          <span id="pipeline-summary-state" class="monitor-value">—</span>
         </div>
-      </details>
+        <div class="monitor-card">
+          <span class="monitor-label" data-i18n="pipeline.summary.reliabilityLabel">Confiabilidade</span>
+          <span id="pipeline-summary-reliability" class="monitor-value">—</span>
+        </div>
+        <div class="monitor-card">
+          <span class="monitor-label" data-i18n="pipeline.summary.dockerLabel">Imagens Docker</span>
+          <span id="pipeline-summary-docker" class="monitor-value">—</span>
+        </div>
+        <div class="monitor-card">
+          <span class="monitor-label" data-i18n="pipeline.summary.workflowsLabel">Workflows monitorados</span>
+          <span id="pipeline-summary-workflows" class="monitor-value">—</span>
+        </div>
+      </div>
+
+      <p id="pipeline-status" class="response-meta" role="status" aria-live="polite">// carregando execuções públicas do GitHub Actions…</p>
+
+      <div id="pipeline-body" class="collapse-body">
+        <div class="pipeline-actions">
+          <button id="pipeline-refresh" class="cmd-button cmd-button--primary" type="button" data-i18n="pipeline.refresh">[ atualizar ]</button>
+        </div>
+        <ul id="pipeline-runs" class="run-list" aria-labelledby="pipeline-title"></ul>
+        <p id="pipeline-filter-note" class="muted" data-i18n="pipeline.filtersNote" hidden>// execuções internas (auto-merge, skipped) ocultadas neste resumo</p>
+        <noscript>
+          <p class="muted">// JavaScript desativado: as execuções públicas ficam em github.com/yamamotin/AncientStudio/actions</p>
+        </noscript>
+        <details class="tech-doc">
+          <summary data-i18n="pipeline.docsSummary">[ documentação técnica ]</summary>
+          <div class="tech-doc-body">
+            <h3 data-i18n="pipeline.doc.archTitle">Arquitetura real dos workflows</h3>
+            <ul>
+              <li data-i18n="pipeline.doc.archCi">ci.yml — CI — Backend, ASCII 3D Engine &amp; Portfolio Integrity: typecheck, build do bundle ASCII, contrato do engine, node --test e unittest do backend.</li>
+              <li data-i18n="pipeline.doc.archCicd">ci-cd.yml — Ruff + pytest no backend, build da imagem Docker e deploy de produção na Vercel.</li>
+              <li data-i18n="pipeline.doc.archPages">pages.yml — publicação estática no GitHub Pages com verificação de paridade (não bloqueante) entre Pages e Vercel.</li>
+              <li data-i18n="pipeline.doc.archVcr">vcr-cleanup.yml — retenção das 3 imagens mais recentes dockerfile no Vercel Container Registry, com modo dry_run.</li>
+            </ul>
+            <h3 data-i18n="pipeline.doc.frontTitle">Como o frontend consome os dados</h3>
+            <ul>
+              <li data-i18n="pipeline.doc.frontApi">Duas chamadas GET públicas: /actions/runs (até 6 execuções) e /actions/workflows (nomes e paths), sem autenticação.</li>
+              <li data-i18n="pipeline.doc.frontCache">Cache de 5 minutos em localStorage (memória por fallback) e AbortController com timeout de 8 s por requisição.</li>
+              <li data-i18n="pipeline.doc.frontFallback">Em falha ou rate-limit o painel mantém os últimos dados e exibe aviso com horário de renovação.</li>
+              <li data-i18n="pipeline.doc.frontFilter">O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar o que importa ao cliente.</li>
+            </ul>
+            <h3 data-i18n="pipeline.doc.securityTitle">Controles de segurança no cliente</h3>
+            <ul>
+              <li data-i18n="pipeline.doc.securityDom">Somente createElement + textContent; nenhum innerHTML com dado externo, com limite de tamanho e remoção de caracteres de controle.</li>
+              <li data-i18n="pipeline.doc.securityUrl">Nenhum link é montado a partir do payload: as únicas URLs externas passam por allowlist estrita e usam rel="noopener noreferrer".</li>
+              <li data-i18n="pipeline.doc.securitySecrets">Zero segredos: nenhum token em JS, credentials: 'omit' e nenhum header Authorization.</li>
+              <li data-i18n="pipeline.doc.securityCsp">CSP restritiva via meta http-equiv, com connect-src limitado a 'self' e https://api.github.com.</li>
+              <li data-i18n="pipeline.doc.securityFlood">Botão de atualizar bloqueado durante a requisição e cooldown de 4 s contra clique duplo ou flood.</li>
+            </ul>
+            <p class="muted">
+              <a id="pipeline-doc-link" href="docs/ci-cd-pipeline.html" target="_blank" rel="noopener noreferrer" data-i18n="pipeline.doc.reference">Referência completa: docs/ci-cd-pipeline.html</a>
+            </p>
+            <p class="muted"><a id="pipeline-last-run-link" hidden data-i18n="pipeline.doc.lastRun">[ última execução no GitHub ]</a></p>
+          </div>
+        </details>
+      </div>
     </section>
 
     <!-- 3. API GATEWAY / INTEGRATIONS -->
-    <section id="gateway" class="section" aria-labelledby="gateway-title">
-      <h2 id="gateway-title" data-i18n="gateway.title">[ API GATEWAY // INTEGRAÇÕES ]</h2>
+    <section id="gateway" class="section collapsible" data-collapsible data-collapsed="true" aria-labelledby="gateway-title">
+      <div class="panel-head">
+        <h2 id="gateway-title" data-i18n="gateway.title">[ API GATEWAY // INTEGRAÇÕES ]</h2>
+        <div class="panel-head-actions">
+          <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="gateway-body">[ expandir ]</button>
+        </div>
+      </div>
+      <div id="gateway-body" class="collapse-body">
       <div class="ascii-tab-frame">
         <div class="ascii-rule" aria-hidden="true">+------------------+------------------+-------------------+</div>
         <div class="tablist" role="tablist" aria-label="Integrações" data-i18n-attr="aria-label:tabs.aria">
@@ -167,15 +205,15 @@
                 <span data-i18n="etl.tribunalLabel">Tribunal</span>
                 <select id="projudi-tribunal" class="select-control">
                   <option value="TJPR" selected>TJPR</option>
-                  <option value="TJSP">TJSP</option>
-                  <option value="TJMG">TJMG</option>
-                  <option value="TJSC">TJSC</option>
-                  <option value="TJRS">TJRS</option>
                 </select>
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="etl.processoLabel">Processo CNJ (20 dígitos)</span>
-                <input id="projudi-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+                <input id="projudi-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
+              </label>
+              <label class="field-group field-group--wide">
+                <span>reCAPTCHA Token (TJPR)</span>
+                <input id="projudi-captcha" class="select-control" type="text" placeholder="g-recaptcha-response (consulta.tjpr.jus.br)" autocomplete="off" data-sensitive>
               </label>
             </div>
             <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.</p>
@@ -215,7 +253,7 @@
             <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="fintech.ncmLabel">Descrição do produto ou código NCM</span>
-                <input id="siscomex-query" class="select-control" type="text" value="computadores portateis" autocomplete="off">
+                <input id="siscomex-query" class="select-control" type="text" value="GPU" placeholder="GPU, computadores portateis, 8471.80.00" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -242,7 +280,7 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="workflow.resumoProcessoLabel">Processo CNJ</span>
-                <input id="resumo-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+                <input id="resumo-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="workflow.resumoTextoLabel">Texto / Movimentação para triagem</span>
@@ -273,13 +311,17 @@
         <p class="muted" data-i18n="workflow.note">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
         <p class="muted" data-i18n="workflow.tokenHygiene">// a chave fica apenas na memória desta aba e é apagada ao sair</p>
       </div>
+      </div>
     </section>
 
     <!-- 4. INTERACTIVE SCENE 3D (engine adapter + static fallback) -->
-    <section id="scene" class="section" aria-labelledby="scene-title">
+    <section id="scene" class="section collapsible" data-collapsible data-collapsed="true" aria-labelledby="scene-title">
       <div class="panel-head">
         <h2 id="scene-title" data-i18n="scene.title">[ CENA 3D INTERATIVA ]</h2>
-        <span id="scene-mode" class="badge">FALLBACK</span>
+        <div class="panel-head-actions">
+          <span id="scene-mode" class="badge">FALLBACK</span>
+          <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="scene-body">[ expandir ]</button>
+        </div>
       </div>
       <div class="scene-toolbar" role="group" aria-label="Controle de tamanho da fonte ASCII" data-i18n-attr="aria-label:scene.fontGroupAria">
         <div class="scene-font-control">
@@ -291,6 +333,7 @@
       </div>
       <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>
       <p class="sr-only" data-i18n="scene.aria">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
+      <div id="scene-body" class="collapse-body">
       <div id="ascii-scene" class="scene-stage" data-mode="fallback">
         <pre class="scene-fallback" aria-hidden="true">   /\
   /  \      [ SYS ]
@@ -309,13 +352,18 @@
         <button id="scene-fullscreen" class="cmd-button cmd-button--small" type="button" aria-pressed="false" aria-label="Ampliar a seção Cena 3D Interativa" data-i18n="scene.fullscreen" data-i18n-attr="aria-label:scene.fullscreenAria">[ tela cheia ]</button>
         <span class="scene-help muted" data-i18n="scene.presetHelp">// WASD ou clique/toque move o personagem · E interage · scroll livre</span>
       </div>
+      </div>
     </section>
 
     <!-- 5. NEOFETCH STACK -->
-    <section id="stack" class="section" aria-labelledby="stack-title">
+    <section id="stack" class="section collapsible" data-collapsible data-collapsed="false" aria-labelledby="stack-title">
       <div class="panel-head">
         <h2 id="stack-title">[ STACK // NEOFETCH ]</h2>
+        <div class="panel-head-actions">
+          <button class="cmd-button cmd-button--small collapse-toggle" type="button" data-collapse-toggle aria-controls="stack-body">[ recolher ]</button>
+        </div>
       </div>
+      <div id="stack-body" class="collapse-body">
       <div class="neofetch">
         <div>
           <div id="penguin-stage" class="engine-stage" data-mode="fallback" aria-hidden="true">
@@ -343,6 +391,7 @@
           <div><dt data-i18n="specs.certifications">Certifications</dt><dd>Harvard CS50, Microsoft SC-900, UFPR Machine Learning</dd></div>
           <div><dt data-i18n="specs.education">Education</dt><dd>[B.Sc](http://B.Sc). Electrical Engineering (IFPR) + Erasmus+ International Program</dd></div>
         </dl>
+      </div>
       </div>
     </section>
 

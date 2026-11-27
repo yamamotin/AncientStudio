@@ -1,9 +1,10 @@
-"""Decoupled HTTP client transport with short timeouts and response byte caps."""
+"""Decoupled HTTP client transport with short timeouts, cookies, and response byte caps."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 import socket
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -12,7 +13,12 @@ from urllib.request import Request, urlopen
 
 from api.connectors.errors import UpstreamConnectorError
 
-DEFAULT_USER_AGENT = "AncientStudio-PublicConnectors/1.0 (+https://github.com/yamamotin/AncientStudio)"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (compatible; AncientStudio-PublicConnectors/2.0; "
+    "+https://github.com/yamamotin/AncientStudio)"
+)
+
+_CHARSET_RE = re.compile(r"charset\s*=\s*['\"]?([A-Za-z0-9._-]+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -24,8 +30,47 @@ class HttpResponse:
     headers: dict[str, str]
     body: bytes
 
-    def text(self, encoding: str = "utf-8") -> str:
-        return self.body.decode(encoding, errors="replace")
+    def text(self, encoding: str | None = None) -> str:
+        """Decode response body honoring explicit, Content-Type, or HTML meta charsets."""
+        if encoding:
+            return self.body.decode(encoding, errors="replace")
+
+        content_type = self.headers.get("content-type", "")
+        match = _CHARSET_RE.search(content_type)
+        if match:
+            detected = match.group(1).strip()
+            try:
+                return self.body.decode(detected, errors="replace")
+            except LookupError:
+                pass
+
+        head_ascii = self.body[:2048].decode("ascii", errors="ignore")
+        meta_match = _CHARSET_RE.search(head_ascii)
+        if meta_match:
+            detected_meta = meta_match.group(1).strip()
+            try:
+                return self.body.decode(detected_meta, errors="replace")
+            except LookupError:
+                pass
+
+        try:
+            return self.body.decode("utf-8")
+        except UnicodeDecodeError:
+            return self.body.decode("iso-8859-1", errors="replace")
+
+    def cookies(self) -> dict[str, str]:
+        """Extract cookie key-value pairs emitted via ``Set-Cookie`` headers."""
+        raw_header = self.headers.get("set-cookie", "")
+        if not raw_header:
+            return {}
+        jar: dict[str, str] = {}
+        for segment in raw_header.split("\n"):
+            first_pair = segment.split(";", 1)[0].strip()
+            if "=" in first_pair:
+                key, val = first_pair.split("=", 1)
+                if key.strip():
+                    jar[key.strip()] = val.strip()
+        return jar
 
     def json(self) -> Any:
         try:
@@ -52,25 +97,25 @@ class HttpTransport(Protocol):
 
 
 def build_url(base_url: str, params: dict[str, Any] | None = None) -> str:
-    """Append URL-encoded query parameters while preserving OData ``$`` keys."""
+    """Append URL-encoded query parameters while preserving OData ``$`` and pipe keys."""
     if not params:
         return base_url
     filtered = {k: v for k, v in params.items() if v is not None}
     if not filtered:
         return base_url
-    query = urlencode(filtered, safe="$")
+    query = urlencode(filtered, safe="$|[]")
     sep = "&" if "?" in base_url else "?"
     return f"{base_url}{sep}{query}"
 
 
 class UrllibHttpTransport:
-    """Zero-dependency HTTP transport with short timeouts and strict streaming byte cap."""
+    """Zero-dependency HTTP transport with short timeouts, Set-Cookie capture, and byte cap."""
 
     def __init__(
         self,
         *,
-        default_timeout_seconds: float = 3.5,
-        max_response_bytes: int = 4 * 1024 * 1024,
+        default_timeout_seconds: float = 4.5,
+        max_response_bytes: int = 8 * 1024 * 1024,
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
         self._default_timeout = max(0.2, float(default_timeout_seconds))
@@ -96,6 +141,7 @@ class UrllibHttpTransport:
         req_headers = {
             "User-Agent": self._user_agent,
             "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.7,en;q=0.6",
         }
         if headers:
             req_headers.update(headers)
@@ -115,9 +161,17 @@ class UrllibHttpTransport:
                             f"Resposta de {full_url} excedeu o limite de {self._max_bytes} bytes."
                         )
                     chunks.append(chunk)
+
                 resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+                get_all = getattr(resp.headers, "get_all", None)
+                if callable(get_all):
+                    all_cookies = get_all("Set-Cookie")
+                    if all_cookies:
+                        resp_headers["set-cookie"] = "\n".join(all_cookies)
+
+                final_url = getattr(resp, "geturl", lambda: full_url)() or full_url
                 return HttpResponse(
-                    url=full_url,
+                    url=final_url,
                     status_code=int(resp.status),
                     headers=resp_headers,
                     body=b"".join(chunks),

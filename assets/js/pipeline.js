@@ -1,6 +1,14 @@
-/* Live CI/CD & Docker pipeline panel.
+/* Live CI/CD & Docker pipeline panel — a compact client-facing monitoring screen.
    Reads the public, read-only GitHub Actions metadata of yamamotin/AncientStudio
    (https://api.github.com/repos/.../actions/runs and /actions/workflows).
+
+   Presentation rules:
+   - an executive summary (reliability, automation, Docker image hygiene) is always
+     visible; the detailed run list lives in the collapsible body;
+   - internal noise (auto-merge runs, `skipped`/`cancelled` conclusions) is filtered
+     out of the summary and the list;
+   - no external link is rendered per run: at most one allowlisted link points to the
+     latest run inside the technical details.
 
    Security posture of this file:
    - no credentials of any kind (no token, no Authorization header, credentials: 'omit');
@@ -18,10 +26,11 @@ window.TP = window.TP || {};
   var OWNER = 'yamamotin';
   var REPO = 'AncientStudio';
   var API_ROOT = 'https://api.github.com/repos/' + OWNER + '/' + REPO;
-  var RUNS_URL = API_ROOT + '/actions/runs?per_page=6';
+  var RUNS_URL = API_ROOT + '/actions/runs?per_page=10';
   var WORKFLOWS_URL = API_ROOT + '/actions/workflows';
-  var ACTIONS_PAGE = 'https://github.com/' + OWNER + '/' + REPO + '/actions';
   var RUN_URL_PATTERN = /^https:\/\/github\.com\/yamamotin\/AncientStudio\/actions\/runs\/\d{1,20}$/;
+  var NOISE_WORKFLOW = /auto-merge/i;
+  var NOISE_CONCLUSIONS = ['skipped', 'cancelled'];
 
   var CACHE_KEY = 'tp.gh-actions.v1';
   var CACHE_TTL = 300000;        // 5 minutes of fresh data
@@ -40,7 +49,8 @@ window.TP = window.TP || {};
     remaining: null,
     resetAt: null,
     stale: false,
-    loading: false
+    loading: false,
+    filtered: 0
   };
 
   function t(key, vars) {
@@ -82,7 +92,7 @@ window.TP = window.TP || {};
     if (!name && !url) return null;
 
     var sha = String(raw.head_sha || '').toLowerCase();
-    if (!/^[0-9a-f]{40}$/.test(sha) && !/^[0-9a-f]{7,39}$/.test(sha)) sha = '';
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) sha = '';
 
     var status = text(raw.status, 24).toLowerCase();
     if (!/^[a-z_]{3,24}$/.test(status)) status = 'unknown';
@@ -122,18 +132,30 @@ window.TP = window.TP || {};
       var item = list[i];
       if (!item || typeof item !== 'object') continue;
       var name = text(item.name, 72);
-      var path = text(item.path, 96);
       if (!name) continue;
       workflows.push({
         name: name,
-        path: /^[\w./-]{1,96}$/.test(path) ? path : '',
+        path: /^[\w./-]{1,96}$/.test(text(item.path, 96)) ? text(item.path, 96) : '',
         state: /^[a-z_]{3,24}$/.test(String(item.state || '')) ? String(item.state) : ''
       });
     }
     return workflows;
   }
 
+  /* Client-facing filter: internal chore workflows and skipped/cancelled runs add
+     noise without adding signal. */
+  function isMeaningful(run) {
+    if (!run) return false;
+    if (NOISE_WORKFLOW.test(run.name)) return false;
+    return NOISE_CONCLUSIONS.indexOf(run.conclusion) === -1;
+  }
+
+  function meaningfulRuns() {
+    return state.runs.filter(isMeaningful);
+  }
+
   function statusClass(run) {
+    if (!run) return 'is-neutral';
     if (run.conclusion === 'success') return 'is-success';
     if (run.conclusion === 'failure' || run.conclusion === 'timed_out' || run.conclusion === 'startup_failure') {
       return 'is-failure';
@@ -144,9 +166,25 @@ window.TP = window.TP || {};
     return 'is-neutral';
   }
 
+  function statusLabel(run) {
+    if (!run) return '';
+    return run.conclusion || run.status;
+  }
+
   function formatTimestamp(iso) {
     if (!iso) return '—';
     return iso.slice(0, 16).replace('T', ' ') + ' UTC';
+  }
+
+  /* Status lines already carry "UTC" in their templates. */
+  function formatClock(iso) {
+    if (!iso) return '—';
+    return iso.slice(11, 16);
+  }
+
+  function formatClockUtc(iso) {
+    var clock = formatClock(iso);
+    return clock === '—' ? clock : clock + ' UTC';
   }
 
   function formatDuration(startIso, endIso) {
@@ -157,12 +195,6 @@ window.TP = window.TP || {};
     if (seconds < 60) return seconds + 's';
     var minutes = Math.floor(seconds / 60);
     return minutes + 'm ' + (seconds % 60) + 's';
-  }
-
-  function formatClock(timestamp) {
-    var date = new Date(timestamp);
-    if (isNaN(date.getTime())) return '—';
-    return date.toISOString().slice(11, 16);
   }
 
   function storage() {
@@ -213,14 +245,14 @@ window.TP = window.TP || {};
   }
 
   function statusMessage(kind, error) {
-    var count = state.runs.length;
+    var count = meaningfulRuns().length;
     if (kind === 'loading') return t('pipeline.loading');
     if (kind === 'loaded') {
-      var message = t('pipeline.loaded', { count: count, time: formatClock(state.fetchedAt) });
+      var message = t('pipeline.loaded', { count: count, time: formatClock(new Date(state.fetchedAt).toISOString()) });
       if (state.remaining !== null && state.remaining <= 10) {
         message += ' ' + t('pipeline.quota', {
           remaining: state.remaining,
-          time: state.resetAt ? formatClock(state.resetAt * 1000) : '—'
+          time: state.resetAt ? formatClock(new Date(state.resetAt * 1000).toISOString()) : '—'
         });
       }
       return message;
@@ -231,31 +263,94 @@ window.TP = window.TP || {};
     }
     if (kind === 'rateLimit') {
       return t('pipeline.rateLimit', {
-        time: state.resetAt ? formatClock(state.resetAt * 1000) : '—'
+        time: state.resetAt ? formatClock(new Date(state.resetAt * 1000).toISOString()) : '—'
       });
     }
     if (kind === 'empty') return t('pipeline.empty');
     return t('pipeline.offline', { detail: describeError(error) });
   }
 
-  function renderEmpty() {
-    if (!elements.list) return;
-    elements.list.textContent = '';
-    var item = document.createElement('li');
-    item.className = 'run-empty';
-    item.textContent = t('pipeline.empty');
-    elements.list.appendChild(item);
+  function setSlot(name, value, run) {
+    var node = elements['summary' + name];
+    if (!node) return;
+    node.textContent = value || '—';
+    node.className = 'monitor-value ' + statusClass(run);
+  }
+
+  /* Executive summary: real numbers only, derived from the sanitized payload. */
+  function renderSummary() {
+    var runs = meaningfulRuns();
+    var last = runs[0] || null;
+    setSlot('State', last
+      ? t('pipeline.summary.stateValue', { status: statusLabel(last), time: formatClockUtc(last.updatedAt) })
+      : t('pipeline.summary.none'), last);
+
+    var completed = runs.filter(function (run) { return run.status === 'completed'; });
+    var ok = completed.filter(function (run) { return run.conclusion === 'success'; }).length;
+    if (completed.length) {
+      setSlot('Reliability', t('pipeline.summary.reliabilityValue', {
+        ok: ok,
+        total: completed.length,
+        percent: Math.round((ok / completed.length) * 100)
+      }), { conclusion: ok === completed.length ? 'success' : (ok === 0 ? 'failure' : '') });
+    } else {
+      setSlot('Reliability', t('pipeline.summary.none'), null);
+    }
+
+    // Only a real retention outcome is interesting; a scheduled-but-skipped run
+    // is noise, so fall back to the documented policy line.
+    var retention = state.runs.filter(function (run) {
+      return /vcr|retention/i.test(run.name) &&
+        (run.conclusion === 'success' || run.conclusion === 'failure' || run.conclusion === 'timed_out');
+    })[0] || null;
+    setSlot('Docker', retention
+      ? t('pipeline.summary.dockerValue', {
+          status: statusLabel(retention),
+          time: formatClockUtc(retention.updatedAt)
+        })
+      : t('pipeline.summary.dockerScheduled'), null);
+
+    setSlot('Workflows', state.workflows.length
+      ? t('pipeline.summary.workflowsValue', { count: state.workflows.length })
+      : t('pipeline.summary.none'), null);
+
+    renderLastRunLink(runs[0] || null);
+  }
+
+  function renderLastRunLink(run) {
+    var link = elements.lastRunLink;
+    if (!link) return;
+    var href = run ? safeRunUrl(run.url) : '';
+    if (!href) {
+      link.hidden = true;
+      link.removeAttribute('href');
+      link.removeAttribute('target');
+      link.removeAttribute('rel');
+      return;
+    }
+    link.setAttribute('href', href);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.hidden = false;
   }
 
   function renderRuns() {
     if (!elements.list) return;
     elements.list.textContent = '';
-    if (!state.runs.length) {
-      renderEmpty();
+
+    var runs = meaningfulRuns();
+    state.filtered = state.runs.length - runs.length;
+    if (elements.filterNote) elements.filterNote.hidden = !state.filtered;
+
+    if (!runs.length) {
+      var empty = document.createElement('li');
+      empty.className = 'run-empty';
+      empty.textContent = t('pipeline.empty');
+      elements.list.appendChild(empty);
       return;
     }
 
-    state.runs.forEach(function (run) {
+    runs.forEach(function (run) {
       var item = document.createElement('li');
       item.className = 'run-item';
 
@@ -268,7 +363,7 @@ window.TP = window.TP || {};
 
       var pill = document.createElement('span');
       pill.className = 'status-pill ' + statusClass(run);
-      pill.textContent = run.conclusion || run.status;
+      pill.textContent = statusLabel(run);
 
       head.appendChild(name);
       head.appendChild(pill);
@@ -285,22 +380,12 @@ window.TP = window.TP || {};
       meta.textContent = parts.join(' · ');
       item.appendChild(meta);
 
-      var href = safeRunUrl(run.url);
-      if (href) {
-        var link = document.createElement('a');
-        link.className = 'run-link';
-        link.href = href;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = t('pipeline.runLink');
-        item.appendChild(link);
-      }
-
       elements.list.appendChild(item);
     });
   }
 
   function render() {
+    renderSummary();
     renderRuns();
   }
 
@@ -369,7 +454,7 @@ window.TP = window.TP || {};
     if (!force && state.fetchedAt && now - state.fetchedAt < CACHE_TTL) {
       state.stale = false;
       render();
-      setStatus(statusMessage(state.runs.length ? 'loaded' : 'empty'));
+      setStatus(statusMessage(meaningfulRuns().length ? 'loaded' : 'empty'));
       return null;
     }
     // Flood/double-click guard: a manual refresh cannot hammer the public API.
@@ -401,7 +486,7 @@ window.TP = window.TP || {};
         try {
           state.workflows = sanitizeWorkflows(await fetchJson(WORKFLOWS_URL));
         } catch (workflowError) {
-          /* Workflow names are decorative: run data still renders. */
+          /* Workflow names are secondary: run data still renders. */
         }
       }
 
@@ -436,20 +521,19 @@ window.TP = window.TP || {};
       list: document.getElementById('pipeline-runs'),
       status: document.getElementById('pipeline-status'),
       refresh: document.getElementById('pipeline-refresh'),
-      link: document.getElementById('pipeline-actions-link'),
-      badge: document.getElementById('pipeline-source')
+      badge: document.getElementById('pipeline-source'),
+      filterNote: document.getElementById('pipeline-filter-note'),
+      lastRunLink: document.getElementById('pipeline-last-run-link'),
+      summaryState: document.getElementById('pipeline-summary-state'),
+      summaryReliability: document.getElementById('pipeline-summary-reliability'),
+      summaryDocker: document.getElementById('pipeline-summary-docker'),
+      summaryWorkflows: document.getElementById('pipeline-summary-workflows')
     };
     if (!elements.list) return;
 
     if (elements.refresh && elements.refresh.dataset.bound !== 'true') {
       elements.refresh.dataset.bound = 'true';
       elements.refresh.addEventListener('click', function () { refresh(true); });
-    }
-
-    // The static markup already points at ACTIONS_PAGE; keep the constant honest
-    // if the repository ever moves, without trusting anything from the network.
-    if (elements.link && elements.link.getAttribute('href') !== ACTIONS_PAGE) {
-      elements.link.setAttribute('href', ACTIONS_PAGE);
     }
 
     window.addEventListener('tp:languagechange', function () {
@@ -470,13 +554,13 @@ window.TP = window.TP || {};
     render: render,
     sanitizeRun: sanitizeRun,
     safeRunUrl: safeRunUrl,
+    isMeaningful: isMeaningful,
     formatDuration: formatDuration,
     config: {
       owner: OWNER,
       repo: REPO,
       runsUrl: RUNS_URL,
       workflowsUrl: WORKFLOWS_URL,
-      actionsPage: ACTIONS_PAGE,
       runUrlPattern: String(RUN_URL_PATTERN),
       cacheKey: CACHE_KEY,
       cacheTtl: CACHE_TTL,

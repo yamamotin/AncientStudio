@@ -121,8 +121,8 @@ window.TP = window.TP || {};
     projudiConsulta: function (payload) {
       return request('/projudi/processos/consulta', { method: 'POST', body: payload || {} });
     },
-    projudiProcesso: function (numeroProcesso) {
-      return request('/projudi/processos/' + encodeURIComponent(numeroProcesso || ''));
+    projudiProcesso: function (numeroProcesso, params) {
+      return request('/projudi/processos/' + encodeURIComponent(numeroProcesso || '') + buildQuery(params));
     },
     projudiResumo: function (numeroProcesso, payload) {
       return request('/projudi/processos/' + encodeURIComponent(numeroProcesso || '') + '/resumo', {

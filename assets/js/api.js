@@ -1,5 +1,7 @@
-/* API client with live Python backend detection + realistic static-host simulation
-   for GitHub Pages / file:// previews when no Python server is running. */
+/* API client with live Python backend detection + static-host contingency
+   for GitHub Pages / file:// previews when no Python server is running.
+   PROJUDI never returns synthetic or mock case records: unauthenticated static calls
+   return structured HTTP 422 CAPTCHA_REQUIRED problem details. */
 window.TP = window.TP || {};
 
 (function (TP) {
@@ -15,76 +17,225 @@ window.TP = window.TP || {};
 
   var STATIC_NCM_CATALOG = [
     {
+      codigo: '8471.80.00',
+      codigo_numerico: '84718000',
+      nivel: 'ncm_8_digitos',
+      descricao: 'Outras unidades de máquinas automáticas para processamento de dados',
+      hierarquia: {
+        capitulo: { codigo: '84', descricao: 'Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos' },
+        posicao: { codigo: '84.71', descricao: 'Máquinas automáticas para processamento de dados e suas unidades' },
+        subposicao: null
+      },
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
+    },
+    {
+      codigo: '8471.50.90',
+      codigo_numerico: '84715090',
+      nivel: 'ncm_8_digitos',
+      descricao: 'Outras',
+      hierarquia: {
+        capitulo: { codigo: '84', descricao: 'Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos' },
+        posicao: { codigo: '84.71', descricao: 'Máquinas automáticas para processamento de dados e suas unidades' },
+        subposicao: { codigo: '8471.50', descricao: 'Unidades de processamento, exceto as das subposições 8471.41 ou 8471.49' }
+      },
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
+    },
+    {
+      codigo: '8542.31.90',
+      codigo_numerico: '85423190',
+      nivel: 'ncm_8_digitos',
+      descricao: 'Outros',
+      hierarquia: {
+        capitulo: { codigo: '85', descricao: 'Máquinas, aparelhos e materiais elétricos, e suas partes' },
+        posicao: { codigo: '85.42', descricao: 'Circuitos integrados eletrônicos' },
+        subposicao: { codigo: '8542.31', descricao: 'Processadores e controladores, mesmo combinados com memórias' }
+      },
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
+    },
+    {
       codigo: '8471.30.12',
       codigo_numerico: '84713012',
       nivel: 'ncm_8_digitos',
-      descricao: 'Computadores portáteis (notebooks, laptops e tablets com teclado), de peso inferior a 3,5 kg',
+      descricao: 'De peso inferior a 3,5 kg, com tela de área superior a 140 cm²',
       hierarquia: {
-        capitulo: { codigo: '84', descricao: 'Reatores nucleares, caldeiras, máquinas e instrumentos mecânicos' },
+        capitulo: { codigo: '84', descricao: 'Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos' },
         posicao: { codigo: '84.71', descricao: 'Máquinas automáticas para processamento de dados e suas unidades' },
-        subposicao: { codigo: '8471.30', descricao: 'Máquinas automáticas para processamento de dados, portáteis' }
+        subposicao: { codigo: '8471.30', descricao: 'Máquinas automáticas para processamento de dados, portáteis, de peso não superior a 10 kg' }
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
+    },
+    {
+      codigo: '8471.70.40',
+      codigo_numerico: '84717040',
+      nivel: 'ncm_8_digitos',
+      descricao: 'De estado sólido (solid-state)',
+      hierarquia: {
+        capitulo: { codigo: '84', descricao: 'Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos' },
+        posicao: { codigo: '84.71', descricao: 'Máquinas automáticas para processamento de dados e suas unidades' },
+        subposicao: { codigo: '8471.70', descricao: 'Unidades de memória' }
+      },
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
     },
     {
       codigo: '8517.13.00',
       codigo_numerico: '85171300',
       nivel: 'ncm_8_digitos',
-      descricao: 'Telefones inteligentes (smartphones) para redes celulares e para outras redes sem fio',
+      descricao: 'Telefones inteligentes (smartphones)',
       hierarquia: {
         capitulo: { codigo: '85', descricao: 'Máquinas, aparelhos e materiais elétricos, e suas partes' },
         posicao: { codigo: '85.17', descricao: 'Aparelhos telefônicos, incluindo smartphones e roteadores' },
         subposicao: null
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
     },
     {
       codigo: '8504.40.90',
       codigo_numerico: '85044090',
       nivel: 'ncm_8_digitos',
-      descricao: 'Outros conversores elétricos estáticos, incluindo inversores fotovoltaicos para energia solar',
+      descricao: 'Outros',
       hierarquia: {
         capitulo: { codigo: '85', descricao: 'Máquinas, aparelhos e materiais elétricos, e suas partes' },
-        posicao: { codigo: '85.04', descricao: 'Transformadores elétricos e conversores estáticos' },
-        subposicao: null
+        posicao: { codigo: '85.04', descricao: 'Transformadores elétricos e conversores elétricos estáticos' },
+        subposicao: { codigo: '8504.40', descricao: 'Conversores estáticos' }
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
     },
     {
       codigo: '0901.11.10',
       codigo_numerico: '09011110',
       nivel: 'ncm_8_digitos',
-      descricao: 'Café não torrado, não descafeinado, em grão',
+      descricao: 'Em grão',
       hierarquia: {
         capitulo: { codigo: '09', descricao: 'Café, chá, mate e especiarias' },
         posicao: { codigo: '09.01', descricao: 'Café, mesmo torrado ou descafeinado' },
         subposicao: { codigo: '0901.11', descricao: 'Café não torrado, não descafeinado' }
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
     },
     {
       codigo: '1201.90.00',
       codigo_numerico: '12019000',
       nivel: 'ncm_8_digitos',
-      descricao: 'Soja, mesmo triturada, exceto para semeadura',
+      descricao: 'Outras',
       hierarquia: {
         capitulo: { codigo: '12', descricao: 'Sementes e frutos oleaginosos' },
         posicao: { codigo: '12.01', descricao: 'Soja, mesmo triturada' },
         subposicao: null
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
     },
     {
       codigo: '8703.80.00',
       codigo_numerico: '87038000',
       nivel: 'ncm_8_digitos',
-      descricao: 'Outros veículos automóveis de passageiros, unicamente com motor elétrico para propulsão',
+      descricao: 'Outros veículos, unicamente com motor elétrico para propulsão',
       hierarquia: {
         capitulo: { codigo: '87', descricao: 'Veículos automóveis, tratores, ciclos e suas partes' },
         posicao: { codigo: '87.03', descricao: 'Automóveis de passageiros' },
         subposicao: null
       },
-      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Camex nº 272/2021' }
+      vigencia: { inicio: '2022-04-01', fim: null, vigente: true, ato_legal: 'Res Gecex nº 272/2021' }
+    }
+  ];
+
+  var STATIC_CLASSIF_THESAURUS = [
+    {
+      triggers: ['gpu', 'gpus', 'gpgpu', 'placa de video', 'placa grafica', 'placa aceleradora', 'rtx', 'geforce', 'radeon'],
+      expandedTerms: ['unidade de processamento grafico', 'outras unidades de maquinas automaticas para processamento de dados'],
+      sugestoes: [
+        {
+          codigo_ncm: '8471.80.00',
+          confianca: 'alta',
+          perfil_mercadoria: 'Placa de vídeo convencional (GPU montada em PCB com saídas de vídeo HDMI/DisplayPort)',
+          fundamentacao: 'Solução de Consulta COANA nº 46/2016 e Solução de Consulta COSIT nº 98.227/2020.',
+          carater: 'orientativo_nao_vinculante'
+        },
+        {
+          codigo_ncm: '8471.50.90',
+          confianca: 'alta',
+          perfil_mercadoria: 'Placa aceleradora / GPGPU para data center e IA (sem saída de vídeo)',
+          fundamentacao: 'Soluções de Consulta COSIT nº 98.081/2021 e nº 98.227/2020.',
+          carater: 'orientativo_nao_vinculante'
+        },
+        {
+          codigo_ncm: '8542.31.90',
+          confianca: 'media',
+          perfil_mercadoria: 'Circuito integrado processador gráfico avulso (chip GPU/BGA sem placa)',
+          fundamentacao: 'Posição 85.42 da NCM/SH-2022 (Res. Gecex nº 272/2021).',
+          carater: 'orientativo_nao_vinculante'
+        }
+      ],
+      decisoes: [
+        {
+          tipo_ato: 'Solução de Consulta',
+          numero: '98081',
+          orgao: 'Cosit',
+          data_publicacao: '2021-04-08',
+          codigo_ncm: '8471.50.90',
+          ementa: "Código NCM 8471.50.90. Unidade de processamento sob a forma de placa de circuito impresso sem saída de vídeo, comercialmente denominada 'Unidade de Processamento Gráfico (GPU)' ou 'placa aceleradora'.",
+          fonte: 'Receita Federal do Brasil — Soluções de Consulta (COSIT/COANA)'
+        },
+        {
+          tipo_ato: 'Solução de Consulta',
+          numero: '98227',
+          orgao: 'Cosit',
+          data_publicacao: '2020-07-10',
+          codigo_ncm: '8471.50.90',
+          ementa: "Código NCM: 8471.50.90. Placa aceleradora GPGPU com memória HBM2 sem saída de vídeo (distinta das placas de vídeo convencionais da subposição 8471.80.00).",
+          fonte: 'Receita Federal do Brasil — Soluções de Consulta (COSIT/COANA)'
+        },
+        {
+          tipo_ato: 'Solução de Consulta',
+          numero: '46',
+          orgao: 'Coana',
+          data_publicacao: '2016-04-26',
+          codigo_ncm: '8471.80.00',
+          ementa: 'Código NCM: 8471.80.00. Unidade de processamento gráfico constituída de placa de circuito impresso com processador próprio (GPU), comercialmente denominada placa de vídeo.',
+          fonte: 'Receita Federal do Brasil — Soluções de Consulta (COSIT/COANA)'
+        }
+      ]
+    },
+    {
+      triggers: ['computadores', 'computador', 'computadores portateis', 'notebook', 'laptop'],
+      expandedTerms: ['maquinas automaticas para processamento de dados portateis'],
+      sugestoes: [
+        {
+          codigo_ncm: '8471.30.12',
+          confianca: 'alta',
+          perfil_mercadoria: 'Notebook / computador portátil de peso inferior a 3,5 kg',
+          fundamentacao: 'Subitem 8471.30.12 da NCM/TEC.',
+          carater: 'orientativo_nao_vinculante'
+        }
+      ],
+      decisoes: []
+    },
+    {
+      triggers: ['inversor solar', 'inversores solares', 'inversor fotovoltaico'],
+      expandedTerms: ['conversores estaticos'],
+      sugestoes: [
+        {
+          codigo_ncm: '8504.40.90',
+          confianca: 'alta',
+          perfil_mercadoria: 'Inversor solar fotovoltaico (conversor elétrico estático)',
+          fundamentacao: 'Subitem 8504.40.90 da NCM/TEC e SC Cosit nº 98.294/2023.',
+          carater: 'orientativo_nao_vinculante'
+        }
+      ],
+      decisoes: []
+    },
+    {
+      triggers: ['ssd', 'nvme'],
+      expandedTerms: ['estado solido'],
+      sugestoes: [
+        {
+          codigo_ncm: '8471.70.40',
+          confianca: 'alta',
+          perfil_mercadoria: 'Unidade de memória SSD (Solid-State Drive)',
+          fundamentacao: 'Subitem 8471.70.40 da NCM/SH-2022.',
+          carater: 'orientativo_nao_vinculante'
+        }
+      ],
+      decisoes: []
     }
   ];
 
@@ -101,46 +252,97 @@ window.TP = window.TP || {};
 
   var STATIC_MUNICIPALITIES = {
     'paranavai:PR': {
-      municipio: { nome: 'Paranavaí', uf: 'PR', codigo_ibge: '4118402', codigo_tse: '77498', mesorregiao: 'Noroeste Paranaense' },
-      prefeito: { nome_urna: 'MAURICIO GEHLEN', cargo: 'Prefeito', partido: 'PSD', numero_urna: 55, situacao: 'ELEITO' },
-      vice_prefeito: { nome_urna: 'PEDRO BARALDI', cargo: 'Vice-Prefeito', partido: 'PL', numero_urna: 55, situacao: 'ELEITO' },
+      municipio: { nome: 'Paranavaí', uf: 'PR', codigo_ibge: '4118402', codigo_tse: '77496', mesorregiao: 'Noroeste Paranaense' },
+      resumo_monetario: {
+        unidade_moeda: 'BRL',
+        moeda: 'BRL',
+        pib_municipal_brl: 4189765000.0,
+        pib_per_capita_brl: 45540.43,
+        receitas_realizadas_brl: 572821920.0,
+        despesas_empenhadas_brl: 540219230.0,
+        transferencias_correntes_brl: 397240906.84,
+        bens_declarados_prefeito_brl: 7479000.0,
+        despesas_campanha_prefeito_brl: 256896.2
+      },
+      indicadores_ibge: {
+        moeda: 'BRL',
+        populacao_estimada_pessoas: 96209,
+        populacao_ano_referencia: '2025',
+        pib_total_brl: 4168436000.0,
+        pib_per_capita_brl: 45295.3,
+        pib_ano_referencia: '2021',
+        receitas_brutas_realizadas_brl: 572821922.49,
+        despesas_brutas_empenhadas_brl: 540219225.49,
+        orcamento_ibge_ano_referencia: '2024'
+      },
+      execucao_orcamentaria_siconfi: {
+        moeda: 'BRL',
+        ano_exercicio: 2024,
+        receitas_orcamentarias_realizadas_brl: 562413615.32,
+        receitas_correntes_brl: 545950037.13,
+        receita_tributaria_propria_brl: 113863276.64,
+        transferencias_correntes_brl: 397240906.84,
+        despesas_empenhadas_brl: 540219225.49,
+        despesas_liquidadas_brl: 500024943.77,
+        despesas_pagas_brl: 492030972.37,
+        despesas_pessoal_encargos_brl: 251329086.65
+      },
+      financas_eleitorais_tse: {
+        moeda: 'BRL',
+        ano_eleicao: 2024,
+        bens_declarados_prefeito_brl: 7479000.0,
+        campanha_prefeito: {
+          limite_gastos_1t_brl: 235542.16,
+          receitas_campanha_brl: 294295.15,
+          despesas_contratadas_campanha_brl: 256896.2,
+          despesas_pagas_campanha_brl: 256896.2
+        }
+      },
+      prefeito: { nome_urna: 'MAURÍCIO GEHLEN', cargo: 'Prefeito', partido: 'PSD', numero_urna: 55, situacao: 'ELEITO', bens_declarados_brl: 7479000.0 },
+      vice_prefeito: { nome_urna: 'PEDRO BARALDI', cargo: 'Vice-Prefeito', partido: 'PP', numero_urna: 55, situacao: 'ELEITO' },
       vereadores: [
-        { nome_urna: 'CARLOS AUGUSTO', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'PROFESSORA IVANY', cargo: 'Vereador', partido: 'PP', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'DR. LEÔNIDAS', cargo: 'Vereador', partido: 'PL', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'JOSIVAL MOREIRA', cargo: 'Vereador', partido: 'UNIÃO', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'MARIA CLARA', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR MÉDIA' }
+        { nome_urna: 'WALDUR DO POVO', cargo: 'Vereador', partido: 'UNIÃO', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'DR. LEÔNIDAS FAVERO', cargo: 'Vereador', partido: 'CIDADANIA', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'CARLOS AUGUSTO', cargo: 'Vereador', partido: 'UNIÃO', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'PROFESSORA IVANY', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'JOSIVAL MOREIRA', cargo: 'Vereador', partido: 'PP', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'MARIA CLARA GOMES', cargo: 'Vereador', partido: 'PL', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'PROFESSORA CIDA GONÇALVES', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'LUIS PAULO', cargo: 'Vereador', partido: 'SOLIDARIEDADE', situacao: 'ELEITO POR QP' },
+        { nome_urna: 'RAFAEL OCTAVIANO', cargo: 'Vereador', partido: 'PL', situacao: 'ELEITO POR MÉDIA' },
+        { nome_urna: 'GABRIEL LUIZ', cargo: 'Vereador', partido: 'PP', situacao: 'ELEITO POR MÉDIA' }
       ]
     },
     'curitiba:PR': {
       municipio: { nome: 'Curitiba', uf: 'PR', codigo_ibge: '4106902', codigo_tse: '75353', mesorregiao: 'Metropolitana de Curitiba' },
+      resumo_monetario: {
+        moeda: 'BRL',
+        pib_municipal_brl: 98003704000.0,
+        pib_per_capita_brl: 55247.45,
+        receita_orcamentaria_anual_brl: 13542890112.45,
+        despesa_orcamentaria_empenhada_brl: 12980450321.18
+      },
       prefeito: { nome_urna: 'EDUARDO PIMENTEL', cargo: 'Prefeito', partido: 'PSD', numero_urna: 55, situacao: 'ELEITO' },
       vice_prefeito: { nome_urna: 'PAULO MARTINS', cargo: 'Vice-Prefeito', partido: 'PL', numero_urna: 55, situacao: 'ELEITO' },
       vereadores: [
         { nome_urna: 'JAIRO MARCELINO', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'MARCELO FACHINELO', cargo: 'Vereador', partido: 'PODEMOS', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'INDIARA BARBOSA', cargo: 'Vereador', partido: 'NOVO', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'GIORGIA PRATES', cargo: 'Vereador', partido: 'PT', situacao: 'ELEITO POR QP' }
+        { nome_urna: 'INDIARA BARBOSA', cargo: 'Vereador', partido: 'NOVO', situacao: 'ELEITO POR QP' }
       ]
     },
     'maringa:PR': {
       municipio: { nome: 'Maringá', uf: 'PR', codigo_ibge: '4115200', codigo_tse: '76910', mesorregiao: 'Norte Central Paranaense' },
+      resumo_monetario: {
+        moeda: 'BRL',
+        pib_municipal_brl: 22656732000.0,
+        pib_per_capita_brl: 55312.8,
+        receita_orcamentaria_anual_brl: 2894510230.9,
+        despesa_orcamentaria_empenhada_brl: 2710884120.4
+      },
       prefeito: { nome_urna: 'SILVIO BARROS', cargo: 'Prefeito', partido: 'PP', numero_urna: 11, situacao: 'ELEITO' },
       vice_prefeito: { nome_urna: 'SANDRA JACOVÓS', cargo: 'Vice-Prefeito', partido: 'PL', numero_urna: 11, situacao: 'ELEITO' },
       vereadores: [
         { nome_urna: 'DELEGADO LUIZ ALVES', cargo: 'Vereador', partido: 'PL', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'MARIO HOSSOKAWA', cargo: 'Vereador', partido: 'PP', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'FLÁVIO MANTOVANI', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' }
-      ]
-    },
-    'sao paulo:SP': {
-      municipio: { nome: 'São Paulo', uf: 'SP', codigo_ibge: '3550308', codigo_tse: '71072', mesorregiao: 'Metropolitana de São Paulo' },
-      prefeito: { nome_urna: 'RICARDO NUNES', cargo: 'Prefeito', partido: 'MDB', numero_urna: 15, situacao: 'ELEITO' },
-      vice_prefeito: { nome_urna: 'CORONEL MELLO ARAUJO', cargo: 'Vice-Prefeito', partido: 'PL', numero_urna: 15, situacao: 'ELEITO' },
-      vereadores: [
-        { nome_urna: 'LUCAS PAVANATO', cargo: 'Vereador', partido: 'PL', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'ANA CAROLINA OLIVEIRA', cargo: 'Vereador', partido: 'PODEMOS', situacao: 'ELEITO POR QP' },
-        { nome_urna: 'LUNA ZARATTINI', cargo: 'Vereador', partido: 'PT', situacao: 'ELEITO POR QP' }
+        { nome_urna: 'MARIO HOSSOKAWA', cargo: 'Vereador', partido: 'PP', situacao: 'ELEITO POR QP' }
       ]
     }
   };
@@ -174,16 +376,17 @@ window.TP = window.TP || {};
     return c2 === Number(d[10]);
   }
 
-  function maskCpf(raw) {
-    var d = cleanDigits(raw);
-    if (d.length !== 11) return '***.***.***-**';
-    return '***.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-**';
-  }
-
   function formatCnj(raw) {
     var d = cleanDigits(raw);
     if (d.length !== 20) return null;
-    return d.slice(0, 7) + '-' + d.slice(7, 9) + '.' + d.slice(9, 13) + '.' + d.slice(13, 14) + '.' + d.slice(14, 16) + '.' + d.slice(16, 20);
+    var seq = d.slice(0, 7);
+    var dd = d.slice(7, 9);
+    var year = Number(d.slice(9, 13));
+    var j = Number(d.slice(13, 14));
+    var tr = Number(d.slice(14, 16));
+    var orig = d.slice(16, 20);
+    if (year < 1980 || year > 2099 || j === 0 || tr === 0) return null;
+    return seq + '-' + dd + '.' + d.slice(9, 13) + '.' + d.slice(13, 14) + '.' + d.slice(14, 16) + '.' + orig;
   }
 
   function simResult(status, method, route, body) {
@@ -346,26 +549,61 @@ window.TP = window.TP || {};
         ok: false,
         status: 422,
         title: 'Validation error',
-        detail: "Informe ao menos 2 caracteres em 'q' (descrição do produto ou código NCM)."
+        detail: "Informe ao menos 2 caracteres em 'q' (descrição comercial/técnica ou código NCM)."
       });
     }
-    var tokens = norm.split(' ').filter(Boolean);
-    var matches = STATIC_NCM_CATALOG.filter(function (entry) {
-      var hay = normalizeText(entry.descricao + ' ' + entry.hierarquia.capitulo.descricao + ' ' + entry.hierarquia.posicao.descricao);
-      var codeMatch = digits && entry.codigo_numerico.indexOf(digits) === 0;
-      var textMatch = tokens.length && tokens.every(function (t) { return hay.indexOf(t) >= 0; });
-      return codeMatch || textMatch;
+
+    var sugestoes = [];
+    var decisoes = [];
+    var expandedTerms = [];
+    var boostedCodes = {};
+    var queryTokens = norm.split(' ').filter(Boolean);
+
+    STATIC_CLASSIF_THESAURUS.forEach(function (rule) {
+      var hit = rule.triggers.some(function (tr) {
+        return tr.indexOf(' ') >= 0 ? norm.indexOf(tr) >= 0 : queryTokens.indexOf(tr) >= 0;
+      });
+      if (hit) {
+        rule.expandedTerms.forEach(function (t) { expandedTerms.push(t); });
+        rule.sugestoes.forEach(function (s) {
+          sugestoes.push(s);
+          boostedCodes[cleanDigits(s.codigo_ncm)] = true;
+        });
+        rule.decisoes.forEach(function (d) {
+          decisoes.push(d);
+          if (d.codigo_ncm) boostedCodes[cleanDigits(d.codigo_ncm)] = true;
+        });
+      }
     });
+
+    var matches = STATIC_NCM_CATALOG.filter(function (entry) {
+      var subDesc = entry.hierarquia.subposicao ? entry.hierarquia.subposicao.descricao : '';
+      var hay = normalizeText(
+        entry.descricao + ' ' + entry.hierarquia.capitulo.descricao + ' ' +
+        entry.hierarquia.posicao.descricao + ' ' + subDesc
+      );
+      var codeMatch = digits && entry.codigo_numerico.indexOf(digits) === 0;
+      var textMatch = queryTokens.length && queryTokens.every(function (t) { return hay.indexOf(t) >= 0; });
+      var boostMatch = Boolean(boostedCodes[entry.codigo_numerico]);
+      return codeMatch || textMatch || boostMatch;
+    });
+
     return simResult(200, 'GET', route, {
       ok: true,
       data: {
         consultado_em: new Date().toISOString(),
-        fonte: 'Portal Único Siscomex — Tabela Oficial NCM (SH-2022)',
-        fonte_modo: 'simulacao_estatica_pages',
+        fonte: 'Portal Único Siscomex — Classif (Nomenclatura NCM + Decisões COSIT/COANA + Sugestões)',
+        fonte_modo: 'contingencia_estatica_classif',
         termo_busca: raw,
         termo_normalizado: norm,
+        termos_expandidos: expandedTerms,
         total_encontrado: matches.length,
-        resultados: matches
+        resultados: matches,
+        nomenclaturas: matches,
+        total_decisoes: decisoes.length,
+        decisoes: decisoes,
+        total_sugestoes: sugestoes.length,
+        sugestoes: sugestoes
       }
     });
   }
@@ -386,26 +624,51 @@ window.TP = window.TP || {};
     }
     var profile = STATIC_MUNICIPALITIES[normCity + ':' + cleanUf];
     if (!profile) {
-      profile = {
-        municipio: { nome: rawCity, uf: cleanUf, codigo_ibge: '0000000', codigo_tse: '00000', observacao: 'Amostra estática — suba o backend Python para consulta online completa IBGE/TSE.' },
-        prefeito: { nome_urna: 'CONSULTA ONLINE REQUER BACKEND ATIVO', cargo: 'Prefeito', partido: 'PSD', situacao: 'ELEITO' },
-        vice_prefeito: { nome_urna: 'VICE-PREFEITO ELEITO', cargo: 'Vice-Prefeito', partido: 'MDB', situacao: 'ELEITO' },
-        vereadores: [
-          { nome_urna: 'VEREADOR 01 (MODO ESTÁTICO)', cargo: 'Vereador', partido: 'PSD', situacao: 'ELEITO POR QP' }
-        ]
-      };
+      return simResult(503, 'GET', route, {
+        ok: false,
+        status: 503,
+        code: 'BACKEND_REQUIRED_FOR_CITY',
+        title: 'Backend Python Necessário para Consulta Municipal Dinâmica',
+        detail: 'Em hospedagem estática, apenas snapshots verificados (Paranavaí/PR, Maringá/PR, Curitiba/PR) estão embarcado localmente. Conecte o backend Python para consultar qualquer município brasileiro via IBGE + Siconfi + TSE.'
+      });
     }
     return simResult(200, 'GET', route, {
       ok: true,
       data: {
         consultado_em: new Date().toISOString(),
-        fonte: 'IBGE API de Localidades v1 + TSE Dados Abertos (DivulgaCandContas 2024)',
-        fonte_modo: 'simulacao_estatica_pages',
+        unidade_moeda: 'BRL',
+        moeda_padrao: 'BRL',
+        fonte: 'IBGE (Agregados 5938 + Pesquisas) + Tesouro Nacional Siconfi (DCA) + TSE DivulgaCandContas 2024',
+        fonte_modo: 'contingencia_estatica_verificada',
         mandato: '2025-2028',
         municipio: profile.municipio,
+        resumo_monetario: profile.resumo_monetario,
+        indicadores_ibge: profile.indicadores_ibge || null,
+        execucao_orcamentaria_siconfi: profile.execucao_orcamentaria_siconfi || null,
+        financas_eleitorais_tse: profile.financas_eleitorais_tse || null,
         executivo: { prefeito: profile.prefeito, vice_prefeito: profile.vice_prefeito },
         legislativo: { total_vereadores_listados: profile.vereadores.length, vereadores: profile.vereadores }
       }
+    });
+  }
+
+  function buildCaptchaRequiredResponse(method, route) {
+    return simResult(422, method, route, {
+      ok: false,
+      type: 'about:blank',
+      status: 422,
+      code: 'CAPTCHA_REQUIRED',
+      title: 'Desafio CAPTCHA Obrigatório no PROJUDI',
+      detail: 'A Consulta Pública do PROJUDI TJPR exige validação humana reCAPTCHA (g-recaptcha-response) e backend Python ativo para sessão HTTP real. Nenhum dado processual sintético ou mock é retornado.',
+      portal_url: 'https://consulta.tjpr.jus.br/projudi_consulta/',
+      form_url: 'https://consulta.tjpr.jus.br/projudi_consulta/processo/consultaPublica.do?actionType=iniciar',
+      recaptcha_callback: 'executaRecaptchaPBC_actre_consulta_publica',
+      dados_sinteticos_ou_mock: false,
+      instructions: [
+        '1. Suba o backend Python (/api/v1) para habilitar a sessão HTTP real com consulta.tjpr.jus.br.',
+        '2. Acesse o formulário público do PROJUDI TJPR e resolva o desafio Google reCAPTCHA para obter g-recaptcha-response.',
+        '3. Envie captcha_token (e opcionalmente session_cookie JSESSIONID) na requisição.'
+      ]
     });
   }
 
@@ -413,44 +676,27 @@ window.TP = window.TP || {};
     if (utils && utils.sleep) await utils.sleep(45);
     var body = payload || {};
     var route = '/api/v1/projudi/processos/consulta';
-    if (!isValidCpf(body.cpf)) {
+    var digits = cleanDigits(body.cpf);
+    if (digits.length !== 14 && !isValidCpf(body.cpf)) {
       return simResult(422, 'POST', route, {
         ok: false,
         status: 422,
+        code: 'INVALID_DOCUMENT',
         title: 'Validation error',
-        detail: 'CPF inválido: verifique os 11 dígitos e os dígitos verificadores.'
+        detail: 'CPF/CNPJ inválido: verifique os dígitos verificadores.'
       });
     }
     var tribunal = String(body.tribunal || 'TJPR').toUpperCase();
-    return simResult(200, 'POST', route, {
-      ok: true,
-      data: {
-        consultado_em: new Date().toISOString(),
-        tribunal: tribunal,
-        cpf_mascarado: maskCpf(body.cpf),
-        modo_execucao: 'sandbox_demonstracao',
-        politica_privacidade: 'LGPD_MASKED_PUBLIC_RECORDS_ONLY',
-        total_processos: 2,
-        processos: [
-          {
-            numero_processo: '0001234-42.2024.8.16.0130',
-            tribunal: tribunal,
-            classe: 'Procedimento Comum Cível',
-            assunto: 'Indenização por Dano Material / Inadimplemento Contratual',
-            vara_comarca: '1ª Vara Cível e da Fazenda Pública de Paranavaí — PR',
-            situacao: 'Ativo — Concluso para Sentença'
-          },
-          {
-            numero_processo: '0008421-18.2025.8.16.0001',
-            tribunal: tribunal,
-            classe: 'Cumprimento de Sentença',
-            assunto: 'Repetição de Indébito Tributário / Tarifa Bancária',
-            vara_comarca: '4ª Vara Cível de Curitiba — PR',
-            situacao: 'Ativo — Fase de Cumprimento / Penhora Online'
-          }
-        ]
-      }
-    });
+    if (tribunal !== 'TJPR') {
+      return simResult(422, 'POST', route, {
+        ok: false,
+        status: 422,
+        code: 'UNSUPPORTED_COURT',
+        title: 'Validation error',
+        detail: 'Conector real configurado exclusivamente para o PROJUDI do TJPR.'
+      });
+    }
+    return buildCaptchaRequiredResponse('POST', route);
   }
 
   async function simulatedProjudiProcesso(numero) {
@@ -461,33 +707,12 @@ window.TP = window.TP || {};
       return simResult(422, 'GET', route, {
         ok: false,
         status: 422,
+        code: 'INVALID_CNJ',
         title: 'Validation error',
-        detail: 'Número de processo inválido. Use o padrão CNJ de 20 dígitos (NNNNNNN-DD.AAAA.J.TR.OOOO).'
+        detail: 'Número de processo inválido segundo o módulo 97 do CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO).'
       });
     }
-    return simResult(200, 'GET', route, {
-      ok: true,
-      data: {
-        consultado_em: new Date().toISOString(),
-        modo_execucao: 'sandbox_demonstracao',
-        numero_processo: cnj,
-        tribunal: 'TJPR',
-        classe: 'Procedimento Comum Cível',
-        assunto_principal: 'Indenização por Dano Material / Inadimplemento Contratual',
-        comarca: 'Comarca de Paranavaí — PR',
-        vara: '1ª Vara Cível e da Fazenda Pública de Paranavaí',
-        situacao: 'Ativo — Concluso para Sentença',
-        partes: [
-          { polo: 'ATIVO', tipo_participacao: 'Autor', nome: 'Comercial Agrícola Noroeste Ltda.', documento_mascarado: '14.***.***/0001-**' },
-          { polo: 'PASSIVO', tipo_participacao: 'Réu', nome: 'J. R. S. Logística Integrada', documento_mascarado: '***.444.777-**' }
-        ],
-        movimentacoes: [
-          { sequencia: 1, data: '2024-03-18', tipo: 'Distribuição', descricao: 'Distribuído por sorteio automático à 1ª Vara Cível de Paranavaí.' },
-          { sequencia: 2, data: '2024-04-02', tipo: 'Decisão Interlocutória', descricao: 'Deferida parcialmente tutela de urgência e determinada citação.' },
-          { sequencia: 3, data: '2026-10-29', tipo: 'Conclusão', descricao: 'Autos conclusos ao magistrado para prolação de sentença de mérito.' }
-        ]
-      }
-    });
+    return buildCaptchaRequiredResponse('GET', route);
   }
 
   async function simulatedProjudiResumo(numero, payload) {
@@ -499,27 +724,33 @@ window.TP = window.TP || {};
         ok: false,
         status: 422,
         title: 'Validation error',
-        detail: 'Número de processo inválido. Use o padrão CNJ de 20 dígitos (NNNNNNN-DD.AAAA.J.TR.OOOO).'
+        detail: 'Número de processo inválido segundo o módulo 97 do CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO).'
       });
     }
-    var extra = payload && payload.texto_processo ? String(payload.texto_processo) : '';
+    var extra = payload && payload.texto_processo ? String(payload.texto_processo).trim() : '';
+    if (!extra) {
+      return buildCaptchaRequiredResponse('POST', route);
+    }
     var norm = normalizeText(extra);
     var hasUrgencia = norm.indexOf('urgencia') >= 0 || norm.indexOf('liminar') >= 0;
+    var hasSentenca = norm.indexOf('sentenca') >= 0 || norm.indexOf('julgad') >= 0;
+    var fase = hasSentenca ? 'julgamento_sentenca' : 'conhecimento_instrucao';
     return simResult(200, 'POST', route, {
       ok: true,
       data: {
         gerado_em: new Date().toISOString(),
         status: 'ready_for_llm',
+        origem_dados: 'corpus_fornecido_pelo_cliente',
         numero_processo: cnj,
-        fase_processual: 'julgamento_sentenca',
+        fase_processual: fase,
         metricas: {
-          total_movimentacoes: 3,
+          total_movimentacoes: 1,
           possui_tutela_urgencia: hasUrgencia,
-          possui_sentenca: true,
+          possui_sentenca: hasSentenca,
           prioridade_triagem: hasUrgencia ? 'alta' : 'media',
-          score_prioridade: hasUrgencia ? 70 : 45
+          score_prioridade: hasUrgencia ? 70 : 40
         },
-        resumo_deterministico: 'Processo ' + cnj + ' em fase de julgamento_sentenca. Triagem determinística concluída e pronta para sumarização LLM/n8n.',
+        resumo_deterministico: 'Processo ' + cnj + ' classificado em ' + fase + ' exclusivamente a partir do texto informado pelo cliente.',
         llm_placeholder: {
           status: 'ready_for_llm',
           provider_configured: false,

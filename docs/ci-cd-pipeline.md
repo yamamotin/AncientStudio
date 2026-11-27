@@ -1,9 +1,13 @@
 # CI/CD & Docker pipeline — painel real, cache e segurança frontend
 
 Documento de referência da seção `[ LIVE CI/CD & DOCKER PIPELINE ]` do portfólio.
-Cobre (1) a arquitetura real dos workflows do repositório, (2) como o frontend consome
-os metadados públicos do GitHub Actions, (3) cache e rate-limit, (4) os controles de
-segurança aplicados no cliente e (5) como validar tudo localmente.
+Cobre (1) a arquitetura real dos workflows do repositório, (2) o resumo executivo
+orientado ao cliente e o detalhamento colapsável, (3) como o frontend consome os
+metadados públicos do GitHub Actions, (4) cache e rate-limit, (5) os controles de
+segurança aplicados no cliente e (6) como validar tudo localmente.
+
+Versão renderizada (é o alvo do link `[ documentação técnica ]` do portfólio):
+`docs/ci-cd-pipeline.html`. O Markdown continua sendo a fonte.
 
 > **Escopo:** somente metadados públicos, somente leitura. Nenhum token, segredo ou
 > credencial é embutido, solicitado ou enviado pelo frontend.
@@ -43,7 +47,7 @@ Arquivo: `assets/js/pipeline.js` (exposto como `TP.pipeline`).
 Somente dois endpoints públicos, sem autenticação:
 
 ```text
-GET https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=6
+GET https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=10
 GET https://api.github.com/repos/yamamotin/AncientStudio/actions/workflows
 ```
 
@@ -53,6 +57,7 @@ GET https://api.github.com/repos/yamamotin/AncientStudio/actions/workflows
 - Nenhum header `Authorization` existe no arquivo.
 - `actions/workflows` é consultado no máximo uma vez por dia (24 h, nomes e paths mudam
   pouco); `actions/runs` respeita o TTL de 5 minutos.
+- Busca até 10 execuções, renderiza no máximo 6 (`TP.pipeline.config.maxRuns`).
 
 Campos exibidos por execução, todos verificáveis no GitHub:
 
@@ -65,7 +70,7 @@ Campos exibidos por execução, todos verificáveis no GitHub:
 | Duração | `run_started_at` → `updated_at` | `Xs` ou `Xm Ys` |
 | Timestamp | `updated_at` | `YYYY-MM-DD HH:MM UTC` |
 | Número do run | `run_number` | `#N` |
-| Link do run | `html_url` | `<a>` apenas se passar na allowlist |
+| Link do run | `html_url` | no máximo **um** link allowlisted, na documentação técnica |
 
 ## 3. Cache, rate-limit e fallback informativo
 
@@ -79,8 +84,11 @@ Campos exibidos por execução, todos verificáveis no GitHub:
   na linha de status, e um `403`/`429` mostra a mensagem de limite com o horário de
   renovação.
 - **Fallback informativo:** em falha de rede, timeout ou rate-limit, o painel mantém os
-  últimos dados em cache (marcados como cache, com a idade em segundos) e sempre oferece
-  o link direto `https://github.com/yamamotin/AncientStudio/actions`.
+  últimos dados em cache (marcados como cache, com a idade em segundos) e informa quando
+  a API volta a responder. Links externos por execução não existem mais: a única URL
+  externa do painel é o link allowlisted da última execução, dentro da documentação
+  técnica, e a referência `https://github.com/yamamotin/AncientStudio/actions` no
+  `<noscript>`.
 - **Timeout:** `AbortController` com 8 s por requisição; o timer é sempre limpo no
   `finally`. A mesma regra vale para o resto do frontend: 10 s em `/api/v1`
   (`api-client.js`), 5 s no probe `api-status.json`, 4 s no dicionário i18n — nenhuma
@@ -89,9 +97,53 @@ Campos exibidos por execução, todos verificáveis no GitHub:
   desabilitado com `aria-busy="true"` durante a chamada e existe um cooldown de 4 s entre
   tentativas manuais (clique duplo ou repetido não gera tráfego extra).
 
-## 4. Segurança no cliente
+## 4. Monitor compacto orientado ao cliente
 
-### 4.1 Zero segredos
+A seção deixou de ser uma lista de links e virou uma **tela de monitoramento compacta**:
+
+- **Resumo executivo sempre visível** (`#pipeline-summary`, quatro cartões preenchidos
+  apenas com dados reais da API): última execução (`status · HH:MM UTC`), confiabilidade
+  (`sucessos/concluídas · %`), higiene das imagens Docker (última execução do
+  `vcr-cleanup.yml`, política das 3 imagens mais recentes) e quantidade de workflows
+  monitorados.
+- **Sem links repetidos por item:** cada linha da lista mostra nome, selo de status,
+  branch, SHA curto, duração e timestamp. O `[ abrir run ]` de cada execução e o botão
+  `[ open actions ]` foram removidos; sobrou apenas `[ atualizar ]`.
+- **Ruído interno filtrado:** execuções do `Auto-merge verified PRs` e conclusões
+  `skipped`/`cancelled` não entram no resumo nem na lista. Quando algo é filtrado, a nota
+  `#pipeline-filter-note` explica o critério (`pipeline.filtersNote`).
+- **Detalhamento colapsável:** o corpo (`#pipeline-body`) guarda a lista de execuções, a
+  nota de filtro, o `<noscript>` e o bloco `[ documentação técnica ]`. O painel abre
+  recolhido (`data-collapsed="true"`) para não empurrar o resto do portfólio.
+- **Sem fabricação de dados:** o cliente nunca inventa status, imagens ou contagens; se a
+  API não responde, os cartões mostram o último valor carregado ou `—`.
+
+A mesma política de altura compacta vale para as seções altas do portfólio: `#gateway` e
+`#scene` abrem recolhidas (o palco 3D continua renderizando, apenas recortado) e `#stack`,
+que é curta, abre expandida. O mecanismo é único:
+`[data-collapsible]` + `[data-collapse-toggle]` + `.collapse-body`.
+
+| Peça | Papel |
+| --- | --- |
+| `data-collapsible` / `data-collapsed` | marca a seção e o estado inicial |
+| `[data-collapse-toggle][aria-controls]` | botão `[ expandir ]` / `[ recolher ]` com `aria-expanded` |
+| `.collapse-body` | corpo limitado por `max-height` + gradiente; **nunca** `display:none` |
+| `body.inert` | remove foco/ordem de tabulação do conteúdo recolhido |
+| `TP.collapse` (`assets/js/main.js`) | aplica estado, traduz o rótulo e reage a `tp:languagechange` |
+
+Detalhes de implementação relevantes:
+
+- Recolher **não** destrói nem remede a cena 3D: o corpo é apenas recortado por
+  `max-height`, a engine mantém o mesmo contrato público (`engine-adapter.js`,
+  `ascii-engine.bundle.js`) e o `ResizeObserver` do adapter continua válido.
+- Entrar em fullscreen na cena chama `TP.collapse.expand(#scene)`, porque fullscreen é o
+  gesto explícito de "mostrar tudo".
+- Rótulos traduzidos em pt-br **e** en (`common.expand` / `common.collapse`), presentes nos
+  dois JSON e no dicionário embutido `BUNDLED`.
+
+## 5. Segurança no cliente
+
+### 5.1 Zero segredos
 
 - Nenhum `GITHUB_TOKEN`, `VERCEL_TOKEN`, chave de API ou credencial em `assets/js/**`,
   `index.html` ou dicionários.
@@ -112,7 +164,7 @@ Campos exibidos por execução, todos verificáveis no GitHub:
   dispara builds. O endpoint `POST /api/v1/pipeline/run` continua existindo apenas no
   backend legado, com seus próprios testes, sem uso pela interface.
 
-### 4.2 Proteção contra XSS e injeção de DOM
+### 5.2 Proteção contra XSS e injeção de DOM
 
 - Toda renderização usa `document.createElement` + `textContent`. Não existe
   `innerHTML`, `outerHTML`, `insertAdjacentHTML` ou `document.write` com dado externo.
@@ -126,8 +178,10 @@ Campos exibidos por execução, todos verificáveis no GitHub:
 - `sanitizeRun()` só aceita `status`/`conclusion` no formato `[a-z_]{3,24}`, SHA
   hexadecimal e timestamps ISO `YYYY-MM-DDTHH:MM:SSZ`; o resto é descartado.
 - Todo elemento externo criado recebe `target="_blank"` + `rel="noopener noreferrer"`.
+  O link da última execução (`#pipeline-last-run-link`) fica `hidden` até existir uma URL
+  que passe na allowlist; sem URL válida, `href`, `target` e `rel` são removidos.
 
-### 4.3 CSP e higiene de requisições
+### 5.3 CSP e higiene de requisições
 
 `index.html` declara, via `<meta http-equiv="Content-Security-Policy">`:
 
@@ -151,7 +205,29 @@ connect-src 'self' https://api.github.com; form-action 'self'; frame-src 'none'
 - `rel="noopener noreferrer"` em todos os links externos do HTML (LinkedIn, Actions,
   documentação).
 
-## 5. Validação
+## 6. Documentação: por que existe um HTML
+
+O link `[ documentação técnica ]` apontava para `docs/ci-cd-pipeline.md`. Servidores
+estáticos (`api/server.py` na Vercel e o Pages) entregam `.md` como
+`text/markdown`/`text/plain`: o navegador baixa o arquivo ou mostra texto cru, sem índice,
+sem tabelas. Não havia router JS nem renderer de Markdown no cliente — interceptar o link
+não resolveria nada.
+
+Correção aplicada em duas partes:
+
+1. **Formato:** `docs/ci-cd-pipeline.html` é uma renderização estática, autocontida (css
+   inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com o
+   Markdown. O link do painel (`#pipeline-doc-link`) aponta para `docs/ci-cd-pipeline.html`,
+   um caminho relativo que funciona em `file://`, no GitHub Pages (`/AncientStudio/docs/...`)
+   e na Vercel. A página inclui um link de volta para o Markdown fonte no GitHub.
+2. **Empacotamento:** `docs/` não era publicado em nenhum dos dois hosts — o staging do
+   Pages copiava só `index.html robots.txt sitemap.xml api-status.json assets` e o
+   `Dockerfile` usado pela Vercel copiava apenas `assets` e `api`. Agora `pages.yml` copia
+   `docs` para `_site` (com `test -f _site/docs/ci-cd-pipeline.html`) e o `Dockerfile` faz
+   `COPY docs ./docs` (com `test -f ./docs/ci-cd-pipeline.html`), então o mesmo caminho
+   relativo resolve nos três ambientes.
+
+## 7. Validação
 
 ```bash
 node --check assets/js/*.js
@@ -169,7 +245,11 @@ Cobertura específica do painel em `tests/pipeline-panel.test.js`:
    caractere nulo, nome longo);
 4. cálculo de duração e validação de timestamps;
 5. títulos das seções e proibição de `playground|simulator|simulador|sandbox` em pt-br/en;
-6. política CSP e `referrer` no `index.html`.
+6. política CSP e `referrer` no `index.html`;
+7. ausência de links por execução (`pipeline.runLink` / `pipeline.openActions`), presença
+   do resumo executivo e do controle de recolher/expandir;
+8. paridade das novas chaves i18n (`common.expand`, `common.collapse`,
+   `pipeline.summary.*`) entre pt-br, en e o dicionário embutido.
 
 ---
 
@@ -180,6 +260,16 @@ only public, read-only GitHub Actions metadata for `yamamotin/AncientStudio`
 (`/actions/runs?per_page=6` and `/actions/workflows`), renders workflow name, branch,
 short SHA, status/conclusion, duration, UTC timestamp and the direct run link, and never
 sends credentials (`credentials: 'omit'`, no `Authorization`).
+
+The section is now a compact, collapsible monitoring screen: an always-visible executive
+summary (latest run, reliability, Docker image hygiene, monitored workflows) plus a
+filtered run list inside a collapsed body, with a single `[ refresh ]` action and an
+`[ expand ]` / `[ collapse ]` control translated in every locale. Per-run `[ open run ]`
+links and the `[ open actions ]` button were removed on purpose.
+
+The technical documentation link now opens `docs/ci-cd-pipeline.html`, a self-contained
+static rendering served correctly by GitHub Pages and Vercel (raw `.md` was being
+downloaded as plain text). The Markdown file remains the source.
 
 A five-minute `localStorage` cache (validated again on read), an 8 s `AbortController`
 timeout, an in-flight lock plus a 4 s cooldown protect both the visitor and the public API
