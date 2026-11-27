@@ -285,7 +285,11 @@ export function extractAndPrepareGlbNodes(
     }
 
     mesh.castShadow = !isFoliage && !hasTransparentBlend;
-    mesh.receiveShadow = !hasTransparentBlend;
+    // The paired road meshes include a mirrored transform. Suppress possible
+    // shadow-map discontinuities at their join while preserving road markings.
+    const isRoad = /real_road|road|asphalt/i.test(matLabel);
+    mesh.receiveShadow = !hasTransparentBlend && !isRoad;
+    if (isRoad) mesh.castShadow = false;
 
     for (const rawMat of mats) {
       const mat = rawMat as THREE.MeshStandardMaterial;
@@ -305,7 +309,12 @@ export function extractAndPrepareGlbNodes(
       }
 
       if (/real_road|road|asphalt/i.test(name)) {
-        ensureSurfaceNormalMap(mat, proceduralNormals.asphalt, 0.78, 0.85);
+        // Mirrored transforms can change the tangent-space normal response across the join.
+        // Preserve the embedded map for ownership/disposal, but use the flat plane normals.
+        ensureSurfaceNormalMap(mat, proceduralNormals.asphalt, 0.0, 0.0);
+        mat.normalScale.set(0, 0);
+        mat.userData.__baseNormalScaleX = 0;
+        mat.userData.__baseNormalScaleY = 0;
         roads.push(mat);
       } else if (/concrete_pavement|tiles|material\.010/i.test(name)) {
         ensureSurfaceNormalMap(mat, proceduralNormals.pavement, 0.68, 0.82);
@@ -368,7 +377,7 @@ export function extractAndPrepareGlbNodes(
   // to `metalness = 1.0, roughness = 1.0` -> zero diffuse albedo without an envMap!).
   const protagonistMaterial = new THREE.MeshStandardMaterial({
     name: 'PlayerProtagonistMaterial',
-    color: new THREE.Color('#788A98'),
+    color: new THREE.Color('#55778A'),
     emissive: new THREE.Color('#2A4152'),
     emissiveIntensity: 0.06,
     roughness: 0.72,
@@ -392,6 +401,7 @@ export function extractAndPrepareGlbNodes(
         mesh.material = protagonistMaterial;
       } else if (!seenMats.has(stdMat.uuid)) {
         seenMats.add(stdMat.uuid);
+        stdMat.userData.__playerBaseColor = stdMat.color.clone();
         stdMat.metalness = Math.min(0.22, stdMat.metalness);
         stdMat.roughness = Math.min(0.55, Math.max(0.3, stdMat.roughness));
         ensureSurfaceNormalMap(stdMat, proceduralNormals.contourTrim, 0.38, 0.45);

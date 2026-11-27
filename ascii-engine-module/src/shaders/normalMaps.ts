@@ -259,8 +259,8 @@ export class NormalPassMaterialCache {
     const srcScaleX = candidate.normalScale ? Math.abs(candidate.normalScale.x) : 0.6;
     const srcScaleY = candidate.normalScale ? Math.abs(candidate.normalScale.y) : 0.6;
     // Attenuate micro-grain in Pass 2 so macro bevels/joints/grooves drive ASCII lighting cleanly without static
-    const macroScaleX = THREE.MathUtils.clamp(srcScaleX * 0.42, 0.14, 0.48);
-    const macroScaleY = THREE.MathUtils.clamp(srcScaleY * 0.42, 0.14, 0.48);
+    const macroScaleX = srcScaleX === 0 ? 0 : THREE.MathUtils.clamp(srcScaleX * 0.42, 0.14, 0.48);
+    const macroScaleY = srcScaleY === 0 ? 0 : THREE.MathUtils.clamp(srcScaleY * 0.42, 0.14, 0.48);
 
     const existing = this.bySourceUuid.get(source.uuid);
     if (existing && existing.sourceMap === normalMap) {
