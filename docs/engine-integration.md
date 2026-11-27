@@ -72,8 +72,8 @@ its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):
   pass with attached `SpotLight`s and `PointLight` illuminating asphalt and
   building facades, followed by **22s** hidden out of frame with `visible = false`).
 
-A 45°-counter-clockwise elevated 3/4 camera (`CameraFollowSystem`, `fov: 64°`,
-`offset: (10.6, 11.6, 10.6)`, inclined top-to-ground and pulled back to widen
+A 45°-counter-clockwise elevated 3/4 camera (`CameraFollowSystem`, `fov: 58°`,
+`offset: (10.3, 11.3, 10.3)`, inclined top-to-ground and pulled back to widen
 framing of the street, storefront facades, streetlamps and vehicle lane)
 accompanies `Player_Rig` smoothly (`lerp`) while respecting `setAutoOrbit` when
 toggled. `LineOfSightOcclusionSystem` (ECS priority `39`) dynamically inspects
@@ -81,19 +81,35 @@ the two foreground plaza trees (`Cidade_leaves_0_3` and `Cidade_leaves001_1_7`)
 and the hanging front sign (`Cidade_Plane052/053` + `Cylinder001..005`) without
 modifying `cena_completa.glb` on disk, clearing obstructing foreground meshes
 whenever they enter the camera-to-`Player_Rig` or central plaza sightline.
+`GlbSceneLoader` also restores diffuse/sculpted PBR response on `Player_Rig`
+(which ships with `material: undefined` / glTF `metalness = 1.0`) and
+`Carro_Grupo` (`PaletteMaterial001..004`), preserves all embedded glTF
+`normalTexture`s (`real_road`, `concrete_pavement`, `tiles`, `wall`, `hous4`,
+`roof`, `tireProtector`), synthesizes lightweight zero-CDN procedural
+tangent-space normal maps (`src/shaders/normalMaps.ts`: `asphalt`, `pavement`,
+`facade`, `contourTrim`) for flat surfaces lacking embedded normal maps, and
+tags alpha-blended billboard decals (`grass_medium_01`, `leavesfall`,
+`PaletteMaterial005`) with `skipNormalPass` so `AsciiPostProcessor` Pass 2
+(`normalTarget` via `NormalPassMaterialCache`) captures macro-filtered
+normal-mapped view-space normals without rectangular quad contour noise.
 Storefront facade lights (`StorefrontEastTransom`, `StorefrontWestTransom`,
 `StorefrontEastNeon`, `StorefrontWestNeon`, `KioskCanopyGlow`), streetlamp
 luminaires (`StreetLampGlobeWest/Center/East`), and the distant avenue beacon
-(`AvenueCyberBeacon`) cast warm amber and contained cyber-cyan reflections onto
-wet asphalt alongside `Carro_Grupo`'s headlights. The full-screen ASCII
-post-processing shader (`AsciiPostProcessor` + `asciiShader.ts`) combines
-sub-cell integrated luminance, 2-octave deterministic glyph-variety modulation
-(`glyphVarietyHash` over `o, u, s, a, $, 8, Q, =, -, ~, ^, *`), linearized depth,
-dual 3x3 Sobel contours (`tNormal` + `tDepth`), 6-tap vertical rippled ground
-reflections (`sampleGroundReflection`), and contained typographic light halos
-without blown-out blocks or oversaturation. The adapter maps the three UI buttons
-(`day`, `night`, `rain`) to lighting, fog, car headlights, pavement wetness and
-3D rain particles.
+(`AvenueCyberBeacon`) cast warm amber and contained cyber-cyan pools surrounded
+by dark breathing shadows. The full-screen ASCII post-processing shader
+(`AsciiPostProcessor` + `asciiShader.ts`) extracts view-space key/rim
+directional light vectors (`uKeyLightViewDir`, `uRimLightViewDir`) and true
+world-up (`uWorldUpViewDir`) each frame to drive normal-mapped directional
+incidence (`N·L`, back-facing planar self-shadowing, Blinn-Phong `N·H` specular
+glints, and Fresnel rim lighting), sub-cell integrated luminance, dark-breathing
+shadow gating (`DEFAULT_ASCII_RAMP` leading spaces + `shadowFloor`), grounded 3D
+shaded tonal underlayers (`smoothBackdrop` + `tonedUnderlayer`), foreground
+depth-silhouette separation moats (`silhouetteOuterMoat` /
+`silhouetteInnerRim`), orientation-coherent glyph clusters (`glyphVarietyHash`),
+normal-perturbed vertical rippled ground reflections (`sampleGroundReflection`),
+and contained typographic light halos without blown-out blocks or noisy static.
+The adapter maps the three UI buttons (`day`, `night`, `rain`) to lighting, fog,
+car headlights, pavement wetness, normal-map relief scale, and 3D rain particles.
 [`docs/changelog-2026-11-25.md`](changelog-2026-11-25.md) records the earlier
 engine-side tools added on that date.
 

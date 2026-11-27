@@ -26,29 +26,27 @@ O pacote entrega dois modos nativos (`mode: 'playground' | 'mascot'`) sobre o me
 │   │   ├── ResolutionController.ts   # Tiers HiDPI (DPR <= 2.0 / 1.5), guardrails de colunas e transição 5:8
 │   │   └── defaultConfig.ts          # Rampa ASCII, paleta base e merge imutável preservando fov
 │   ├── /ecs/
-│   │   ├── World.ts                  # Store enxuto de entidades e 11 componentes puros de dados/estado
-│   │   ├── EntityBlueprint.ts        # EntityBlueprintRegistry declarativo para prefabs reutilizáveis
-│   │   └── SystemRunner.ts           # Pipeline ECS ordenado por prioridade numérica determinística
+│   │   ├── World.ts                  # Store enxuto de entidades e componentes puros de dados/estado
+│   │   └── SystemRunner.ts           # Contratos EcsSystem/SystemContext e sistemas ECS ordenados por prioridade
 │   ├── /world/
-│   │   ├── MapLoader.ts              # Definição única consolidada do cenário ('cyberpunk-citadel')
-│   │   ├── MascotStageBuilder.ts     # Palco minimalista ASCII (#13222E fundo + #1D2B36 piso + sombra/reflexo)
-│   │   ├── PlaygroundSceneBuilder.ts # Avenida cyberpunk em camadas, sombras PCF e atmosferas (day/night/rain)
-│   │   └── SceneComposerKit.ts       # SceneComposerKit + SceneDepthRig + NeonMaterialBank compartilhado
+│   │   ├── GlbSceneLoader.ts         # Loader Draco/WebP self-hosted, calibração de normal maps e NLA clips
+│   │   ├── SceneGlbLoader.ts         # Loader com pool de Web Workers, métricas de telemetria e .dispose()
+│   │   ├── UrbanGlbSceneBuilder.ts   # Iluminação urbana, calçada (SidewalkBounds), tráfego 30s e day/night/rain
+│   │   └── MascotStageBuilder.ts     # Palco minimalista ASCII (#13222E fundo + #1D2B36 piso + sombra/reflexo)
 │   ├── /entities/
-│   │   ├── TuxEntityFactory.ts       # Mascote Linux Tux 3D articulado (malhas suaves + TuxShowcasePlinth opt-in)
-│   │   └── PlaygroundEntityFactory.ts# Blueprints ECS: holo-reactor, neon-pylon, wind-banner, hover-drone e netrunner
+│   │   └── TuxEntityFactory.ts       # Mascote Linux Tux 3D articulado (malhas suaves + TuxShowcasePlinth opt-in)
 │   ├── /animation/
-│   │   └── AnimationSystem.ts        # Respiração orgânica, flutuação e articulação de membros/asas/sobretudo
+│   │   └── AnimationSystem.ts        # Cross-fade NLA (Idle/Walking/Casting) e animação procedural do mascote
 │   ├── /vfx/
-│   │   └── VfxController.ts          # Parallax/pan suave da câmera, luz de cursor e chuva/vapor sem alocação por frame
+│   │   └── VfxController.ts          # Respiração da câmera do mascote, luz de cursor e partículas 3D de chuva
 │   ├── /input/
 │   │   ├── PointerInput.ts           # Rastreamento passivo ({ passive: true }, pan-y) de mouse e toque
-│   │   └── KeyboardInput.ts          # Teclado opt-in isolado por foco e seguro para formulários/atalhos
+│   │   └── KeyboardInput.ts          # Teclado WASD + E isolado por foco e seguro para formulários/atalhos
 │   ├── /shaders/
-│   │   ├── AsciiPostProcessor.ts     # Pipeline multi-pass (Scene + Depth -> Bloom H/V -> Composite ASCII 5:8)
-│   │   ├── asciiShader.ts            # Shaders GLSL sem grade (Sobel, lighten block ~35% e ramo uMascotStudio)
-│   │   ├── waterShader.ts            # Shader GLSL da avenida (asfalto seco/úmido/alagado + PCF 5-tap)
-│   │   ├── glyphAtlas.ts             # Gerador de atlas tipográfico 5:8 em Canvas 2D com blocos ░▒▓█ full-bleed
+│   │   ├── AsciiPostProcessor.ts     # Pipeline multi-pass (Scene + Depth -> Normal-Map Pass -> Bloom -> ASCII 5:8)
+│   │   ├── normalMaps.ts             # Normal maps procedurais zero-CDN, NormalPassMaterialCache e vetores de luz
+│   │   ├── asciiShader.ts            # Iluminação direcional por normais (N·L, N·H, Fresnel rim), Sobel e reflexos
+│   │   ├── glyphAtlas.ts             # Gerador de atlas tipográfico 5:8 em Canvas 2D com pontilhado Bayer
 │   │   └── objectOutline.ts          # API sob demanda de contorno por objeto (applyObjectOutline)
 │   ├── /types/
 │   │   └── index.ts                  # Contratos TypeScript estritos (EngineConfig, Stats, Outline, Resolution)
@@ -71,17 +69,21 @@ Toda nova implementação, cena, entidade, sistema, *shader* ou refatoração de
 
 ### 1. Arquitetura Modular Inspirada em ECS Enxuto (Separação de Responsabilidades)
 
-- **Componentes exclusivamente de dados/estado (`src/ecs/World.ts`)**: componentes (`Transform`, `Velocity`, `RotationTarget`, `AnimationState`, `Renderable`, `NeonBeacon`, `PatrolPath`, `WindSway`, `DepthLayer`, `LifecycleTag`, `InputState`, `NavigationTarget`, `CameraFollow` e futuros) devem conter apenas estado plano/estruturado — nunca métodos de negócio, *listeners* de DOM ou chamadas diretas ao renderizador.
+- **Componentes exclusivamente de dados/estado (`src/ecs/World.ts`)**: componentes (`Transform`, `Velocity`, `RotationTarget`, `AnimationState`, `CharacterAnimation`, `SidewalkBounds`, `TrafficCycle`, `ForegroundOccluders`, `Renderable`, `DepthLayer`, `LifecycleTag`, `InputState`, `NavigationTarget`, `CameraFollow`) devem conter apenas estado estruturado — nunca *listeners* de DOM ou chamadas diretas ao renderizador.
 - **Sistemas focados e ordenados deterministicamente (`SystemRunner.ts` / `AnimationSystem.ts`)**: cada sistema cumpre uma única responsabilidade sobre consultas `world.query(...)`, respeitando a ordem explícita de prioridades:
-  - `mode: 'playground'`: `InputSystem (10)` → `PatrolSystem (15)` → `MovementRotationSystem (20)` → `WindSystem (25)` → `AnimationSystem (30)` → `NeonPulseSystem (35)` → `CameraFollowSystem (38)` → `RenderSyncSystem (40)`.
-  - `mode: 'mascot'`: apenas `MovementRotationSystem (20)` → `AnimationSystem (30)` → `RenderSyncSystem (40)` (sem `InputSystem`, `PatrolSystem`, `WindSystem`, `NeonPulseSystem` ou `CameraFollowSystem`).
-- **Builders, Factories e Blueprints quando aplicável (`src/world/`, `src/entities/`, `EntityBlueprint.ts`)**: construção de hierarquias `THREE.Object3D`, iluminação de palco e registro inicial de componentes ficam isolados em `*EntityFactory`, `*SceneBuilder`, `SceneComposerKit` e `EntityBlueprintRegistry`.
-- **Proibição de acoplamento no renderizador ASCII**: nunca embutir lógica de input, animação de personagens/objetos ou controle de câmera dentro de `AsciiPostProcessor` ou dos *shaders* GLSL (`asciiShader.ts`, `glyphAtlas.ts`). O pipeline ASCII consome exclusivamente os *render targets* (`tScene`, `tDepth`, `tBloom`) e *uniforms* declarativos de configuração.
+  - `mode: 'playground'`: `InputSystem (10)` → `TrafficFlowSystem (15)` → `MovementRotationSystem (20)` → `CharacterAnimationSystem (28)` → `AnimationSystem (30)` → `CameraFollowSystem (38)` → `LineOfSightOcclusionSystem (39)` → `RenderSyncSystem (40)`.
+  - `mode: 'mascot'`: apenas `MovementRotationSystem (20)` → `AnimationSystem (30)` → `RenderSyncSystem (40)`.
+- **Builders, Loaders e Factories (`src/world/`, `src/entities/`)**: carregamento Draco/WebP, calibração de *normal maps*, construção de iluminação de palco e registro inicial de componentes ficam isolados em `GlbSceneLoader`, `SceneGlbLoader`, `UrbanGlbSceneBuilder`, `MascotStageBuilder` e `TuxEntityFactory`.
+- **Proibição de acoplamento no renderizador ASCII**: nunca embutir lógica de input, animação de personagens/objetos ou controle de câmera dentro de `AsciiPostProcessor` ou dos *shaders* GLSL (`asciiShader.ts`, `normalMaps.ts`, `glyphAtlas.ts`). O pipeline ASCII consome exclusivamente os *render targets* (`tScene`, `tNormal`, `tDepth`, `tBloom`) e *uniforms* declarativos/vetoriais de cena.
 - **Sem *over-engineering* de motor AAA**: manter o ECS enxuto baseado em `Map<EntityId, Component>`, evitando *containers* de injeção/reflexão, compiladores de arquétipos por *bitmask*, motores de física pesados ou abstrações especulativas sem uso real nas cenas do módulo.
 
-### 2. Coerência Estilística ASCII Integral e Higiene de Código Residual
+### 2. Coerência Estilística ASCII Integral, Normais de Superfície e Higiene de Código Residual
 
-- **Fidelidade ASCII em 100% da cena**: personagem/mascote, cenário arquitetônico, adereços, piso, plano de fundo (*backdrop*), sombras projetadas, reflexos planares e efeitos atmosféricos devem atravessar e ser calibrados para a quantização ASCII `5:8` sem linhas de grade (`glyphAtlas.ts` + `asciiShader.ts`), preservando contornos estruturais Sobel (`/ \ | _ [ ]`) e textura tipográfica legível em todos os planos.
+- **Fidelidade ASCII em 100% da cena**: personagem/mascote, cenário arquitetônico, asfalto, calçada, veículo, piso, plano de fundo (*backdrop*), sombras projetadas, reflexos planares e efeitos atmosféricos devem atravessar e ser calibrados para a quantização ASCII `5:8` sem linhas de grade (`glyphAtlas.ts` + `asciiShader.ts`), preservando contornos estruturais Sobel (`/ \ | _`) e textura tipográfica legível sem chuvisco de ruído.
+- **Volume 3D guiado por normais e *normal maps***:
+  - Preservar todos os `normalTexture`s embutidos do `.glb` (`real_road`, `concrete_pavement`, `tiles`, `wall`, `hous4`, `roof`, `tireProtector`) e complementar superfícies planas sem mapa (`Player_Rig`, carroceria de `Carro_Grupo`, muros/postes lisos) com *normal maps* procedurais leves (`src/shaders/normalMaps.ts`, `DataTexture` `64×64` zero-CDN).
+  - No Pass 2 (`normalTarget`), usar `NormalPassMaterialCache` com escala macro controlada e exclusão estrita de malhas transparentes/VFX (`userData.skipNormalPass = true`) para alimentar `tNormal` com relevo real sem gerar granulação ruidosa de caracteres.
+  - No *shader* composto (`asciiShader.ts`), extrair os vetores direcionais de luz (`uKeyLightViewDir`, `uRimLightViewDir`) e vertical do mundo (`uWorldUpViewDir`) em *view space* para modular incidência difusa (`N·L`), auto-oclusão planar de faces opostas à luz, brilho especular Blinn-Phong (`N·H`), recorte Fresnel de borda e perturbação normal dos reflexos úmidos do solo (`sampleGroundReflection`).
 - **Zero planos crus ou artefatos fora do pipeline**:
   - É proibido introduzir planos chapados não quantizados, sobreposições HTML/CSS fingindo geometria 3D, *clamps* de margem UV que gerem fendas/grades entre células (como `clamp(glyphUv, 0.04, 0.96)`), listras de *scanline* artificiais ou *Z-fighting*/*flatShading* facetado em malhas orgânicas (como o torso/peito do Tux).
   - Contornos de silhueta (`objectOutline.ts`) permanecem **estritamente sob demanda por alvo** (`THREE.Object3D`), nunca ativados globalmente na cena por padrão, e pisos/planos de fundo devem sinalizar `userData.skipObjectOutline = true` quando aplicável.
@@ -89,15 +91,15 @@ Toda nova implementação, cena, entidade, sistema, *shader* ou refatoração de
 
 ### 3. Paletas Controladas, Sóbrias e Sem Excesso de Luzes Saturadas
 
-- **Bases escuras, dessaturadas e hierarquia de luminância**: fundos, pisos e volumes estruturais devem partir de tons escuros e de baixa saturação (ardósia, petróleo, obsidiana, aço entrópico) com separação clara de valor para sustentar a leitura dos glifos — exemplarmente a escada tonal de estúdio do mascote: pelagem dorsal do Tux (`#0B1017`) < fundo `MASCOT_BACKDROP_HEX` (`#13222E`) < piso `MASCOT_FLOOR_HEX` (`#1D2B36`), e a paleta **Cyber Noir + Entropism** do `playground`: céu/fundo entrópico `#0C1217`, piso ASCII `#1A222A`, estruturas/ruínas `#2A3540`, personagem *Techwear/Darkwear* `#14171C`/`#3B424C`, braço mecânico `#6E7B87`/`#8A99A6` e acento pontual discreto `#4A7C7E`.
-- **Acentos contidos e iluminação exclusivamente ASCII**: evitar saturação neon excessiva, excesso de `PointLight`s simultâneas ou `bloomIntensity`/`emissiveIntensity` estourados que saturem a luminância em `1.0` e colapsem toda a área em caracteres sólidos uniformes (`blockTier` nunca emite bloco 100% sólido `█`). Priorizar esquema equilibrado de *key light* suave + *fill* controlado + *rim light* discreto para recorte de silhueta.
-- **Reuso de materiais reativos à paleta**: compartilhar materiais via bancos centralizados (`NeonMaterialBank` em `SceneComposerKit` ou *uniforms* de estágio), evitando duplicar instâncias de `Material`/`ShaderMaterial` por malha.
+- **Bases escuras, dessaturadas e hierarquia de luminância**: fundos, pisos e volumes estruturais devem partir de tons escuros e de baixa saturação (ardósia, petróleo, obsidiana, aço entrópico) com separação clara de valor para sustentar a leitura dos glifos — exemplarmente a escada tonal de estúdio do mascote: pelagem dorsal do Tux (`#0B1017`) < fundo `MASCOT_BACKDROP_HEX` (`#13222E`) < piso `MASCOT_FLOOR_HEX` (`#1D2B36`), e a paleta **Cyber Noir + Entropism** do `playground`: céu/fundo entrópico `#0C1217`, estruturas `#2A3540`, tons ambientes `#6E7B87`/`#8A99A6`, acento frio `#4A7C7E` e focos quentes âmbar contidos nas vitrines, postes e faróis.
+- **Acentos contidos e iluminação exclusivamente ASCII**: evitar saturação neon excessiva, excesso de `PointLight`s simultâneas ou `bloomIntensity`/`emissiveIntensity` estourados que saturem a luminância em `1.0` e colapsem toda a área em caracteres sólidos uniformes (`blockTier` nunca emite bloco 100% sólido `█`). Priorizar esquema equilibrado de *key light* direcional + *fill* controlado + *rim light* discreto para recorte de silhueta.
+- **Reuso de materiais e texturas**: compartilhar *normal maps* procedurais (`ProceduralNormalMapSet`) e materiais cacheados de normal pass (`NormalPassMaterialCache`), evitando duplicar instâncias por malha.
 
 ### 4. Regras de Câmera e Isolamento de Interação por Modo
 
 - **`mode: 'mascot'` (`#penguin-stage`)**: palco estritamente contemplativo (`fov: 38°`) e 100% inerte a ponteiro/toque/teclado — nunca anexar `PointerInput` ou `KeyboardInput`, manter `cursorLight` zerada (`intensity = 0`) e zero partículas (`particleCount = 0`), travar posição/alvo da câmera e restringir qualquer rotação externa ao eixo horizontal (`yaw`), sem inclinação (`pitch`) nem telemetria reativa a cursor.
 - **`mode: 'playground'` (`#ascii-scene`)**:
-  - Câmera em **FOV de `106°`**, centrada e acompanhando suavemente o protagonista via `CameraFollowSystem`, com locomoção por clique/toque no solo (`PointerInput.consumeTap()` + raycast de solo em `InputSystem` + `NavigationTargetComponent`) e ciclo de caminhada guiado por `deltaTime` que retorna de forma limpa ao repouso ao atingir o destino.
+  - Câmera elevada 3/4 a `45°` (`fov: 58°`, `URBAN_CAMERA_FOLLOW_DEFAULTS`), acompanhando suavemente `Player_Rig` (`lerp`) via `CameraFollowSystem`, com locomoção `WASD` restrita à calçada (`SidewalkBounds` + `THREE.MathUtils.clamp`), interação `E` (`Casting`) e suporte a clique/toque no solo (`PointerInput.consumeTap()` + raycast de plano em `InputSystem`).
   - Todo *listener* de mouse/toque deve ser passivo (`{ passive: true }`) com `touch-action: pan-y` no container, **nunca** bloqueando a rolagem vertical da página.
   - `KeyboardInput` deve permanecer desabilitado por padrão (`enableKeyboard: false`); quando habilitado explicitamente, exige foco ativo em `focusTarget`, ignora `<input>`, `<textarea>`, `<select>` e `[contenteditable]` e jamais intercepta atalhos com `Ctrl`/`Cmd`/`Alt`.
   - Preservar `config.fov` explícito em redimensionamentos e respeitar os *guardrails* adaptativos de `ResolutionController` (DPR e limites de colunas) para evitar poeira subpixel em telas 4K ou ilegibilidade em telas móveis.

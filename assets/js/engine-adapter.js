@@ -25,10 +25,10 @@ window.TP = window.TP || {};
         foliageAccent: '#2A3540',
         cursorLight: '#6E7B87'
       },
-      bloomIntensity: 0.30,
-      dofStrength: 0.18,
-      edgeStrength: 0.94,
-      blockBlendWeight: 0.10,
+      bloomIntensity: 0.28,
+      dofStrength: 0.20,
+      edgeStrength: 0.96,
+      blockBlendWeight: 0.06,
       windStrength: 0.62,
       parallaxIntensity: 0.35
     },
@@ -41,10 +41,10 @@ window.TP = window.TP || {};
         foliageAccent: '#2A3540',
         cursorLight: '#8A99A6'
       },
-      bloomIntensity: 0.16,
-      dofStrength: 0.15,
-      edgeStrength: 0.92,
-      blockBlendWeight: 0.08,
+      bloomIntensity: 0.14,
+      dofStrength: 0.16,
+      edgeStrength: 0.94,
+      blockBlendWeight: 0.05,
       windStrength: 0.42,
       parallaxIntensity: 0.30
     },
@@ -57,10 +57,10 @@ window.TP = window.TP || {};
         foliageAccent: '#2A3540',
         cursorLight: '#6E7B87'
       },
-      bloomIntensity: 0.34,
+      bloomIntensity: 0.32,
       dofStrength: 0.22,
-      edgeStrength: 0.94,
-      blockBlendWeight: 0.12,
+      edgeStrength: 0.96,
+      blockBlendWeight: 0.08,
       windStrength: 1.45,
       parallaxIntensity: 0.40
     }
@@ -335,7 +335,7 @@ window.TP = window.TP || {};
               mode: 'playground',
               modelUrl: './assets/models/cena_completa.glb',
               dracoDecoderPath: './assets/draco/',
-              fov: 64,
+              fov: 58,
               enableKeyboard: true,
               cellSize: 8,
               autoResponsiveDensity: true,

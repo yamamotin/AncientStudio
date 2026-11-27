@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PointerSnapshot } from '../input/PointerInput';
 import type { EngineConfig } from '../types';
+import { URBAN_CAMERA_FOLLOW_DEFAULTS } from '../world/UrbanGlbSceneBuilder';
 
 export interface VfxControllerOptions {
   scene: THREE.Scene;
@@ -108,6 +109,7 @@ export class VfxController {
       this.rainPoints = new THREE.Points(geo, mat);
       this.rainPoints.name = 'WeatherRainParticles';
       this.rainPoints.frustumCulled = false;
+      this.rainPoints.userData.skipNormalPass = true;
       this.rainPositions = positions;
       this.rainSpeeds = speeds;
       this.scene.add(this.rainPoints);
@@ -141,8 +143,8 @@ export class VfxController {
 
     // 2. Subtle interactive cursor light relative to 45-degree camera focus in playground mode
     if (this.config.mode === 'playground') {
-      const anchorX = camera.position.x - 10.6;
-      const anchorZ = camera.position.z - 10.6;
+      const anchorX = camera.position.x - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX;
+      const anchorZ = camera.position.z - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ;
       const targetLightX = anchorX + pointer.normX * 7.5;
       const targetLightY = 1.85 + pointer.normY * 1.4;
       const targetLightZ = anchorZ - pointer.normY * 5.4;
@@ -161,8 +163,8 @@ export class VfxController {
       const pos = this.rainPositions;
       const speeds = this.rainSpeeds;
       const count = speeds.length;
-      const centerX = camera.position.x - 10.0;
-      const centerZ = camera.position.z - 10.0;
+      const centerX = camera.position.x - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetX;
+      const centerZ = camera.position.z - URBAN_CAMERA_FOLLOW_DEFAULTS.offsetZ;
       const halfX = VfxController.RAIN_SPAN_X * 0.5;
       const halfZ = VfxController.RAIN_SPAN_Z * 0.5;
       const windDriftX = -2.2 * this.config.windStrength;

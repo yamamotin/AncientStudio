@@ -1,19 +1,17 @@
 /**
  * Modern Full-Screen 3D-Wrapping ASCII Post-Processing Shader Pipeline (`asciiShader.ts`):
  * - Multi-tap sub-cell supersampling (`sampleCellIntegrated`) prevents subpixel aliasing across
- *   dense architectural textures, vehicle bodywork, foliage, and character geometry.
- * - Deterministic 2D spatial glyph-variety modulation (`glyphVarietyHash`) breaks up monotonous
- *   runs of uniform dashes/bars across broad walls and roads into organic alphanumeric/symbolic
- *   textures (`o`, `u`, `s`, `a`, `c`, `$`, `8`, `Q`, `=`, `-`, `~`, `^`, `*`).
- * - Linearized view-space depth (`linearizeDepth` via `uCameraNear` / `uCameraFar`) + dual 3x3
- *   Sobel operator across Linear Depth and View-Space Normals (`tNormal`) wraps true 3D silhouettes
- *   and sharp architectural creases in directional structural glyphs (`| / \ _`).
- * - Vertical rippled ground/asphalt/water reflection pass (`sampleGroundReflection`) projects
- *   nearby lights, storefronts, lampposts, passing headlights, and foreground silhouettes onto
- *   upward-facing wet surfaces directly inside the quantized ASCII grid.
- * - Contained typographic light halos + chromatic discipline: dark desaturated slate base with
- *   selective warm-amber light accents, crisp ivory cores, and muted emerald/sage foliage tones
- *   (solid full-fill block tier is never emitted).
+ *   architectural textures, vehicle bodywork, foliage, and character geometry.
+ * - Dark-breathing value hierarchy (`shadowToe` + empty-space ramp floor) keeps shadowed roads,
+ *   unlit roofs, and night air quiet instead of filling the screen with uniform noisy text.
+ * - Grounded 3D tonal underlayer (`smoothBackdrop`) + depth silhouette separation (`silhouetteMoat`)
+ *   preserves unmistakable silhouettes for `Player_Rig`, `Carro_Grupo`, and street structures
+ *   underneath crisp ASCII typography.
+ * - Coherent spatial cluster variety (`glyphVarietyHash`) diversifies active lit surfaces into
+ *   natural groupings (`o`, `u`, `s`, `a`, `c`, `$`, `8`, `Q`, `=`, `-`, `~`, `^`, `*`) without
+ *   1-cell salt-and-pepper static.
+ * - Vertical rippled ground/asphalt/water reflection pass (`sampleGroundReflection`) + contained
+ *   typographic light halos (solid full-fill block tier is never emitted).
  */
 
 export const FULLSCREEN_VERTEX_SHADER = /* glsl */ `
@@ -48,26 +46,26 @@ export const BLOOM_EXTRACT_FRAGMENT_SHADER = /* glsl */ `
     acc += texture2D(tScene, clamp(vUv + vec2( r1.x, -r1.y), 0.001, 0.999)).rgb * 0.105;
     acc += texture2D(tScene, clamp(vUv + vec2(-r1.x, -r1.y), 0.001, 0.999)).rgb * 0.105;
 
-    vec2 r2 = uTexelSize * 2.75;
+    vec2 r2 = uTexelSize * 2.65;
     acc += texture2D(tScene, clamp(vUv + vec2( r2.x,  0.0 ), 0.001, 0.999)).rgb * 0.055;
     acc += texture2D(tScene, clamp(vUv + vec2(-r2.x,  0.0 ), 0.001, 0.999)).rgb * 0.055;
     acc += texture2D(tScene, clamp(vUv + vec2( 0.0,   r2.y), 0.001, 0.999)).rgb * 0.055;
     acc += texture2D(tScene, clamp(vUv + vec2( 0.0,  -r2.y), 0.001, 0.999)).rgb * 0.055;
 
-    vec2 r3 = uTexelSize * 4.25;
+    vec2 r3 = uTexelSize * 4.10;
     acc += texture2D(tScene, clamp(vUv + vec2( r3.x,  r3.y), 0.001, 0.999)).rgb * 0.035;
     acc += texture2D(tScene, clamp(vUv + vec2(-r3.x,  r3.y), 0.001, 0.999)).rgb * 0.035;
     acc += texture2D(tScene, clamp(vUv + vec2( r3.x, -r3.y), 0.001, 0.999)).rgb * 0.035;
     acc += texture2D(tScene, clamp(vUv + vec2(-r3.x, -r3.y), 0.001, 0.999)).rgb * 0.035;
 
     float lum = luma(acc);
-    float knee = 0.26;
+    float knee = 0.22;
     float soft = clamp(lum - uThreshold + knee, 0.0, 2.0 * knee);
     soft = (soft * soft) / (4.0 * knee + 0.0001);
     float contrib = max(soft, lum - uThreshold) / max(lum, 0.0001);
 
     // Cap peak bloom radiance so lamp/headlight halos lift nearby glyphs without solid whitewash
-    vec3 extracted = min(acc * clamp(contrib, 0.0, 1.30), vec3(1.12));
+    vec3 extracted = min(acc * clamp(contrib, 0.0, 1.25), vec3(1.05));
     gl_FragColor = vec4(extracted, 1.0);
   }
 `;
@@ -96,11 +94,13 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uDofStrength;
   uniform float uDaylight;
   uniform float uWetness;
-  uniform float uCamPitchCos;
-  uniform float uCamPitchSin;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uVolumeWrapStrength;
+  uniform float uNormalReliefStrength;
+  uniform vec3 uKeyLightViewDir;
+  uniform vec3 uRimLightViewDir;
+  uniform vec3 uWorldUpViewDir;
   uniform vec3 uBgColor;
   uniform vec3 uCoolTint;
   uniform vec3 uWarmTint;
@@ -113,9 +113,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   }
 
   /**
-   * Deterministic flicker-free 2D spatial hash in [-0.5 .. +0.5] anchored to integer cell coordinates.
-   * Diversifies glyph selection across flat walls and roads so broad surfaces read as rich ASCII
-   * tapestries ('o u s c a $ 8 Q = ~ ^ *') instead of monotonous runs of identical dashes.
+   * Deterministic flicker-free 2D spatial hash in [-0.5 .. +0.5] anchored to cell clusters.
    */
   float glyphVarietyHash(vec2 cellCoord) {
     vec2 p = fract(cellCoord * vec2(0.3183099, 0.3678794)) + 0.07;
@@ -141,48 +139,59 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec2 o1 = vec2( uSubCellSpread,  uSubCellSpread * 0.5) * cellUvSpan;
     vec2 o2 = vec2(-uSubCellSpread * 0.5,  uSubCellSpread) * cellUvSpan;
 
-    vec3 c0 = texture2D(tScene, centerUv).rgb * 0.40;
-    vec3 c1 = texture2D(tScene, clamp(centerUv + o1, 0.001, 0.999)).rgb * 0.15;
-    vec3 c2 = texture2D(tScene, clamp(centerUv - o1, 0.001, 0.999)).rgb * 0.15;
-    vec3 c3 = texture2D(tScene, clamp(centerUv + o2, 0.001, 0.999)).rgb * 0.15;
-    vec3 c4 = texture2D(tScene, clamp(centerUv - o2, 0.001, 0.999)).rgb * 0.15;
+    vec3 c0 = texture2D(tScene, centerUv).rgb * 0.42;
+    vec3 c1 = texture2D(tScene, clamp(centerUv + o1, 0.001, 0.999)).rgb * 0.145;
+    vec3 c2 = texture2D(tScene, clamp(centerUv - o1, 0.001, 0.999)).rgb * 0.145;
+    vec3 c3 = texture2D(tScene, clamp(centerUv + o2, 0.001, 0.999)).rgb * 0.145;
+    vec3 c4 = texture2D(tScene, clamp(centerUv - o2, 0.001, 0.999)).rgb * 0.145;
 
     return c0 + c1 + c2 + c3 + c4;
   }
 
   /**
-   * Vertical rippled reflection sampler for upward-facing asphalt, sidewalk, and puddle surfaces:
-   * Integrates upper-screen radiance & bloom vertically downward with gentle wave oscillation so
-   * storefronts, streetlamps, car headlights, and foreground silhouettes cast ASCII-quantized
-   * reflections onto the ground plane.
+   * Selective vertical rippled reflection sampler for upward-facing wet asphalt & sidewalk:
+   * Perturbs reflection rays by actual surface normal tilt ('normalTilt' from embedded/procedural
+   * normal maps) plus gentle rain ripples, reflecting only genuinely luminous upper-screen sources.
    */
-  vec3 sampleGroundReflection(vec2 centerUv, vec2 cellIndex, vec2 cellUvSpan, float upwardMask) {
+  vec3 sampleGroundReflection(
+    vec2 centerUv,
+    vec2 cellIndex,
+    vec2 cellUvSpan,
+    float upwardMask,
+    vec2 normalTilt
+  ) {
     if (upwardMask <= 0.01 || uWetness <= 0.01) {
       return vec3(0.0);
     }
 
-    float wavePhase = cellIndex.y * 0.92 + cellIndex.x * 0.21 - uTime * 2.15;
-    float rippleX = sin(wavePhase) * cellUvSpan.x * (0.55 + 0.45 * uWetness);
-    float rippleBand = 0.72 + 0.28 * sin(cellIndex.y * 1.45 - uTime * 2.8 + cellIndex.x * 0.33);
+    float rainAnim = smoothstep(0.45, 0.95, uWetness);
+    float wavePhase = cellIndex.y * 0.88 + cellIndex.x * 0.19 - uTime * (0.45 + 1.65 * rainAnim);
+    float rippleX = sin(wavePhase) * cellUvSpan.x * (0.28 + 0.56 * rainAnim);
+    float normalRefractX = normalTilt.x * cellUvSpan.x * (1.85 + 1.35 * uWetness);
+    float normalRefractY = normalTilt.y * cellUvSpan.y * 1.25;
+    float rippleBand = 0.74 + 0.26 * sin(cellIndex.y * 1.35 - uTime * (0.55 + 1.95 * rainAnim) + normalTilt.x * 3.2);
 
     vec3 reflAcc = vec3(0.0);
     float weightSum = 0.0;
 
     for (int i = 1; i <= 6; i++) {
       float fi = float(i);
-      float w = 1.0 / (0.75 + fi * 0.55);
-      float subWave = sin(wavePhase + fi * 0.85) * cellUvSpan.x * (0.45 + 0.55 * uWetness);
+      float w = 1.0 / (0.70 + fi * 0.58);
+      float subWave = sin(wavePhase + fi * 0.82) * cellUvSpan.x * (0.24 + 0.52 * rainAnim);
       vec2 sampleUv = clamp(
-        centerUv + vec2(rippleX * 0.65 + subWave * 0.55, fi * cellUvSpan.y * 2.75),
+        centerUv + vec2(
+          normalRefractX + rippleX * 0.55 + subWave * 0.45,
+          fi * cellUvSpan.y * 2.85 + normalRefractY
+        ),
         vec2(0.002),
         vec2(0.998)
       );
       vec3 sCol = texture2D(tScene, sampleUv).rgb;
       vec3 bCol = texture2D(tBloom, sampleUv).rgb;
       float sLum = getLuma(sCol);
-      // Emphasize luminous character rims, lanterns, storefronts & passing car beams on wet pavement
-      float specBoost = smoothstep(0.18, 0.78, sLum);
-      reflAcc += (sCol * (0.42 + 0.52 * specBoost) + bCol * 1.25) * w;
+      // High-pass specular gate: only reflect lit sources & silhouettes (never dull unlit walls)
+      float specGate = smoothstep(0.26, 0.82, sLum);
+      reflAcc += (sCol * specGate * 0.82 + bCol * 1.30) * w;
       weightSum += w;
     }
 
@@ -222,30 +231,30 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float centerLinDepth = linearizeDepth(rawCenterDepth);
     float isGeometry = step(rawCenterDepth, 0.9994);
 
-    // 2. Atmospheric Depth Layering & Far-Plane Softening
+    // 2. Atmospheric Depth Layering & Far-Plane Suppression (dark background with light points)
     float depthDelta = abs(centerLinDepth - uDofFocus);
-    float dofBlurFactor = clamp(depthDelta * uDofStrength * 2.1, 0.0, 0.70) * isGeometry;
+    float dofBlurFactor = clamp(depthDelta * uDofStrength * 2.0, 0.0, 0.68) * isGeometry;
 
     if (dofBlurFactor > 0.02) {
-      vec2 blurStep = cellUvSpan * (1.0 + dofBlurFactor * 1.35);
+      vec2 blurStep = cellUvSpan * (1.0 + dofBlurFactor * 1.25);
       vec3 farSample = 0.25 * (
         texture2D(tScene, clamp(cellCenterUv + vec2( blurStep.x, 0.0), 0.001, 0.999)).rgb +
         texture2D(tScene, clamp(cellCenterUv + vec2(-blurStep.x, 0.0), 0.001, 0.999)).rgb +
         texture2D(tScene, clamp(cellCenterUv + vec2(0.0,  blurStep.y), 0.001, 0.999)).rgb +
         texture2D(tScene, clamp(cellCenterUv + vec2(0.0, -blurStep.y), 0.001, 0.999)).rgb
       );
-      sceneCol = mix(sceneCol, farSample, dofBlurFactor * 0.54);
+      sceneCol = mix(sceneCol, farSample, dofBlurFactor * 0.52);
     }
 
-    // Attenuate non-emissive far background structures for crisp foreground/midground/background depth separation
+    // Strongly quiet non-emissive far background structures so distant background breathes darkly
     if (uVolumeWrapStrength > 0.5 && isGeometry > 0.5) {
-      float farFade = smoothstep(0.42, 0.92, centerLinDepth) * (1.0 - uDaylight * 0.45);
-      float emissiveKeep = smoothstep(0.42, 0.88, getLuma(sceneCol + bloomCol));
-      sceneCol *= mix(1.0, 0.64, farFade * (1.0 - emissiveKeep));
+      float farFade = smoothstep(0.28, 0.78, centerLinDepth) * (1.0 - uDaylight * 0.55);
+      float emissiveKeep = smoothstep(0.45, 0.92, getLuma(sceneCol + bloomCol * 1.15));
+      sceneCol *= mix(1.0, 0.36, farFade * (1.0 - emissiveKeep));
     }
 
-    // 3. Dual 3x3 Sobel Edge & Crease Detection (Linear Depth + View-Space Normals)
-    vec2 stepUv = (cellSize * 0.82) / uResolution;
+    // 3. Dual 3x3 Sobel Silhouette & Crease Detection + Foreground Silhouette Separation Moat
+    vec2 stepUv = (cellSize * 0.85) / uResolution;
 
     float dTL = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2(-stepUv.x,  stepUv.y), 0.001, 0.999)).r);
     float dTC = linearizeDepth(texture2D(tDepth, clamp(cellCenterUv + vec2( 0.0,       stepUv.y), 0.001, 0.999)).r);
@@ -258,7 +267,22 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     float gxD = (dTR + 2.0 * dMR + dBR) - (dTL + 2.0 * dML + dBL);
     float gyD = (dTL + 2.0 * dTC + dTR) - (dBL + 2.0 * dBC + dBR);
-    float depthEdgeMag = length(vec2(gxD, gyD)) * 11.5;
+    float depthEdgeMag = length(vec2(gxD, gyD)) * 13.0;
+
+    // Distinguish outer background side vs inner foreground side of 3D depth silhouettes
+    float minNeighborDepth = min(min(min(dTL, dTC), min(dTR, dML)), min(min(dMR, dBL), min(dBC, dBR)));
+    float maxNeighborDepth = max(max(max(dTL, dTC), max(dTR, dML)), max(max(dMR, dBL), max(dBC, dBR)));
+    // Background pixel immediately outside a closer object (e.g. street right behind Player_Rig / Carro_Grupo)
+    float silhouetteOuterMoat =
+      uVolumeWrapStrength *
+      smoothstep(0.018, 0.065, centerLinDepth - minNeighborDepth) *
+      (1.0 - smoothstep(0.45, 0.80, minNeighborDepth));
+    // Foreground pixel right on the outer contour of a closer object
+    float silhouetteInnerRim =
+      uVolumeWrapStrength *
+      isGeometry *
+      smoothstep(0.018, 0.065, maxNeighborDepth - centerLinDepth) *
+      (1.0 - smoothstep(0.48, 0.82, centerLinDepth));
 
     vec3 nCenterEnc = texture2D(tNormal, cellCenterUv).xyz;
     vec3 nTL = texture2D(tNormal, clamp(cellCenterUv + vec2(-stepUv.x,  stepUv.y), 0.001, 0.999)).xyz;
@@ -274,67 +298,129 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     vec3 gyNVec = (nTL + 2.0 * nTC + nTR) - (nBL + 2.0 * nBC + nBR);
     float gxN = dot(gxNVec, vec3(0.38, 0.38, 0.24));
     float gyN = dot(gyNVec, vec3(0.38, 0.38, 0.24));
-    float normalEdgeMag = length(vec2(gxN, gyN)) * 0.44 * isGeometry;
+    float normalEdgeMag = length(vec2(gxN, gyN)) * 0.38 * isGeometry;
 
-    float depthCreaseAtten = mix(1.0, 0.38, smoothstep(0.22, 0.82, centerLinDepth));
-    float combinedEdge = max(depthEdgeMag, normalEdgeMag * depthCreaseAtten) * uEdgeStrength * (1.0 - dofBlurFactor * 0.55);
-    vec2 domGrad = depthEdgeMag >= normalEdgeMag * depthCreaseAtten ? vec2(gxD, gyD) : vec2(gxN, gyN);
+    // 4. Reconstruct Normal-Mapped Surface Orientation & View-Space Directional Lighting
+    vec3 rawViewN = normalize(nCenterEnc * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
+    vec3 macroViewN = normalize(((nTC + nBC + nML + nMR) * 0.25) * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
+    // Distance-filter micro-normals into macro planar normals so distant facades never alias into static
+    vec3 viewN = normalize(mix(rawViewN, macroViewN, smoothstep(0.24, 0.74, centerLinDepth) * 0.68));
 
-    // 4. Reconstruct Upward Surface Mask + Vertical Rippled Ground Reflections + Volume Relief
-    vec3 viewN = normalize(nCenterEnc * 2.0 - 1.0 + vec3(0.0, 0.0, 0.0001));
-    float worldUpY = clamp(viewN.y * uCamPitchCos + viewN.z * uCamPitchSin, -1.0, 1.0);
+    // Exact surface slope relative to world gravity '+Y' (independent of camera pitch or orbit)
+    float worldUpY = clamp(dot(viewN, uWorldUpViewDir), -1.0, 1.0);
+    vec2 normalTilt = (viewN - uWorldUpViewDir * worldUpY).xy;
     float upwardSurfaceMask =
       uVolumeWrapStrength *
       isGeometry *
-      smoothstep(0.70, 0.93, worldUpY) *
-      (1.0 - smoothstep(0.68, 0.95, centerLinDepth));
+      smoothstep(0.68, 0.90, worldUpY) *
+      (1.0 - smoothstep(0.62, 0.92, centerLinDepth));
 
-    vec3 groundRefl = sampleGroundReflection(cellCenterUv, cellIndex, cellUvSpan, upwardSurfaceMask);
+    // Directional key & rim incidence (Lambertian N*L, back-facing self-occlusion, Blinn-Phong N*H, Fresnel rim)
+    float rawKeyDot = dot(viewN, uKeyLightViewDir);
+    float keyNdotL = clamp(rawKeyDot, 0.0, 1.0);
+    float keyAway = clamp(-rawKeyDot, 0.0, 1.0);
+    float rimNdotL = clamp(dot(viewN, uRimLightViewDir), 0.0, 1.0);
+    vec3 halfVec = normalize(uKeyLightViewDir + vec3(0.0, 0.0, 1.0));
+    float specPower = mix(22.0, 44.0, uWetness);
+    float normalSpec = pow(max(dot(viewN, halfVec), 0.0), specPower) * mix(0.075, 0.165, uWetness);
+    float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.15) * (0.36 + 0.64 * rimNdotL) * 0.105;
+    float hemiCatch = worldUpY * 0.038;
 
-    float zenithCatch = clamp(viewN.y, -0.35, 0.75) * 0.046;
-    float grazingRim = pow(1.0 - clamp(abs(viewN.z), 0.0, 1.0), 2.1) * 0.062;
-    float volumeRelief = (zenithCatch + grazingRim) * isGeometry * uVolumeWrapStrength;
+    // Suppress fine internal bevel noise on far facades while letting key/rim-lit architectural creases glint
+    float creaseLightCatch = 0.58 + 0.62 * max(keyNdotL, rimNdotL);
+    float depthCreaseAtten = mix(1.0, 0.22, smoothstep(0.18, 0.62, centerLinDepth));
+    float effectiveNormalEdge = normalEdgeMag * depthCreaseAtten * creaseLightCatch * (1.0 - silhouetteOuterMoat);
+    float effectiveDepthEdge = depthEdgeMag * (1.0 - silhouetteOuterMoat * 0.85);
+    float combinedEdge = max(effectiveDepthEdge, effectiveNormalEdge) * uEdgeStrength * (1.0 - dofBlurFactor * 0.55);
+    vec2 domGrad = effectiveDepthEdge >= effectiveNormalEdge ? vec2(gxD, gyD) : vec2(gxN, gyN);
 
-    // Contained typographic light halo: bloom lifts nearby character indices into bright symbols
-    vec3 haloLift = bloomCol * (uBloomIntensity * 0.92);
-    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.68;
+    vec3 groundRefl = sampleGroundReflection(cellCenterUv, cellIndex, cellUvSpan, upwardSurfaceMask, normalTilt);
+
+    // Contained typographic light halo: bloom lifts nearby character indices into crisp bright glyphs
+    vec3 haloLift = bloomCol * (uBloomIntensity * 0.96);
+    vec3 combinedHdr = sceneCol + haloLift + groundRefl * 0.82;
+
+    // Modulate scene radiance by directional surface orientation so 90-degree return walls separate cleanly
+    if (uVolumeWrapStrength > 0.5 && isGeometry > 0.5) {
+      float emissiveKeep = smoothstep(0.55, 0.96, getLuma(combinedHdr));
+      float planarFactor = mix(
+        1.0 + (keyNdotL * 0.16 - keyAway * 0.18 + hemiCatch * 1.4) * uNormalReliefStrength,
+        1.0,
+        emissiveKeep
+      );
+      combinedHdr = combinedHdr * clamp(planarFactor, 0.72, 1.24) + vec3(normalSpec * 0.45 * uNormalReliefStrength);
+    }
 
     // Soft-shoulder tone curve compresses bright lamp/headlight peaks smoothly without solid clipping
-    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.36)) * 1.28;
+    vec3 combinedSignal = (combinedHdr / (vec3(1.0) + combinedHdr * 0.38)) * 1.26;
 
     // Selective chromatic discipline: dark desaturated stone/asphalt base with amber, cyan & moss accents
     float rawLuma = getLuma(combinedSignal);
-    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.68, 0.0, 1.0);
+    float warmAccentMask = clamp((combinedHdr.r - combinedHdr.b) * 1.72, 0.0, 1.0);
     float coolCyanMask = clamp((combinedHdr.b - combinedHdr.r) * 1.55, 0.0, 1.0);
-    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.92, combinedHdr.b * 0.95)) * 2.45, 0.0, 1.0);
-    float baseSatKeep = mix(0.60, 0.94, max(max(warmAccentMask, foliageMask), coolCyanMask * 0.85));
+    float foliageMask = clamp((combinedHdr.g - max(combinedHdr.r * 0.90, combinedHdr.b * 0.94)) * 2.55, 0.0, 1.0);
+    float baseSatKeep = mix(0.55, 0.94, max(max(warmAccentMask, foliageMask), coolCyanMask * 0.85));
     if (uVolumeWrapStrength > 0.5) {
       combinedSignal = mix(vec3(rawLuma), combinedSignal, baseSatKeep);
     }
 
-    float luma = clamp(pow(clamp(getLuma(combinedSignal), 0.0, 1.0), 0.81) + volumeRelief, 0.0, 1.0);
+    // Gate directional 3D normal relief strictly to lit surfaces so unlit shadows stay genuinely dark & empty
+    float litGate = smoothstep(0.065, 0.27, rawLuma);
+    float directionalRelief =
+      (keyNdotL * 0.056 - keyAway * 0.044 + hemiCatch + grazingRim + normalSpec) * uNormalReliefStrength;
+    float volumeRelief =
+      (directionalRelief * litGate + silhouetteInnerRim * 0.115) *
+      isGeometry *
+      uVolumeWrapStrength;
 
-    // 5. Select Primary Detail ASCII Glyph (2-Octave Organic Cluster + Cell Variety vs Sharp Contour)
+    // Value hierarchy S-curve in playground mode:
+    // - Carves true dark breathing space in shadows ('rawLuma < 0.08' -> empty space)
+    // - Carves a crisp dark moat ('silhouetteOuterMoat') right outside foreground silhouettes
+    float shapedLuma = clamp(getLuma(combinedSignal), 0.0, 1.0);
+    if (uVolumeWrapStrength > 0.5) {
+      float shadowFloor = mix(0.068, 0.032, uDaylight);
+      shapedLuma = smoothstep(shadowFloor, 0.95, shapedLuma);
+      shapedLuma = pow(shapedLuma, mix(1.08, 0.92, uDaylight));
+      // Quiet background clutter immediately behind Player_Rig / Carro_Grupo silhouettes
+      float highlightProtect = smoothstep(0.62, 0.92, shapedLuma);
+      shapedLuma *= mix(1.0, 0.14, silhouetteOuterMoat * (1.0 - highlightProtect));
+    } else {
+      shapedLuma = pow(shapedLuma, 0.82);
+    }
+
+    float luma = clamp(shapedLuma + volumeRelief, 0.0, 1.0);
+
+    // 5. Select Primary Detail ASCII Glyph (Surface-Orientation Coherent Clusters, Zero 1-Cell Static)
     float varietyJitter = 0.0;
     if (uVolumeWrapStrength > 0.5) {
-      float midtoneEnvelope = smoothstep(0.03, 0.15, luma) * (1.0 - smoothstep(0.87, 0.988, luma));
-      float fineHash = glyphVarietyHash(cellIndex + floor(viewN.xy * 5.0));
-      float macroClusterHash = glyphVarietyHash(floor(cellIndex * 0.37) + vec2(17.3, 9.1));
-      float blendedHash = fineHash * 0.68 + macroClusterHash * 0.32;
-      // Subtle animated ripple shimmer exclusively on wet ground reflection cells
-      float wetRippleShift = upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 2.65) * 1.55;
-      varietyJitter = (blendedHash * 7.2 + wetRippleShift) * midtoneEnvelope;
+      // Only diversify active midtones/highlights ('luma > 0.18'), keeping shadows & silhouettes clean
+      float midtoneEnvelope =
+        smoothstep(0.18, 0.34, luma) *
+        (1.0 - smoothstep(0.88, 0.985, luma)) *
+        (1.0 - clamp(combinedEdge * 1.2, 0.0, 1.0)) *
+        smoothstep(0.14, 0.28, centerLinDepth);
+      // Anchor typographic clusters to quantized planar orientation ('normalSector') so flat walls read calmly
+      vec2 normalSector = floor(macroViewN.xy * 2.5 + 0.5);
+      float wordClusterHash = glyphVarietyHash(
+        floor(vec2(cellIndex.x * 0.28, cellIndex.y * 0.58)) + normalSector * 4.1 + vec2(11.7, 5.3)
+      );
+      float cellSubtleHash = glyphVarietyHash(cellIndex * 0.85 + vec2(3.1, 7.9));
+      float blendedHash = wordClusterHash * 0.80 + cellSubtleHash * 0.20;
+      float wetRippleShift =
+        upwardSurfaceMask * uWetness * sin(cellIndex.y * 1.35 - uTime * 1.8 + normalTilt.x * 4.0) * 1.10;
+      varietyJitter = (blendedHash * 3.4 + wetRippleShift) * midtoneEnvelope;
     }
 
     float detailTileIndex = floor(luma * (uRampCount - 1.0) + 0.5 + varietyJitter);
     detailTileIndex = clamp(detailTileIndex, 0.0, uRampCount - 1.0);
 
-    // Reserve directional bars ('|' '/' '\' '_') strictly for true silhouettes & sharp 3D creases
-    // so broad surfaces never degenerate into long repetitive rows of dashes!
-    float edgeThresh = uVolumeWrapStrength > 0.5 ? 0.54 : 0.30;
+    // Reserve directional structural glyphs ('|' '/' '\' '_') strictly for true silhouettes & strong creases
+    float edgeThresh = uVolumeWrapStrength > 0.5 ? 0.62 : 0.30;
+    bool isStrongSilhouette = (effectiveDepthEdge * uEdgeStrength) > 0.42;
     bool useStructuralEdge =
-      (combinedEdge > edgeThresh) &&
-      (luma > 0.04) &&
+      (isStrongSilhouette || combinedEdge > edgeThresh) &&
+      (luma > 0.10 || silhouetteInnerRim > 0.35) &&
+      (silhouetteOuterMoat < 0.45) &&
       (uStructCount >= 4.0) &&
       (upwardSurfaceMask < 0.45);
 
@@ -346,8 +432,7 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
       if (deg >= 22.5 && deg < 67.5) {
         structOffset = 1.0; // '/'
       } else if (deg >= 67.5 && deg < 112.5) {
-        // Only emit '_' on sharp depth silhouettes, keeping horizontal wall bands richly varied
-        if (uVolumeWrapStrength < 0.5 || depthEdgeMag > 0.36) {
+        if (uVolumeWrapStrength < 0.5 || isStrongSilhouette) {
           structOffset = 3.0; // '_'
         } else {
           useStructuralEdge = false;
@@ -362,58 +447,78 @@ export const ASCII_COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
 
     float detailGlyphMask = sampleAtlasTile(detailTileIndex, glyphUv);
 
-    // 6. GPU Lighten Stipple-Detail Blend (strictly capped to tiers 0..2 so strokes stay crisp)
+    // 6. GPU Lighten Stipple-Detail Blend (gated to active lit surfaces 'luma > 0.34', zero shadow dots)
     float compositeGlyphMask = detailGlyphMask;
-    if (uBlockCount >= 3.0 && uBlockBlendWeight > 0.001 && luma > 0.065) {
-      float blockTier = clamp(floor(smoothstep(0.08, 0.96, luma) * 3.0), 0.0, min(2.0, uBlockCount - 2.0));
+    float stippleGate = uVolumeWrapStrength > 0.5 ? 0.34 : 0.065;
+    if (uBlockCount >= 3.0 && uBlockBlendWeight > 0.001 && luma > stippleGate) {
+      float blockTier = clamp(floor(smoothstep(stippleGate, 0.96, luma) * 3.0), 0.0, min(2.0, uBlockCount - 2.0));
       float blockTileIndex = uRampCount + uStructCount + blockTier;
       float blockMask = sampleAtlasTile(blockTileIndex, glyphUv) * uBlockBlendWeight;
       compositeGlyphMask = max(detailGlyphMask, blockMask);
     }
 
-    // 7. Calibrated Foreground Ink, Contained Amber/Emerald Accents & Dark Terminal Substrate
-    vec3 normColor = combinedSignal / max(rawLuma, 0.062);
-    normColor = clamp(normColor, vec3(0.18), vec3(1.52));
+    // 7. Calibrated Foreground Ink, Contained Amber/Emerald Accents & Grounded 3D Tonal Underlayer
+    vec3 normColor = combinedSignal / max(rawLuma, 0.065);
+    normColor = clamp(normColor, vec3(0.20), vec3(1.50));
 
-    vec3 shadowGrade = mix(normColor, uCoolTint * 1.05, 0.26);
+    vec3 shadowGrade = mix(normColor, uCoolTint * 1.04, 0.28);
     vec3 highlightGrade = mix(normColor, uWarmTint * 1.12, 0.14);
-    vec3 charColor = mix(shadowGrade, highlightGrade, smoothstep(0.14, 0.80, luma));
+    vec3 charColor = mix(shadowGrade, highlightGrade, smoothstep(0.18, 0.82, luma));
 
     if (uVolumeWrapStrength > 0.5) {
-      // Warm golden-amber ink on storefront lights, streetlamps & headlight halos (Image 2 & 3 reference)
-      vec3 amberInk = vec3(1.04, 0.79, 0.44);
-      charColor = mix(charColor, mix(charColor, amberInk, 0.50), warmAccentMask * smoothstep(0.22, 0.82, luma));
+      // Warm golden-amber ink on storefront lights, streetlamps & headlight halos (Image 3 & 4 reference)
+      vec3 amberInk = vec3(1.06, 0.80, 0.44);
+      charColor = mix(charColor, mix(charColor, amberInk, 0.56), warmAccentMask * smoothstep(0.22, 0.82, luma));
 
-      // Contained cool cyber-slate/cyan accent on neon trim & wet reflections (Image 3 & 4 reference)
-      vec3 cyanInk = vec3(0.58, 0.84, 0.94);
-      charColor = mix(charColor, mix(charColor, cyanInk, 0.38), coolCyanMask * smoothstep(0.20, 0.80, luma));
+      // Contained cool cyber-slate/cyan accent on neon trim & wet reflections (Image 4 reference)
+      vec3 cyanInk = vec3(0.58, 0.85, 0.95);
+      charColor = mix(charColor, mix(charColor, cyanInk, 0.40), coolCyanMask * smoothstep(0.22, 0.82, luma));
 
-      // Contained dark-emerald / sage ink on foliage & grass canopies (Image 1, 3 & 4 reference)
-      vec3 mossInk = vec3(0.28, 0.64, 0.42);
-      charColor = mix(charColor, mix(charColor, mossInk, 0.45), foliageMask * (1.0 - warmAccentMask * 0.7));
+      // Contained dark-emerald / sage ink on foliage & grass planters (Image 2 & 5 reference)
+      vec3 mossInk = vec3(0.28, 0.66, 0.42);
+      charColor = mix(charColor, mix(charColor, mossInk, 0.52), foliageMask * (1.0 - warmAccentMask * 0.7));
 
-      // Crisp ivory-white core on peak light & character rim glyphs without losing legibility
-      charColor = mix(charColor, vec3(1.06, 1.03, 0.96), smoothstep(0.78, 0.97, luma) * 0.58);
+      // Crisp ivory-white core on peak light & character silhouette glyphs without losing legibility
+      float peakIvory = max(smoothstep(0.74, 0.96, luma) * 0.64, silhouetteInnerRim * 0.42);
+      charColor = mix(charColor, vec3(1.08, 1.05, 0.98), clamp(peakIvory, 0.0, 0.78));
     }
 
     if (useStructuralEdge) {
-      charColor = mix(charColor, uWarmTint * 1.16, 0.18 * clamp(combinedEdge, 0.0, 1.0));
+      vec3 edgeInk = uVolumeWrapStrength > 0.5 ? mix(uWarmTint * 1.15, vec3(0.94, 0.97, 1.0), silhouetteInnerRim * 0.65) : uWarmTint * 1.16;
+      charColor = mix(charColor, edgeInk, 0.26 * clamp(combinedEdge, 0.0, 1.0));
     }
 
-    float brightness = mix(0.18, 1.24, smoothstep(0.02, 0.94, luma));
+    // Quiet low-contrast ink on sparse shadow punctuation so dark areas breathe naturally;
+    // crisp luminous ink on active midtones, silhouettes, reflections, and focal lights.
+    float brightness = uVolumeWrapStrength > 0.5
+      ? mix(0.12, 1.28, smoothstep(0.10, 0.88, luma))
+      : mix(0.18, 1.24, smoothstep(0.02, 0.94, luma));
     vec3 litGlyph = charColor * brightness * compositeGlyphMask;
 
-    // Deep dark substrate preserves crisp typographic contrast between glyph ink and terminal backdrop
-    float substrateLift = mix(0.036, 0.095, uDaylight);
-    vec3 smoothBackdrop = mix(uBgColor, uBgColor + combinedSignal * substrateLift, smoothstep(0.04, 0.62, luma));
+    // Grounded 3D Tonal Base Underneath Glyphs ('smoothBackdrop'):
+    // - Deep dark slate-black in shadows & silhouette moats for clean breathing contrast
+    // - Cohesive shaded 3D form underlayer beneath lit characters, vehicles, planters & storefronts
+    //   so silhouettes never dissolve into floating text static!
+    vec3 deepVoid = uVolumeWrapStrength > 0.5 ? uBgColor * mix(0.76, 0.92, uDaylight) : uBgColor;
+    float formUnderlayerStrength = uVolumeWrapStrength > 0.5
+      ? mix(0.19, 0.25, uDaylight) * isGeometry * (1.0 - silhouetteOuterMoat * 0.85)
+      : mix(0.036, 0.095, uDaylight);
+    vec3 tonedUnderlayer = mix(vec3(getLuma(combinedSignal)), combinedSignal, 0.58) * formUnderlayerStrength;
+    vec3 smoothBackdrop = mix(
+      deepVoid,
+      deepVoid + tonedUnderlayer,
+      smoothstep(0.14, 0.72, luma)
+    );
+    // Reinforce dark separation moat right outside foreground silhouettes
+    smoothBackdrop *= mix(1.0, 0.58, silhouetteOuterMoat);
 
     vec2 vigUv = vUv * 2.0 - 1.0;
-    float vignette = 1.0 - dot(vigUv, vigUv) * mix(0.14, 0.06, uDaylight);
+    float vignette = 1.0 - dot(vigUv, vigUv) * mix(0.16, 0.06, uDaylight);
 
     vec3 finalRgb = mix(smoothBackdrop, litGlyph, clamp(compositeGlyphMask, 0.0, 1.0));
-    // Restrained glyph-locked halo aura (0.14 ambient + 0.86 glyph-masked so dark background never washes out)
-    finalRgb += bloomCol * (uBloomIntensity * mix(0.20, 0.08, uDaylight) * (0.14 + 0.86 * compositeGlyphMask));
-    finalRgb *= clamp(vignette, 0.75, 1.0);
+    // Glyph-locked halo aura (0.06 ambient + 0.94 glyph-masked so dark breathing areas never wash out!)
+    finalRgb += bloomCol * (uBloomIntensity * mix(0.22, 0.08, uDaylight) * (0.06 + 0.94 * compositeGlyphMask));
+    finalRgb *= clamp(vignette, 0.74, 1.0);
 
     gl_FragColor = vec4(finalRgb, 1.0);
   }
