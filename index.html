@@ -205,15 +205,15 @@
                 <span data-i18n="etl.tribunalLabel">Tribunal</span>
                 <select id="projudi-tribunal" class="select-control">
                   <option value="TJPR" selected>TJPR</option>
-                  <option value="TJSP">TJSP</option>
-                  <option value="TJMG">TJMG</option>
-                  <option value="TJSC">TJSC</option>
-                  <option value="TJRS">TJRS</option>
                 </select>
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="etl.processoLabel">Processo CNJ (20 dígitos)</span>
-                <input id="projudi-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+                <input id="projudi-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
+              </label>
+              <label class="field-group field-group--wide">
+                <span>reCAPTCHA Token (TJPR)</span>
+                <input id="projudi-captcha" class="select-control" type="text" placeholder="g-recaptcha-response (consulta.tjpr.jus.br)" autocomplete="off" data-sensitive>
               </label>
             </div>
             <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.</p>
@@ -253,7 +253,7 @@
             <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="fintech.ncmLabel">Descrição do produto ou código NCM</span>
-                <input id="siscomex-query" class="select-control" type="text" value="computadores portateis" autocomplete="off">
+                <input id="siscomex-query" class="select-control" type="text" value="GPU" placeholder="GPU, computadores portateis, 8471.80.00" autocomplete="off">
               </label>
             </div>
             <div class="gateway-actions">
@@ -280,7 +280,7 @@
             <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="workflow.resumoProcessoLabel">Processo CNJ</span>
-                <input id="resumo-numero" class="select-control" type="text" value="0001234-42.2024.8.16.0130" autocomplete="off">
+                <input id="resumo-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
               </label>
               <label class="field-group field-group--wide">
                 <span data-i18n="workflow.resumoTextoLabel">Texto / Movimentação para triagem</span>

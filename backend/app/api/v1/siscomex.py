@@ -1,4 +1,4 @@
-"""Portal Único Siscomex NCM nomenclature search routes."""
+"""Portal Único Siscomex Classif integrated search (NCM + Decisões + Sugestões)."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ router = APIRouter(prefix="/siscomex", tags=["siscomex-ncm"])
 @router.get(
     "/ncm",
     response_model=ConnectorEnvelope,
-    summary="Accent-insensitive NCM search by product description or code",
+    summary="Integrated Classif search: NCM nomenclature + RFB rulings + suggestions",
 )
 def search_siscomex_ncm(
     q: str = Query(default="", max_length=160),
+    termo: str = Query(default="", max_length=160),
     limite: int = Query(default=10, ge=1, le=50),
     somente_vigentes: bool = Query(default=True),
     connectors: PublicConnectorsRegistry = Depends(get_public_connectors),
@@ -26,7 +27,7 @@ def search_siscomex_ncm(
     started = time.perf_counter()
     try:
         data = connectors.siscomex.search_ncm(
-            q,
+            q or termo,
             limite=limite,
             somente_vigentes=somente_vigentes,
         )

@@ -369,6 +369,7 @@ class PortfolioHandler(BaseHTTPRequestHandler):
                 "title": exc.title,
                 "status": exc.status_code,
                 "detail": exc.detail,
+                "code": exc.code,
                 **exc.extra,
             },
             status=exc.status_code,
@@ -482,7 +483,7 @@ class PortfolioHandler(BaseHTTPRequestHandler):
 
                 if path == "/api/v1/siscomex/ncm":
                     REQUEST_COUNTERS["siscomex_ncm"] += 1
-                    q = _query_str(qs, "q", "")
+                    q = _query_str(qs, "q", "") or _query_str(qs, "termo", "")
                     limite = _query_int(qs, "limite", 10)
                     somente_vigentes = _query_bool(qs, "somente_vigentes", True)
                     data = CONNECTORS.siscomex.search_ncm(
@@ -509,7 +510,17 @@ class PortfolioHandler(BaseHTTPRequestHandler):
                 if detail_match:
                     REQUEST_COUNTERS["projudi_detalhe"] += 1
                     numero_processo = unquote(detail_match.group(1))
-                    data = CONNECTORS.projudi.obter_processo(numero_processo)
+                    captcha_token = _query_str(qs, "captcha_token", "") or None
+                    session_cookie = (
+                        _query_str(qs, "session_cookie", "")
+                        or self.headers.get("X-Projudi-Session")
+                        or None
+                    )
+                    data = CONNECTORS.projudi.obter_processo(
+                        numero_processo,
+                        captcha_token=captcha_token,
+                        session_cookie=session_cookie,
+                    )
                     data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                     record_event("GET", path, 200, data["numero_processo"])
                     self._send_json({"ok": True, "data": data})
@@ -547,10 +558,16 @@ class PortfolioHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/projudi/processos/consulta":
                 REQUEST_COUNTERS["projudi_consulta"] += 1
                 payload_dict = body or {}
+                session_cookie = (
+                    payload_dict.get("session_cookie")
+                    or self.headers.get("X-Projudi-Session")
+                    or None
+                )
                 data = CONNECTORS.projudi.consulta_por_cpf(
                     cpf=payload_dict.get("cpf"),
                     tribunal=payload_dict.get("tribunal", "TJPR"),
                     captcha_token=payload_dict.get("captcha_token"),
+                    session_cookie=session_cookie,
                 )
                 data["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
                 record_event("POST", path, 200, f"tribunal={data['tribunal']}")

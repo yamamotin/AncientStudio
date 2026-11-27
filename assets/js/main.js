@@ -187,16 +187,22 @@ window.TP = window.TP || {};
       'extract-meta',
       'extract-output',
       function () {
-        return client.projudiConsulta({
+        var req = {
           cpf: valOf('projudi-cpf'),
           tribunal: valOf('projudi-tribunal', 'TJPR')
-        });
+        };
+        var cap = valOf('projudi-captcha', '');
+        if (cap) req.captcha_token = cap;
+        return client.projudiConsulta(req);
       },
       function () {
-        return TP.api.projudiConsulta({
+        var req = {
           cpf: valOf('projudi-cpf'),
           tribunal: valOf('projudi-tribunal', 'TJPR')
-        });
+        };
+        var cap = valOf('projudi-captcha', '');
+        if (cap) req.captcha_token = cap;
+        return TP.api.projudiConsulta(req);
       }
     );
 
@@ -204,7 +210,10 @@ window.TP = window.TP || {};
       projudiDetalheBtn,
       'extract-meta',
       'extract-output',
-      function () { return client.projudiProcesso(valOf('projudi-numero')); },
+      function () {
+        var cap = valOf('projudi-captcha', '');
+        return client.projudiProcesso(valOf('projudi-numero'), cap ? { captcha_token: cap } : undefined);
+      },
       function () { return TP.api.projudiProcesso(valOf('projudi-numero')); }
     );
 
