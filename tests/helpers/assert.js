@@ -9,4 +9,9 @@ function includesAll(source, fragments, message) {
   }
 }
 
+/** Assert two numbers are within an optional epsilon tolerance. */
+assert.AlmostEqual = function almostEqual(a, b, eps = 1e-3) {
+  assert.ok(Math.abs(a - b) <= eps, `Expected ${a} ≈ ${b}`);
+};
+
 module.exports = { assert, includesAll };
