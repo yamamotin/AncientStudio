@@ -227,11 +227,12 @@ window.TP = window.TP || {};
       }
       var challenge = TP.captcha.fromError(error);
       // Show what we received before the dialog takes focus (the body stays on screen).
+      // Metadata only: the bitmap itself lives in the dialog, never in the response card.
       captchaNote('captcha.title', metaId, outputId, {
         code: challenge.code,
         provider: challenge.provider,
-        site_key: challenge.siteKey || null,
-        portal_url: challenge.portalUrl || null,
+        challenge_id: challenge.challengeId || null,
+        image: Boolean(challenge.image),
         expires_at: new Date(challenge.expiresAt).toISOString()
       });
 
@@ -608,14 +609,37 @@ window.TP = window.TP || {};
     });
   }
 
+  /* The scene adapter is lazy: it is injected on first interaction or when the section
+     approaches the viewport. Waiting for a single event used to lose the race (and a failed
+     script meant a silent, permanent skeleton), so the UI polls for the adapter for a while
+     and also reacts to the explicit ready event. */
+  var SCENE_ADAPTER_POLL_MS = 250;
+  var SCENE_ADAPTER_POLL_TRIES = 40;
+  var sceneAdapterWaitStarted = false;
+
   function initScene() {
     var stage = document.getElementById('ascii-scene');
     var penguinStage = document.getElementById('penguin-stage');
     if (!stage) return;
+    if (stage.getAttribute('data-scene-bound') === 'true') return;
     if (!TP.scene) {
-      window.addEventListener('engine-adapter:ready', initScene, { once: true });
+      if (!sceneAdapterWaitStarted) {
+        sceneAdapterWaitStarted = true;
+        window.addEventListener('engine-adapter:ready', initScene);
+        var tries = 0;
+        (function waitForSceneAdapter() {
+          if (TP.scene) {
+            initScene();
+            return;
+          }
+          tries += 1;
+          if (tries >= SCENE_ADAPTER_POLL_TRIES) return;
+          window.setTimeout(waitForSceneAdapter, SCENE_ADAPTER_POLL_MS);
+        })();
+      }
       return;
     }
+    stage.setAttribute('data-scene-bound', 'true');
 
     var badge = document.getElementById('scene-mode');
     var toggle = document.getElementById('scene-toggle');
@@ -661,16 +685,43 @@ window.TP = window.TP || {};
       syncCellReadout(range.current, range.min, range.max);
     }
 
+    /* Why the stage is still static, in the visitor's language. */
+    function sceneStatusMessage(reason) {
+      if (reason === 'webgl-unavailable' || reason === 'webgl-software') return t('scene.statusWebgl');
+      if (reason === 'engine-unavailable' || reason === 'mount-failed') return t('scene.statusEngine');
+      return '';
+    }
+
     function onSceneMode(event) {
       var engineReady = event.detail.mode === 'engine';
       if (stage) stage.setAttribute('data-mode', engineReady ? 'engine' : 'fallback');
-      if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
+      if (engineReady && badge) badge.textContent = 'ENGINE';
+      else if (badge && badge.textContent !== 'NO WEBGL') badge.textContent = 'FALLBACK';
       [toggle, cellSlider, cellReset].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
       });
       if (engineReady) syncCellControlFromEngine();
       if (help) {
         help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
+      }
+    }
+
+    /* Emitted by the adapter right after every mount attempt, with the failing reason
+       (`webgl-unavailable`, `webgl-software`, `engine-unavailable`, `mount-failed`). */
+    function onSceneStatus(event) {
+      var detail = (event && event.detail) || {};
+      if (detail.mode === 'engine') {
+        stage.removeAttribute('data-scene-failure');
+        return;
+      }
+      if (!detail.reason) return;
+      stage.setAttribute('data-scene-failure', detail.reason);
+      if (badge) {
+        badge.textContent = detail.reason.indexOf('webgl') === 0 ? 'NO WEBGL' : 'FALLBACK';
+      }
+      if (help) {
+        var message = sceneStatusMessage(detail.reason);
+        if (message) help.textContent = message;
       }
     }
 
@@ -724,6 +775,8 @@ window.TP = window.TP || {};
 
     function cleanupSceneUiListeners() {
       stage.removeEventListener('tp:scene-mode', onSceneMode);
+      stage.removeEventListener('tp:scene-status', onSceneStatus);
+      stage.removeAttribute('data-scene-bound');
       if (cellSlider) {
         cellSlider.removeEventListener('input', onCellInput);
         cellSlider.removeEventListener('keydown', onCellKeyDown);
@@ -733,6 +786,7 @@ window.TP = window.TP || {};
     }
 
     stage.addEventListener('tp:scene-mode', onSceneMode);
+    stage.addEventListener('tp:scene-status', onSceneStatus);
     if (cellSlider) {
       cellSlider.addEventListener('input', onCellInput);
       cellSlider.addEventListener('keydown', onCellKeyDown);

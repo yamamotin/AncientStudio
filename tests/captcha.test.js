@@ -253,6 +253,9 @@ test('safeImageSource accepts only mirrored base64 bitmaps or https on the TJPR 
   // The backend mirrors the challenge: a strict base64 data URL is accepted.
   assert.equal(image(PNG_DATA_URL), PNG_DATA_URL);
   assert.equal(image('data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=='), 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==');
+  // A full-size mirrored bitmap (≈1 MiB decoded) still fits the client ceiling.
+  const bigImage = 'data:image/png;base64,' + 'A'.repeat(1400000);
+  assert.equal(image(bigImage), bigImage);
   // ... and so is the official host over https.
   assert.equal(image('https://consulta.tjpr.jus.br/captcha/desafio.png'), 'https://consulta.tjpr.jus.br/captcha/desafio.png');
   assert.equal(image('  https://www.tjpr.jus.br/x.jpg  '), 'https://www.tjpr.jus.br/x.jpg');
@@ -271,7 +274,8 @@ test('safeImageSource accepts only mirrored base64 bitmaps or https on the TJPR 
     '//consulta.tjpr.jus.br/captcha.png',
     '/captcha.png',
     'file:///etc/passwd',
-    'data:image/png;base64,' + 'A'.repeat(400001),
+    // Ceiling mirrors the backend (1 MiB mirrored bitmap + base64 overhead).
+    'data:image/png;base64,' + 'A'.repeat(1450001),
     '',
     null,
     undefined
@@ -340,6 +344,56 @@ test('sanitizeChallenge bounds untrusted metadata and keeps only safe fields', (
   assert.equal(box.TP.captcha.isRequired({ status: 422, code: 'INVALID_CPF' }), false);
   assert.equal(box.TP.captcha.isRequired({ status: 500, code: 'CAPTCHA_REQUIRED' }), false);
   assert.equal(box.TP.captcha.isRequired(null), false);
+});
+
+test('sanitizeChallenge accepts every image variant the Python CAPTCHA contract emits', () => {
+  const box = mount();
+  const sanitize = (payload) => box.TP.captcha.sanitizeChallenge(payload);
+  const base = { status: 422, code: 'CAPTCHA_REQUIRED', challenge_id: 'chal-42' };
+
+  // api/connectors/captcha.py -> public_metadata()/to_public_payload() aliases.
+  const variants = [
+    ['image_data_uri', { image_data_uri: PNG_DATA_URL }],
+    ['image_data_url', { image_data_url: PNG_DATA_URL }],
+    ['captcha_image', { captcha_image: PNG_DATA_URL }],
+    ['image_url (TJPR host)', { image_url: 'https://www.tjpr.jus.br/captcha/abc.png' }],
+    ['image_base64 + image_mime_type', { image_base64: PNG_DATA_URL.split(',')[1], image_mime_type: 'image/png' }],
+    ['image_endpoint (same-origin)', { image_endpoint: '/api/v1/captcha/challenges/chal-42/image' }]
+  ];
+  for (const [label, extra] of variants) {
+    const challenge = sanitize({ ...base, ...extra });
+    assert.ok(challenge.image, `image variant is dropped: ${label}`);
+    assert.match(challenge.image, /^(data:image\/(png|jpeg|webp|gif|bmp);base64,|https:\/\/|\/api\/v1\/captcha\/)/);
+  }
+
+  // Aliases are echoed inside the popup / challenge_data / extra descriptors too.
+  for (const wrapper of ['popup', 'challenge_data', 'extra']) {
+    const challenge = sanitize({ ...base, [wrapper]: { captcha_image: PNG_DATA_URL } });
+    assert.equal(challenge.image, PNG_DATA_URL, `${wrapper}.captcha_image is ignored`);
+  }
+
+  // Prompt sources: challenge_text wins over prompt_label, both are bounded plain text.
+  assert.equal(sanitize({ ...base, prompt_label: 'Digite os 6 caracteres' }).text, 'Digite os 6 caracteres');
+  assert.equal(
+    sanitize({ ...base, challenge_text: 'texto', prompt_label: 'label' }).text,
+    'texto'
+  );
+
+  // Hostile/ambiguous endpoints are rejected: no protocol-relative, no other route,
+  // no traversal, no foreign mime types.
+  const rejected = [
+    { image_endpoint: '//evil.io/api/v1/captcha/challenges/x/image' },
+    { image_endpoint: 'https://evil.io/api/v1/captcha/challenges/x/image' },
+    { image_endpoint: '/api/v1/captcha/challenges/../../admin/image' },
+    { image_endpoint: '/api/v1/captcha/resolve' },
+    { image_base64: 'PHN2Zy8+', image_mime_type: 'image/svg+xml' },
+    { image_base64: 'PHNjcmlwdD4=', image_mime_type: 'text/html' },
+    { image_base64: 'not base64!!', image_mime_type: 'image/png' },
+    { captcha_image: 'data:image/svg+xml;base64,PHN2Zy8+' }
+  ];
+  for (const payload of rejected) {
+    assert.equal(sanitize({ ...base, ...payload }).image, '', `unsafe bitmap accepted: ${JSON.stringify(payload)}`);
+  }
 });
 
 test('buildResolution validates the answer/token and the optional session cookie', () => {
@@ -412,24 +466,32 @@ test('challenge -> compact dialog -> submit resolves with the answer and wipes t
   assert.equal(nodes.get('captcha-error').hidden, true);
 });
 
-test('a challenge without an image falls back to the prompt line', async () => {
+test('a challenge without a usable image shows the image-unavailable warning, never a portal hint', async () => {
   const box = mount('en');
   const nodes = box.__nodes;
   const pending = box.TP.captcha.request({
     code: 'CAPTCHA_REQUIRED',
-    detail: 'PROJUDI requires a human check.'
+    detail: 'Open the official portal and solve the CAPTCHA there.',
+    instructions: ['Open https://consulta.tjpr.jus.br/ and solve it.']
   });
   const image = nodes.get('captcha-image');
   assert.equal(image.attrs.src, PIXEL_DATA_URL);
   assert.equal(image.hidden, true);
-  assert.equal(nodes.get('captcha-prompt').textContent, 'PROJUDI requires a human check.');
+  // `detail`/`instructions` describe the HTTP flow: they are never rendered.
+  assert.equal(nodes.get('captcha-prompt').textContent, en['captcha.imageUnavailable']);
+  assert.match(nodes.get('captcha-prompt').attrs.class, /captcha-prompt--warn/);
+  assert.equal(nodes.get('captcha-prompt').attrs.role, 'alert');
+  assert.doesNotMatch(nodes.get('captcha-prompt').textContent, /portal|tjpr|https?:/i);
 
-  // A broken image is hidden and replaced by the translated notice.
+  // A broken bitmap (CSP block, 404, expired URL) degrades the same way.
   const box2 = mount('en');
   const pending2 = box2.TP.captcha.request(BACKEND_CHALLENGE);
   box2.__nodes.get('captcha-image').fire('error');
   assert.equal(box2.__nodes.get('captcha-image').hidden, true);
-  assert.equal(box2.__nodes.get('captcha-prompt').textContent, BACKEND_CHALLENGE.challenge_text);
+  assert.equal(box2.__nodes.get('captcha-image').attrs.src, PIXEL_DATA_URL);
+  assert.equal(box2.__nodes.get('captcha-prompt').textContent, en['captcha.imageUnavailable']);
+  assert.match(box2.__nodes.get('captcha-prompt').attrs.class, /captcha-prompt--warn/);
+  assert.equal(box2.__nodes.get('captcha-prompt').attrs.role, 'alert');
 
   for (const [b, p] of [[box, pending], [box2, pending2]]) {
     b.__nodes.get('captcha-cancel').fire('click');
@@ -516,10 +578,16 @@ test('the dialog re-renders in the active language and releases listeners on pag
 test('a second challenge replaces the first instead of stacking dialogs', async () => {
   const box = mount();
   const first = box.TP.captcha.request(BACKEND_CHALLENGE);
-  const second = box.TP.captcha.request({ code: 'CAPTCHA_REQUIRED', challenge_text: 'outro desafio' });
+  const second = box.TP.captcha.request({
+    code: 'CAPTCHA_REQUIRED',
+    challenge_text: 'outro desafio'
+  });
   await assert.rejects(first, (error) => error.code === 'CAPTCHA_CANCELLED');
-  assert.equal(box.__nodes.get('captcha-prompt').textContent, 'outro desafio');
+  // The second payload carries no bitmap: the earlier one is not reused, and the prompt
+  // switches to the translated warning instead of the unrendered backend text.
   assert.equal(box.__nodes.get('captcha-image').hidden, true, 'the previous bitmap does not leak');
+  assert.equal(box.__nodes.get('captcha-image').attrs.src, PIXEL_DATA_URL);
+  assert.equal(box.__nodes.get('captcha-prompt').textContent, pt['captcha.imageUnavailable']);
   box.__nodes.get('captcha-token').value = 'second9';
   box.__nodes.get('captcha-form').fire('submit');
   assert.deepEqual({ ...(await second) }, { captcha_token: 'second9' });

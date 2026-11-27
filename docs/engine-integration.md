@@ -32,8 +32,19 @@ implementation.
   `engine-adapter.js` when an engine stage approaches the viewport or the user
   first interacts; the adapter lazily injects the WebGL bundle the same way.
   This keeps the large bundle off the critical path (Lighthouse ≥95).
-- Hardware WebGL2 is required. Software renderers (SwiftShader/llvmpipe) keep
-  the decorative ASCII fallback, avoiding multi-second post-processing frames.
+- Hardware WebGL2 is required. The probe runs twice: first with
+  `failIfMajorPerformanceCaveat: true`, then — only if that exact flag was what the
+  driver refused — a plain `webgl2` request whose renderer string decides. Real GPUs on
+  blocklisted/remote-session drivers therefore mount, while actual software renderers
+  (SwiftShader/llvmpipe/softpipe) keep the decorative ASCII fallback and its cheap frames.
+- A stage that cannot mount is never silent: `mount()` retries on a bounded schedule
+  (250/600/1200/2400/4000 ms) and again on `ascii-realms:ready`, `ascii-realms:error` and
+  `window.load`, while every verdict is broadcast as `tp:scene-status` with
+  `{ mode, reason, mounted, attempts, cellSize }`. `reason` is one of `webgl-unavailable`,
+  `webgl-software`, `engine-unavailable`, `mount-failed` (or `null` once mounted); `main.js`
+  turns it into the `NO WEBGL` badge plus the `scene.statusWebgl` / `scene.statusEngine`
+  hint, and `#ascii-scene[data-scene-failure]` carries it for tests. `getStatus()` and
+  `remount()` expose the same state programmatically.
 - `IntersectionObserver` pauses offscreen engines; `ResizeObserver`, passive
   pointer listeners and `pagehide` cleanup remain in the adapter.
 
@@ -49,8 +60,17 @@ scene.getCellSizeRange() // { min: 2, max: mountedCellPx, current, stops }
 scene.setCellSize(2.5)   // fine 0.25px (<6px) / 0.5px (>6px) stops up to mounted max
 scene.resetCellSize()    // restores initial mounted cell size & density config
 scene.getScene()         // active THREE.Scene or null
+scene.getStatus()        // { mode, reason, mounted, attempts, cellSize }
+scene.remount()          // resets the retry counter and tries again
 scene.destroy()
 ```
+
+The playground config sets `enableWheelZoom: true` explicitly: the engine owns a
+non-passive `wheel` listener on the stage container and calls `preventDefault()` there, so
+the wheel zooms the camera inside the stage while the rest of the page keeps scrolling. The
+canvas is `position:absolute; inset:0; pointer-events:none` — the container is the input
+target — and `.scene-stage[data-mode="engine"]` adds `cursor: zoom-in`, `touch-action: pan-y`
+and `overscroll-behavior: contain` so the gesture never chains into page scroll.
 
 `setCycle()` and the old presets (`sanctuary`, `dawn`, `storm`, `emerald`) were
 removed in 2026-11-25. `TP.scene.mount/setPaused/setPreset/destroy` remain as

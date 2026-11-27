@@ -133,21 +133,52 @@ window.TP = window.TP || {};
     };
   }
 
-  /* Software WebGL (SwiftShader/llvmpipe) spends seconds per frame on multi-pass shaders.
-     Keep software devices on the instant 3D raycast / static ASCII fallback; hardware GPUs get full WebGL2. */
-  function hasHardwareWebGL2() {
+  var SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|software|basic render|mesa offscreen|angle \(google/i;
+  var RETRY_DELAYS = [250, 600, 1200, 2400, 4000];
+
+  /* One throw-away WebGL2 context. Returns null when the driver refuses the request. */
+  function probeWebGL2(attributes) {
     try {
       var canvas = document.createElement('canvas');
-      var gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: true });
-      if (!gl) return false;
+      var gl = canvas.getContext('webgl2', attributes);
+      if (!gl) return null;
       var extension = gl.getExtension('WEBGL_debug_renderer_info');
-      var renderer = extension ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : '';
+      var renderer = extension ? String(gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) || '') : '';
       var lose = gl.getExtension('WEBGL_lose_context');
       if (lose) lose.loseContext();
-      return !/swiftshader|llvmpipe|software|basic render/i.test(String(renderer));
+      return { renderer: renderer };
     } catch (error) {
-      return false;
+      return null;
     }
+  }
+
+  /* Software WebGL (SwiftShader/llvmpipe) spends seconds per frame on multi-pass shaders,
+     so those devices keep the instant 3D raycast / static ASCII fallback.
+
+     `failIfMajorPerformanceCaveat: true` is the fast path, but several real hardware
+     drivers (blocklisted Windows builds, remote sessions, older Mesa) refuse the context
+     *because of that flag only*. Those used to leave the section on the static skeleton
+     forever, so a second, flag-free probe runs and the renderer string decides: a real GPU
+     name is accepted, an actual software rasterizer is not. */
+  function webgl2Support() {
+    var strict = probeWebGL2({ failIfMajorPerformanceCaveat: true });
+    if (strict && !SOFTWARE_RENDERER.test(strict.renderer)) {
+      return { ok: true, reason: '', renderer: strict.renderer };
+    }
+    var relaxed = strict || probeWebGL2({
+      antialias: false,
+      depth: true,
+      stencil: false,
+      powerPreference: 'high-performance'
+    });
+    if (relaxed && !SOFTWARE_RENDERER.test(relaxed.renderer)) {
+      return { ok: true, reason: '', renderer: relaxed.renderer };
+    }
+    return {
+      ok: false,
+      reason: relaxed ? 'webgl-software' : 'webgl-unavailable',
+      renderer: relaxed ? relaxed.renderer : ''
+    };
   }
 
   function resolveEngine() {
@@ -202,13 +233,53 @@ window.TP = window.TP || {};
       mountCellSize: Number(options && options.config && options.config.cellSize) || 8,
       currentCellSize: Number(options && options.config && options.config.cellSize) || 8,
       customCellActive: false,
-      measuredInitialSize: false
+      measuredInitialSize: false,
+      // Diagnostics: why the stage is still on the static skeleton (null once mounted).
+      failure: null,
+      attempts: 0,
+      mounting: false,
+      retryTimer: null,
+      support: null
     };
+
+    function statusPayload() {
+      return {
+        mode: state.mode,
+        reason: state.failure,
+        mounted: Boolean(state.instance),
+        attempts: state.attempts,
+        cellSize: state.currentCellSize
+      };
+    }
+
+    /* `tp:scene-status` carries the mount verdict so the UI can explain a fallback stage
+       instead of leaving a bare skeleton behind. */
+    function notifyStatus() {
+      container.dispatchEvent(new CustomEvent('tp:scene-status', {
+        detail: statusPayload(),
+        bubbles: true
+      }));
+    }
 
     function emit(mode) {
       state.mode = mode;
       container.setAttribute('data-mode', mode);
       container.dispatchEvent(new CustomEvent('tp:scene-mode', { detail: { mode: mode }, bubbles: true }));
+      notifyStatus();
+    }
+
+    /* The bundle is injected lazily; a slow network, a blocked script or a mount that threw
+       must not strand the stage. Retries are bounded and only run while nothing is mounted. */
+    function scheduleRetry() {
+      if (state.instance || state.retryTimer) return;
+      if (state.attempts > RETRY_DELAYS.length) return;
+      if (state.failure !== 'engine-unavailable' && state.failure !== 'mount-failed') return;
+      // `attempts` already counts the attempt that just failed.
+      var delay = RETRY_DELAYS[Math.min(state.attempts - 1, RETRY_DELAYS.length - 1)];
+      state.retryTimer = window.setTimeout(function () {
+        state.retryTimer = null;
+        mount();
+      }, delay);
     }
 
     function applyConfig(partial) {
@@ -348,9 +419,25 @@ window.TP = window.TP || {};
     }
 
     async function mount() {
-      var resolved = hasHardwareWebGL2() ? resolveEngine() : null;
-      if (!resolved) {
+      if (state.instance || state.mounting) return Boolean(state.instance);
+      state.mounting = true;
+      state.attempts += 1;
+
+      if (!state.support) state.support = webgl2Support();
+      if (!state.support.ok) {
+        // No WebGL2 at all (or only a software rasterizer): nothing to retry.
+        state.failure = state.support.reason;
+        state.mounting = false;
         emit('fallback');
+        return false;
+      }
+
+      var resolved = resolveEngine();
+      if (!resolved) {
+        state.failure = 'engine-unavailable';
+        state.mounting = false;
+        emit('fallback');
+        scheduleRetry();
         return false;
       }
 
@@ -383,6 +470,9 @@ window.TP = window.TP || {};
               dracoDecoderPath: './assets/draco/',
               fov: 58,
               enableKeyboard: true,
+              // Wheel = camera zoom on the stage (the engine owns a non-passive listener
+              // there and preventDefaults it, so the page never jumps while zooming).
+              enableWheelZoom: true,
               cellSize: 8,
               autoResponsiveDensity: true,
               enableShadows: true,
@@ -421,6 +511,8 @@ window.TP = window.TP || {};
         state.currentCellSize = state.mountCellSize;
         state.customCellActive = false;
 
+        state.failure = null;
+        state.mounting = false;
         emit('engine');
         if (isMascot) startMascotSpin();
         observe();
@@ -429,13 +521,20 @@ window.TP = window.TP || {};
       } catch (error) {
         state.instance = null;
         state.engine = null;
+        state.failure = 'mount-failed';
+        state.mounting = false;
         emit('fallback');
+        scheduleRetry();
         return false;
       }
     }
 
     function destroy() {
       window.removeEventListener('pagehide', destroy);
+      if (state.retryTimer) {
+        window.clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+      }
       if (state.telemetryRaf) {
         window.cancelAnimationFrame(state.telemetryRaf);
         state.telemetryRaf = null;
@@ -525,7 +624,17 @@ window.TP = window.TP || {};
           : null;
       },
       destroy: destroy,
-      getMode: function () { return state.mode; }
+      getMode: function () { return state.mode; },
+      getStatus: statusPayload,
+      remount: function () {
+        if (state.retryTimer) {
+          window.clearTimeout(state.retryTimer);
+          state.retryTimer = null;
+        }
+        state.attempts = 0;
+        state.support = null;
+        return mount();
+      }
     };
   }
 
@@ -537,6 +646,10 @@ window.TP = window.TP || {};
     script.setAttribute('data-ascii-engine', '');
     script.addEventListener('load', function () {
       window.dispatchEvent(new Event('ascii-realms:ready'));
+    });
+    // A blocked/failed bundle must be visible: the stage would otherwise stay a skeleton.
+    script.addEventListener('error', function () {
+      window.dispatchEvent(new Event('ascii-realms:error'));
     });
     document.head.appendChild(script);
   }
@@ -638,14 +751,30 @@ window.TP = window.TP || {};
       controllers = [];
       disposeGlbLoader();
     },
-    getMode: function () { return controllers.length ? controllers[0].getMode() : 'fallback'; }
+    getMode: function () { return controllers.length ? controllers[0].getMode() : 'fallback'; },
+    getStatus: function () { return controllers.length ? controllers[0].getStatus() : null; },
+    remount: function () { return controllers.length ? controllers[0].remount() : false; }
   };
 
+  /* The bundle arrived: retry every stage that is still on the static skeleton. */
   window.addEventListener('ascii-realms:ready', function () {
     controllers.forEach(function (controller) {
-      if (controller.getMode() === 'fallback') controller.mount();
+      if (controller.getMode() === 'fallback') controller.remount();
     });
   });
+
+  window.addEventListener('ascii-realms:error', function () {
+    controllers.forEach(function (controller) {
+      if (controller.getMode() === 'fallback') controller.remount();
+    });
+  });
+
+  /* Last chance after every subresource settled (fonts, GLB, decoders). */
+  window.addEventListener('load', function () {
+    controllers.forEach(function (controller) {
+      if (controller.getMode() === 'fallback') controller.remount();
+    });
+  }, { once: true });
 
   window.dispatchEvent(new Event('engine-adapter:ready'));
 })(window.TP);
