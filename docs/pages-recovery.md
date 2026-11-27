@@ -88,7 +88,7 @@ fallback ASCII da cena se o deploy tivesse sido publicado.
 Correção:
 
 1. o modelo novo foi reencodado (`resize 1024` → `webp -q 82` → `draco`, via
-   `@gltf-transform/cli`) para `15.19 MiB`, mantendo Draco + WebP, os três root nodes e as
+   `@gltf-transform/cli`) para `15.18 MiB`, mantendo Draco + WebP, os três root nodes e as
    NLA `Idle`/`Walking`/`Casting`, e voltou ao nome canônico
    `assets/models/cena_completa.glb` (a textura nova da `FuturisticGirl` foi preservada);
 2. o staging e a verificação viraram `scripts/build-pages-site.sh`, com um único passo no

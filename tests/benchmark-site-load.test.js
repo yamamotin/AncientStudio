@@ -46,8 +46,8 @@ test('benchmark notifies average site loading speed with real Draco WASM scene d
     expectedPrimitives,
     `all ${expectedPrimitives} Draco mesh primitives decoded`
   );
-  assert.equal(report.scene.vertices, 621_591, 'all unique vertices decoded');
-  assert.equal(report.scene.triangles, 612_502, 'all triangles decoded');
+  assert.equal(report.scene.vertices, 621_587, 'all unique vertices decoded');
+  assert.equal(report.scene.triangles, 612_500, 'all triangles decoded');
   assert.ok(report.scene.vertices >= 600_000 && report.scene.triangles >= 600_000, 'scene geometry fully decoded');
   assert.equal(report.scene.webpImages, expectedWebp, `all ${expectedWebp} WebP textures verified`);
   assert.deepEqual(

@@ -280,7 +280,7 @@ O caminho do modelo 3D **não** é hardcoded: o script lê o `./assets/models/*.
 passou a pedir um arquivo inexistente, o passo antigo morria em `test -s
 _site/assets/models/cena_completa.glb` sem dizer qual arquivo era, e o deploy do Pages
 (`DEPLOY_SHA: 965e49b`) falhou com `exit code 1`. O modelo foi reencodado (Draco + WebP
-`1024px`, `15.19 MiB`) e voltou ao nome canônico `assets/models/cena_completa.glb`, com a
+`1024px`, `15.18 MiB`) e voltou ao nome canônico `assets/models/cena_completa.glb`, com a
 textura nova da `FuturisticGirl` preservada (`FuturisticGirl_Mat`).
 
 Regressões cobertas por teste: `tests/ci.test.js` executa o script de verdade em um diretório
