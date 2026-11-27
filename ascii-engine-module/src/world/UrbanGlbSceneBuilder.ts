@@ -65,7 +65,7 @@ export const URBAN_CAMERA_FOLLOW_DEFAULTS = {
   minDistance: 8.2,
   maxDistance: 31.5,
   zoomSmoothing: 10.5,
-  zoomSpeed: 2.15,
+  zoomSpeed: 4.0,
 } as const;
 
 /**
@@ -751,6 +751,24 @@ export class UrbanGlbSceneBuilder {
     stage.scene.add(playerRig);
     stage.scene.add(carroGrupo);
 
+    // Compute visible city bounds once, ignoring exporter helper boxes. A scene-wide
+    // overview can then be fitted to the actual viewport instead of an arbitrary cap.
+    cidade.updateWorldMatrix(true, true);
+    const overviewBounds = new THREE.Box3().makeEmpty();
+    const meshBounds = new THREE.Box3();
+    cidade.traverseVisible((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      if (mesh.geometry.boundingBox) {
+        meshBounds.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+        overviewBounds.union(meshBounds);
+      }
+    });
+    // Include the full vehicle route even when the car is temporarily hidden.
+    overviewBounds.expandByPoint(new THREE.Vector3(URBAN_TRAFFIC_DEFAULTS.laneX, 0, URBAN_TRAFFIC_DEFAULTS.startZ));
+    overviewBounds.expandByPoint(new THREE.Vector3(URBAN_TRAFFIC_DEFAULTS.laneX, 0, URBAN_TRAFFIC_DEFAULTS.endZ));
+
     // 1. Static Urban Environment Entity (`Cidade_Sketchfab_model` + runtime `ForegroundOccluders`)
     const cidadeId = ecsWorld.createEntity();
     ecsWorld
@@ -923,6 +941,7 @@ export class UrbanGlbSceneBuilder {
       .addComponent(playerId, 'CharacterAnimation', charAnimComp)
       .addComponent(playerId, 'CameraFollow', {
         ...URBAN_CAMERA_FOLLOW_DEFAULTS,
+        overviewBounds,
         autoOrbit: Boolean(config.autoOrbit),
         orbitAngle: 0,
         orbitSpeed: 0.42,

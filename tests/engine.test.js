@@ -176,6 +176,28 @@ function createBundleSandbox(overrides = {}) {
   return sandbox;
 }
 
+test('page CSP supports self-hosted Draco workers, WASM and embedded GLB textures', () => {
+  const html = readFileSync(path.join(root, 'index.html'), 'utf8');
+  const policy = html.match(/Content-Security-Policy" content="([^"]+)"/)[1];
+  const directive = name => policy.split(';').map(s => s.trim()).find(s => s.startsWith(name + ' '));
+  assert.match(directive('script-src'), /'wasm-unsafe-eval'/);
+  assert.doesNotMatch(directive('script-src'), /'unsafe-eval'/);
+  assert.match(directive('worker-src'), /blob:/);
+  assert.match(directive('img-src'), /blob:/);
+  assert.match(directive('connect-src'), /blob:/);
+  assert.doesNotMatch(directive('script-src'), /https?:|\*/);
+});
+
+test('depth classification preserves distant geometry while keeping the cleared sky empty', () => {
+  const shader = readFileSync(path.join(root, 'ascii-engine-module/src/shaders/asciiShader.ts'), 'utf8');
+  assert.match(shader, /1\.0 - step\(0\.9999999, foregroundDepth\)/);
+  const near = 0.15, far = 160;
+  const rawDepth = distance => far / (far - near) - far * near / ((far - near) * distance);
+  assert.ok(rawDepth(120) > 0.9994, 'old threshold rejected distant architecture');
+  assert.ok(rawDepth(120) < 0.9999999, 'new threshold retains it');
+  assert.ok(1 >= 0.9999999, 'cleared depth remains empty sky');
+});
+
 test('engine core keeps its public facade intact', () => {
   includesAll(core, [
     'export { AsciiEngineCore as AsciiSceneEngine',
@@ -434,6 +456,43 @@ test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Playe
 
   assert.equal(ecsWorld.getEntityCount(), 3, 'Maps Cidade_Sketchfab_model, Player_Rig, and Carro_Grupo to 3 ECS entities');
   assert.ok(stage.cidadeEntityId && stage.playerEntityId && stage.carroEntityId);
+
+  // Real decoded city bounds must fit at maximum zoom, including portrait viewports.
+  const overview = ecsWorld.getComponent(stage.playerEntityId, 'CameraFollow').overviewBounds;
+  assert.ok(overview && overview.max.x - overview.min.x > 50);
+  assert.ok(overview.max.z >= pkg.URBAN_TRAFFIC_DEFAULTS.endZ);
+  for (const aspect of [16 / 9, 1, 0.6]) {
+    const viewWorld = new pkg.World();
+    const id = viewWorld.createEntity();
+    viewWorld.addComponent(id, 'Transform', { x: -3.8, y: 0.08635, z: -1.1, rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 });
+    viewWorld.addComponent(id, 'CameraFollow', { ...pkg.URBAN_CAMERA_FOLLOW_DEFAULTS, overviewBounds: overview, autoOrbit: false, orbitAngle: 0, orbitSpeed: 0.42, initialized: false });
+    const cam = new THREE.PerspectiveCamera(58, aspect, 0.15, 160);
+    const followSystem = new pkg.CameraFollowSystem(cam);
+    const input = new pkg.InputSystem(new pkg.PointerInput({ style: {} }), new pkg.KeyboardInput(), cam);
+    followSystem.update(viewWorld, { dt: 0, elapsed: 0 });
+    const follow = viewWorld.getComponent(id, 'CameraFollow');
+    const nearDistance = follow.currentDistance;
+    // Use the same input path as a wheel gesture, then allow camera damping to settle.
+    for (let i = 0; i < 100; i++) {
+      input.pointer.triggerWheel(180);
+      input.update(viewWorld, { dt: 0.05, elapsed: i * 0.05 });
+      followSystem.update(viewWorld, { dt: 0.05, elapsed: i * 0.05 });
+    }
+    assert.ok(follow.currentDistance > nearDistance * 2, `overview zooms out at aspect ${aspect}`);
+    cam.updateMatrixWorld(true);
+    for (let i = 0; i < 8; i++) {
+      const point = new THREE.Vector3(i & 1 ? overview.max.x : overview.min.x, i & 2 ? overview.max.y : overview.min.y, i & 4 ? overview.max.z : overview.min.z).project(cam);
+      assert.ok(Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1,
+        `city corner ${i} fits viewport at aspect ${aspect}: ${point.toArray()}`);
+    }
+    const maxDistance = follow.currentDistance;
+    for (let i = 0; i < 100; i++) {
+      input.pointer.triggerWheel(-180);
+      input.update(viewWorld, { dt: 0.05, elapsed: i * 0.05 });
+      followSystem.update(viewWorld, { dt: 0.05, elapsed: i * 0.05 });
+    }
+    assert.ok(follow.currentDistance < maxDistance * 0.5, 'wheel zoom reverses without per-frame reset');
+  }
 
   // Set up Input + ECS Systems + PerspectiveCamera
   const mockListeners = {};
@@ -1291,7 +1350,11 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
     removeEventListener() {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 675 })
   };
-  const ctrl = adapterSandbox.TP.scene.create(stageContainer, { preset: 'night' });
+  let activeConfig;
+  const OriginalEngine = adapterSandbox.window.ASCIIRealms.AsciiSceneEngine;
+  adapterSandbox.window.ASCIIRealms.AsciiSceneEngine = function (el, cfg) { activeConfig = cfg; return new OriginalEngine(el, cfg); };
+  let loadErrorReceived = false;
+  const ctrl = adapterSandbox.TP.scene.create(stageContainer, { preset: 'night', config: { callbacks: { onLoadError() { loadErrorReceived = true; } } } });
   const mounted = await ctrl.mount();
   assert.equal(mounted, true);
   assert.equal(mountCount, 1);
@@ -1307,6 +1370,9 @@ test('Scene toolbar below title: micro font/cell range [2px..mountMax], 0.25px l
   assert.equal(ctrl.resetCellSize(), 6.25, 'Reset restores mounted cell size');
   assert.deepEqual({ ...updateCalls[updateCalls.length - 1] }, { cellSize: 8, autoResponsiveDensity: true });
   assert.ok(ctrl.getScene().isScene, 'Public getScene() contract preserved');
+  activeConfig.callbacks.onLoadError(new Error('decoder failure'));
+  assert.equal(ctrl.getMode(), 'fallback');
+  assert.equal(loadErrorReceived, true, 'caller load-error callback remains intact');
   ctrl.destroy();
 });
 

@@ -486,6 +486,19 @@ window.TP = window.TP || {};
           (options && options.config) || {}
         );
 
+        if (!isMascot) {
+          var originalCallbacks = mergedConfig.callbacks || {};
+          mergedConfig.callbacks = Object.assign({}, originalCallbacks, {
+            onLoadError: function (error) {
+              // A live renderer without the GLB only shows isolated light points.
+              // Restore the explicit fallback instead of claiming the scene loaded.
+              if (state.instance && typeof state.instance.pause === 'function') state.instance.pause();
+              emit('fallback');
+              if (typeof originalCallbacks.onLoadError === 'function') originalCallbacks.onLoadError(error);
+            }
+          });
+        }
+
         var created = resolved.factory(container, {
           preset: state.preset,
           paused: state.paused,

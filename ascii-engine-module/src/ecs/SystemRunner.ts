@@ -549,6 +549,11 @@ export class CameraFollowSystem implements EcsSystem {
   public readonly name = 'CameraFollowSystem';
   private camera: THREE.PerspectiveCamera | null;
   private readonly lookTarget = new THREE.Vector3();
+  private readonly overviewCenter = new THREE.Vector3();
+  private readonly viewDirection = new THREE.Vector3();
+  private readonly viewRight = new THREE.Vector3();
+  private readonly viewUp = new THREE.Vector3();
+  private readonly corner = new THREE.Vector3();
 
   constructor(camera: THREE.PerspectiveCamera | null = null) {
     this.camera = camera;
@@ -590,9 +595,9 @@ export class CameraFollowSystem implements EcsSystem {
       if (Math.abs(follow.orbitAngle) < 0.001) follow.orbitAngle = 0;
     }
 
-    const targetLookX = transform.x + follow.lookAtOffsetX;
-    const targetLookY = transform.y + follow.lookAtOffsetY;
-    const targetLookZ = transform.z + follow.lookAtOffsetZ;
+    let targetLookX = transform.x + follow.lookAtOffsetX;
+    let targetLookY = transform.y + follow.lookAtOffsetY;
+    let targetLookZ = transform.z + follow.lookAtOffsetZ;
 
     // Resolve view ray from look-at target to camera (composes cleanly with both WASD & autoOrbit)
     const viewVecX = offX - follow.lookAtOffsetX;
@@ -600,6 +605,41 @@ export class CameraFollowSystem implements EcsSystem {
     const viewVecZ = offZ - follow.lookAtOffsetZ;
     const baseDist = Math.hypot(viewVecX, viewVecY, viewVecZ) || 1;
     const minDist = follow.minDistance ?? 8.2;
+    if (follow.overviewBounds && !follow.overviewBounds.isEmpty()) {
+      const bounds = follow.overviewBounds;
+      bounds.getCenter(this.overviewCenter);
+      this.viewDirection.set(viewVecX, viewVecY, viewVecZ).normalize();
+      this.viewRight.crossVectors(this.camera.up, this.viewDirection).normalize();
+      this.viewUp.crossVectors(this.viewDirection, this.viewRight).normalize();
+      const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5) / this.camera.zoom;
+      const tanH = tanV * Math.max(0.1, this.camera.aspect);
+      let fit = baseDist;
+      for (let i = 0; i < 8; i++) {
+        this.corner.set(
+          i & 1 ? bounds.max.x : bounds.min.x,
+          i & 2 ? bounds.max.y : bounds.min.y,
+          i & 4 ? bounds.max.z : bounds.min.z
+        ).sub(this.overviewCenter);
+        const depth = this.corner.dot(this.viewDirection);
+        fit = Math.max(fit, depth + Math.abs(this.corner.dot(this.viewRight)) / tanH,
+          depth + Math.abs(this.corner.dot(this.viewUp)) / tanV);
+      }
+      follow.maxDistance = Math.max(baseDist + 1, fit * 1.12);
+      const requiredFar = Math.max(160, follow.maxDistance + bounds.getSize(this.corner).length() * 1.5);
+      if (Math.abs(this.camera.far - requiredFar) > 0.1) {
+        this.camera.far = requiredFar;
+        this.camera.updateProjectionMatrix();
+      }
+      // Preserve third-person following near the player, blend to the scene's
+      // center as zoom-out approaches the fitted overview.
+      const overviewMix = THREE.MathUtils.smoothstep(
+        follow.currentDistance ?? follow.targetDistance ?? baseDist,
+        baseDist, follow.maxDistance
+      );
+      targetLookX = THREE.MathUtils.lerp(targetLookX, this.overviewCenter.x, overviewMix);
+      targetLookY = THREE.MathUtils.lerp(targetLookY, this.overviewCenter.y, overviewMix);
+      targetLookZ = THREE.MathUtils.lerp(targetLookZ, this.overviewCenter.z, overviewMix);
+    }
     const maxDist = follow.maxDistance ?? 31.5;
     const clampedTargetDist = THREE.MathUtils.clamp(
       follow.targetDistance ?? baseDist,

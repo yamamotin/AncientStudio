@@ -774,6 +774,7 @@ input[data-sensitive]:not(:focus) {
 }
 
 .scene-stage[data-mode="engine"] .scene-fallback { display: none; }
+.scene-stage[data-mode="fallback"] [data-ascii-engine-canvas] { display: none !important; }
 
 .scene-controls {
   display: flex;
