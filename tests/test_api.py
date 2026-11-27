@@ -110,7 +110,7 @@ class PortfolioBackendTests(unittest.TestCase):
         with urlopen(req, timeout=5) as resp:
             html = resp.read().decode("utf-8")
             self.assertEqual(resp.status, 200)
-            self.assertIn("[ ASCII REALMS // SCENE ]", html)
+            self.assertIn("[ CENA 3D INTERATIVA ]", html)
             self.assertIn("[ STACK // NEOFETCH ]", html)
             self.assertIn("assets/js/neofetch.js", html)
 

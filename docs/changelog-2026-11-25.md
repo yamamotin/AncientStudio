@@ -118,3 +118,56 @@ nenhum código de contorno foi adicionado ao frontend.
   desktop/telas não-mobile direciona para
   `https://api.whatsapp.com/send/?phone=5544920009249`. A detecção combina UA,
   `userAgentData.mobile` e media queries de ponteiro/largura, sem listeners de mouse.
+
+## 10. Painel real de CI/CD & Docker, títulos profissionais e hardening frontend
+
+- **Títulos profissionais (todos os idiomas configurados — `pt-br` e `en`):**
+  `[ API PLAYGROUND // PROJECTS ]` → `[ API GATEWAY // INTEGRAÇÕES ]` /
+  `[ API GATEWAY // INTEGRATIONS ]`; `[ ASCII REALMS // SCENE ]` →
+  `[ CENA 3D INTERATIVA ]` / `[ INTERACTIVE SCENE 3D ]`; `[ LIVE CI/CD & DOCKER
+  PIPELINE SIMULATOR ]` → `[ LIVE CI/CD & DOCKER PIPELINE ]`. A palavra
+  “Playground”/“Simulator”/“Sandbox” não permanece em títulos, rótulos, metadados
+  (`og:description`, `twitter:description`) nem traduções. A âncora da seção passou
+  de `#playground` para `#gateway`; o `id` interno do engine (`mode: 'playground'`)
+  foi preservado por ser contrato de `engine-adapter.js`.
+- **Runner fictício removido:** `TP.api.runPipeline` saiu de `assets/js/api.js`; o
+  endpoint `POST /api/v1/pipeline/run` permanece só no backend legado, com testes
+  próprios e sem consumo pela UI.
+- **Painel real (sem simulador):** `assets/js/pipeline.js` foi reescrito e agora lê
+  apenas metadados públicos e read-only de
+  `https://api.github.com/repos/yamamotin/AncientStudio/actions/runs?per_page=6` e
+  `/actions/workflows`, exibindo nome do workflow, branch, SHA curto, status/conclusão,
+  duração, timestamp UTC, número do run e link direto para o run. Removidos os botões
+  `git push`/`--force`, o progresso falso e o RCA simulado.
+- **Cache e resiliência:** cache de 5 minutos em `localStorage`
+  (`tp.gh-actions.v1`), re-sanitizado na leitura; fallback em memória quando o storage
+  está bloqueado; `AbortController` com timeout de 8 s; leitura de
+  `x-ratelimit-remaining`/`x-ratelimit-reset`; aviso informativo com link do Actions
+  em caso de rate-limit ou falha de rede.
+- **Rename interno:** as classes CSS `.playground-*` viraram `.gateway-*`, a âncora
+  `#playground` virou `#gateway` (inclusive no gatilho de carregamento tardio de
+  `main.js`) e o rótulo do menu passou a `02 gateway`.
+- **Segurança no cliente:** nenhum token (`GITHUB_TOKEN`, `VERCEL_TOKEN`, chaves) no
+  bundle; `credentials: 'omit'` e nenhum header `Authorization`; renderização somente
+  com `createElement`/`textContent`; `safeRunUrl()` como allowlist estrita de
+  `https://github.com/yamamotin/AncientStudio/actions/runs/<id>`; limites de tamanho e
+  remoção de caracteres de controle; `rel="noopener noreferrer"` em links externos;
+  bloqueio de requisição concorrente + cooldown de 4 s contra clique duplo/flood;
+  `#workflow-token` marcado `data-sensitive`, nunca persistido e apagado em `pagehide`
+  e ao ocultar a aba; `AbortController` em **todas** as chamadas `fetch` do frontend
+  (8 s GitHub, 10 s `/api/v1`, 5 s `api-status.json`, 4 s dicionário i18n).
+- **CPF da consulta pública PROJUDI:** campo marcado `data-sensitive`, sem autocomplete,
+  mascarado fora de foco (`-webkit-text-security`), nunca gravado em storage, limpo em
+  `pagehide`/aba oculta e não ecoado na resposta — máscara LGPD definitiva no servidor.
+- **CSP:** `<meta http-equiv="Content-Security-Policy">` com
+  `default-src 'self'`, `object-src 'none'`, `script-src 'self'`, `style-src 'self'`,
+  `img-src 'self' data:`, `font-src 'self'`, `connect-src 'self' https://api.github.com`,
+  `form-action 'self'` e `frame-src 'none'`, mais
+  `<meta name="referrer" content="strict-origin-when-cross-origin">`. Nenhum
+  `vercel.json` foi criado para não alterar a configuração de deploy.
+- **Documentação:** criado `docs/ci-cd-pipeline.md` (arquitetura dos workflows,
+  consumo do frontend, cache/rate-limit, hardening e validação) e um bloco técnico
+  colapsável traduzido dentro da própria seção.
+- **Testes:** novo `tests/pipeline-panel.test.js` (6 casos: endpoints/TTL, hardening,
+  allowlist/sanitização, duração, títulos e CSP) e atualização de `static`, `ui` e
+  `i18n`; suíte Node em 64/64 e `unittest` do backend em 6/6.

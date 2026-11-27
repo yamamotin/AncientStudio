@@ -7,6 +7,7 @@ window.TP = window.TP || {};
   'use strict';
 
   var BASE = 'api/v1';
+  var REQUEST_TIMEOUT = 10000;
 
   function integrationError(message, status, problem, cause) {
     var error = new Error(message);
@@ -28,11 +29,30 @@ window.TP = window.TP || {};
       init.body = typeof settings.body === 'string' ? settings.body : JSON.stringify(settings.body);
     }
 
+    // Every request is time-boxed so a stalled backend never hangs the UI.
+    var Controller = window.AbortController;
+    var controller = typeof Controller === 'function' ? new Controller() : null;
+    var timer = null;
+    if (controller) {
+      init.signal = controller.signal;
+      timer = window.setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT);
+    }
+
     var response;
     try {
       response = await fetch(BASE + path, init);
     } catch (cause) {
-      throw integrationError('Network error while calling ' + path, 0, null, cause);
+      var aborted = Boolean(cause && cause.name === 'AbortError');
+      var error = integrationError(
+        (aborted ? 'Timeout after ' + REQUEST_TIMEOUT + 'ms while calling ' : 'Network error while calling ') + path,
+        0,
+        null,
+        cause
+      );
+      error.timeout = aborted;
+      throw error;
+    } finally {
+      if (timer) window.clearTimeout(timer);
     }
 
     var data = null;
@@ -175,6 +195,7 @@ window.TP = window.TP || {};
     },
     describeError: function (error) {
       if (!error) return 'unknown error';
+      if (error.timeout) return 'request timeout';
       if (error.status === 0) return 'network unreachable';
       return 'HTTP ' + error.status;
     },
