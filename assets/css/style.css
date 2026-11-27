@@ -742,9 +742,28 @@ input[data-sensitive]:not(:focus) {
 
 .scene-stage[data-mode="engine"] {
   padding: 0;
-  cursor: pointer;
+  /* Wheel zooms the camera, so the cursor advertises it and the gesture never chains
+     into page scrolling (the engine also preventDefaults its own non-passive listener). */
+  cursor: zoom-in;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   background: #0C1217;
 }
+
+/* Full-bleed canvas: the engine writes these as inline styles too, but keeping them in the
+   stylesheet guarantees the stage is covered even if a future reset/update drops them.
+   `pointer-events: none` lets wheel/drag reach the container that owns the input listeners. */
+.scene-stage > canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.scene-stage > .scene-fallback { position: relative; z-index: 1; }
 
 .scene-fallback {
   color: var(--green);
@@ -1064,6 +1083,13 @@ body.scene-fullscreen-active { overflow: hidden; }
   font-size: var(--fs-tiny);
   text-align: center;
   overflow-wrap: anywhere;
+}
+
+.captcha-prompt--warn {
+  color: #ffb454;
+  border: 1px dashed currentColor;
+  border-radius: calc(var(--radius) / 2);
+  padding: 0.35rem 0.5rem;
 }
 
 .captcha-label { color: var(--muted); font-size: var(--fs-tiny); }

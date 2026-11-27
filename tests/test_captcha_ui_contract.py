@@ -17,6 +17,7 @@ CLIENT = (ROOT / "assets" / "js" / "captcha.js").read_text(encoding="utf-8")
 MAIN = (ROOT / "assets" / "js" / "main.js").read_text(encoding="utf-8")
 HTML = (ROOT / "index.html").read_text(encoding="utf-8")
 PROJUDI = (ROOT / "api" / "connectors" / "projudi.py").read_text(encoding="utf-8")
+CAPTCHA = (ROOT / "api" / "connectors" / "captcha.py").read_text(encoding="utf-8")
 ERRORS = (ROOT / "api" / "connectors" / "errors.py").read_text(encoding="utf-8")
 SERVER = (ROOT / "api" / "server.py").read_text(encoding="utf-8")
 DOCS = (ROOT / "docs" / "api-reference.md").read_text(encoding="utf-8")
@@ -60,7 +61,14 @@ CHALLENGE_FIELDS = (
     "provider",
     "image_url",
     "image_data_url",
+    # aliases produced by api/connectors/captcha.py + ConnectorCaptchaRequiredError
+    "image_data_uri",
+    "captcha_image",
+    "image_base64",
+    "image_mime_type",
+    "image_endpoint",
     "challenge_text",
+    "prompt_label",
 )
 
 GENERIC_FIELDS = {"status", "code", "detail", "data", "problem", "title", "type", "ok"}
@@ -112,12 +120,23 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         self.assertIn('<script src="assets/js/captcha.js" defer></script>', HTML)
 
     def test_backend_challenge_fields_are_consumed_by_the_client(self) -> None:
-        emitted = set(re.findall(r"\b(?:extra|payload)\[\s*[\"'](\w+)[\"']\s*\]", PROJUDI))
-        emitted |= set(re.findall(r"[\"'](\w+)[\"']\s*:", PROJUDI))
+        emitted: set[str] = set()
+        for source in (PROJUDI, CAPTCHA, ERRORS):
+            emitted |= set(re.findall(r"\b(?:extra|payload)\[\s*[\"'](\w+)[\"']\s*\]", source))
+            emitted |= set(re.findall(r"[\"'](\w+)[\"']\s*:", source))
         emitted &= set(CHALLENGE_FIELDS)
-        self.assertTrue(emitted, "no challenge metadata found in the Projudi connector")
+        self.assertTrue(emitted, "no challenge metadata found in the Python connectors")
+        # Every image alias the backend can emit must be understood by sanitizeChallenge().
+        self.assertTrue(
+            {"image_data_uri", "captcha_image", "image_base64", "image_mime_type", "image_endpoint"}
+            <= set(CHALLENGE_FIELDS)
+        )
         for field in sorted(emitted):
-            used = f"raw.{field}" in CLIENT or f"field(raw, '{field}'" in CLIENT
+            used = (
+                f"raw.{field}" in CLIENT
+                or f"field(raw, '{field}'" in CLIENT
+                or f"'{field}'" in CLIENT
+            )
             self.assertTrue(used, f"client ignores backend field {field!r}")
 
         # The client must not invent fields the backend never sends.
@@ -125,6 +144,15 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         read |= set(re.findall(r"field\(raw, '(\w+)'", CLIENT))
         self.assertTrue(read)
         self.assertEqual(read - set(CHALLENGE_FIELDS) - GENERIC_FIELDS - NON_FIELDS, set())
+
+    def test_image_size_ceiling_matches_the_backend_mirror_limit(self) -> None:
+        backend = re.search(r"MAX_CAPTCHA_IMAGE_BYTES\s*=\s*([\d_]+)", CAPTCHA)
+        self.assertIsNotNone(backend, "the backend must cap the mirrored bitmap")
+        limit = int(backend.group(1).replace("_", ""))
+        client = re.search(r"MAX_IMAGE_DATA_LEN\s*=\s*(\d+)", CLIENT)
+        self.assertIsNotNone(client, "the client must cap the data URI it renders")
+        # base64 grows by 4/3 plus the `data:image/<mime>;base64,` prefix.
+        self.assertGreaterEqual(int(client.group(1)), limit * 4 // 3, "a full-size bitmap would be dropped")
 
     def test_error_code_and_status_match_the_python_exception(self) -> None:
         self.assertIn('code = "CAPTCHA_REQUIRED"', ERRORS)
@@ -177,6 +205,24 @@ class CaptchaPopupContractTestCase(unittest.TestCase):
         # There is no outbound link in the compact popup at all: nothing navigates away.
         self.assertNotIn("<a ", dialog_markup(), "the popup renders no anchor")
         self.assertNotIn("setAttribute('href'", CLIENT, "the module never builds a link")
+
+    def test_popup_shows_the_bitmap_and_never_redirects_to_the_portal(self) -> None:
+        markup = dialog_markup()
+        # Image above the answer field, field label right below it.
+        self.assertLess(markup.index('id="captcha-image"'), markup.index('id="captcha-prompt"'))
+        self.assertLess(markup.index('id="captcha-prompt"'), markup.index('id="captcha-token"'))
+        self.assertIn('placeholder="digite a resposta exibida na imagem"', markup)
+        # The bitmap comes from the backend contract; no portal hint is ever rendered.
+        for fragment in ("function imageOf(", "'captcha_image'", "'image_data_uri'", "'image_base64'"):
+            self.assertIn(fragment, CLIENT)
+        prompt = CLIENT.split("function promptOf")[1].split("function renderChallenge")[0]
+        self.assertIn("captcha.imageUnavailable", prompt)
+        self.assertNotIn("detail", prompt, "the backend detail line is not rendered in the popup")
+        self.assertNotIn("portal", prompt.lower())
+        for dictionary in (PT, EN):
+            warning = dictionary["captcha.imageUnavailable"].lower()
+            self.assertNotRegex(warning, r"portal|tjpr|https?://")
+            self.assertRegex(warning, r"desafio|challenge")
 
     def test_no_html_injection_sink_and_state_is_wiped(self) -> None:
         for sink in (".innerHTML", "insertAdjacentHTML", "outerHTML", "document.write", "eval("):
