@@ -322,7 +322,59 @@ class ProjudiRealScraperTestCase(unittest.TestCase):
 
         return FakeRouteTransport({"consulta.tjpr.jus.br": handle_projudi})
 
+    def test_direct_consultation_without_captcha_does_not_raise_captcha(self) -> None:
+        # The TJPR public consultation does NOT require CAPTCHA: a submission
+        # without a token that the portal accepts must scrape directly, never
+        # raising a false CAPTCHA_REQUIRED just because the form HTML carries
+        # the reCAPTCHA widget.
+        def handle_projudi_direct(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            if "actionType=iniciar" in url:
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": "JSESSIONID=TJPRNODE01ABCDEF; Path=/projudi_consulta; Secure",
+                    },
+                    body=REALISTIC_TJPR_FORM_HTML.encode("iso-8859-1"),
+                )
+            if "actionType=pesquisar" in url and method == "POST":
+                # Portal accepts the direct consultation: returns real results,
+                # no captcha error message.
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                )
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={"content-type": "text/html; charset=ISO-8859-1"},
+                body=REALISTIC_TJPR_FRAMESET_HTML.encode("iso-8859-1"),
+            )
+
+        svc = ProjudiConnectorService(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": handle_projudi_direct}),
+            cache=ConnectorTTLCache(),
+        )
+        res = svc.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+        self.assertEqual(res["modo_execucao"], "raspagem_real_projudi_tjpr")
+        self.assertFalse(res["compliance"]["dados_sinteticos_ou_mock"])
+        self.assertEqual(res["total_processos"], 2)
+        self.assertFalse(res.get("captcha_required"))
+
     def test_missing_captcha_raises_structured_422_captcha_required_without_mocks(self) -> None:
+        # Quando o portal efetivamente recusa a submissão sem token (mensagem de
+        # erro de reCAPTCHA), o desafio HTTP 422 deve ser disparado — nunca como
+        # pré-disparo baseado apenas na presença do widget no formulário.
         transport = self._make_tjpr_transport()
         svc = ProjudiConnectorService(transport=transport, cache=ConnectorTTLCache())
 
@@ -1062,6 +1114,7 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
 
         img_requests: list[tuple[str, str]] = []
         post_bodies: list[str] = []
+        search_attempts = iter([0, 1])
 
         def projudi_img_handler(
             *,
@@ -1108,11 +1161,15 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
                         headers={"content-type": "text/html; charset=ISO-8859-1"},
                         body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
                     )
+                # The portal rejects the submission with a rotated challenge image:
+                # first rejected attempt serves d=1, the next (wrong-code retry) d=2.
+                idx = next(search_attempts)
+                form = struts_img_form_1 if idx == 0 else struts_img_form_2
                 return HttpResponse(
                     url=url,
                     status_code=200,
                     headers={"content-type": "text/html; charset=ISO-8859-1"},
-                    body=struts_img_form_2.encode("iso-8859-1"),
+                    body=form.encode("iso-8859-1"),
                 )
             raise UpstreamConnectorError(f"Unexpected URL: {url}", status_code=503)
 
@@ -1316,6 +1373,14 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
                         headers={"content-type": "text/html; charset=ISO-8859-1"},
                         body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
                     )
+                # Portal recusou a submissão sem token válido: devolve o formulário
+                # com o widget de reCAPTCHA, que o parser trata como desafio real.
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=REALISTIC_TJPR_FORM_HTML.encode("iso-8859-1"),
+                )
             raise UpstreamConnectorError(f"Unexpected TJPR request {method} {url}", status_code=503)
 
         registry = create_public_connectors(
@@ -1370,8 +1435,10 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
         self.assertFalse(completed["compliance"]["dados_sinteticos_ou_mock"])
         self.assertEqual(completed["total_processos"], 2)
         self.assertIn("response=1", fallback_posts[-1])
-        self.assertEqual(len(projudi_posts), 1)
+        # Fluxo: submissão inicial sem token (recusada) + resgate com token válido.
+        self.assertEqual(len(projudi_posts), 2)
         self.assertIn("JSESSIONID=TJPR_FB_SID_1", projudi_posts[0][0])
+        self.assertIn("JSESSIONID=TJPR_FB_SID_1", projudi_posts[1][0])
 
     def test_script_assigned_captcha_servlet_and_stateless_cookie_resume(self) -> None:
         from api.connectors import create_public_connectors

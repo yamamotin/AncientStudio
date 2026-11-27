@@ -163,6 +163,8 @@ Sempre que uma fonte pública exige verificação humana (seja em resposta `200 
 >
 > **Proteção LGPD no `consulta_payload`:** parâmetros sensíveis (como `cpf`) permanecem armazenados apenas em memória no `CaptchaChallengeStore` do servidor (TTL de 300s) para retomada automática por `challenge_id`; no JSON devolvido ao navegador, o campo `cpf` bruto é omitido em favor de `cpf_mascarado`.
 
+> **Consulta direta sem CAPTCHA (PROJUDI TJPR):** o portal público `https://consulta.tjpr.jus.br/projudi_consulta/` **permite a consulta direta sem solucionar o widget reCAPTCHA** — a presença do widget (`div.g-recaptcha[data-sitekey]`) no HTML do formulário inicial **não** é, por si só, um sinal de que o CAPTCHA é exigido. O conector PROJUDI (`api/connectors/projudi.py`) **submete a consulta real primeiro** e só dispara o `HTTP 422 CAPTCHA_REQUIRED` quando a resposta do portal efetivamente indica um erro/desafio de CAPTCHA (mensagem de validação inválida/expirada ou formulário de desafio recusado), garantindo que não haja falso desafio nem modal travado sem imagem.
+
 ### 2.1. Diagnóstico de `"image": false`, Extração Real de Bitmaps e Limitação Técnica do Google reCAPTCHA v2
 
 No card interativo do portfólio (`assets/js/main.js`), `resolveCaptchaAndResend` registra no painel `#projudi-output` o resumo `{ code, provider, challenge_id, image: Boolean(challenge.image), expires_at }`. Portanto, `"image": false` significa que `challenge.image` veio vazio porque nenhum bitmap real pôde ser exposto pela sessão upstream.

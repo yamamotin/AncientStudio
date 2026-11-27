@@ -1260,6 +1260,12 @@ class ProjudiConnectorService:
     ) -> None:
         """Issue a session-bound HTTP 422 ``CAPTCHA_REQUIRED`` challenge for PROJUDI TJPR.
 
+        Sempre disparado a partir de uma **resposta real da pesquisa** que indica um
+        desafio/erro de CAPTCHA (ou da rejeição de um token anterior), nunca como
+        pré-disparo baseado apenas na presença do widget ``g-recaptcha`` no HTML do
+        formulário inicial — a consulta pública do TJPR é submetida primeiro e só
+        exige verificação humana quando o portal realmente recusa a submissão.
+
         Image extraction & Google reCAPTCHA v2 limitation:
         - Whenever PROJUDI exposes a session-bound bitmap (inline ``data:image/...``,
           Struts/Servlet ``<img>`` such as ``captcha.svl`` / ``gerarCaptcha``, or a
@@ -1406,30 +1412,14 @@ class ProjudiConnectorService:
             )
 
         form_url = session["form_url"]
-        has_preauth_cookie_only = bool(cookie_clean and stored is None)
 
-        if session["requires_captcha"] and not token_clean and not has_preauth_cookie_only:
-            if stored is not None:
-                self._captcha_store.consume_challenge(stored.challenge_id)
-            resp_field_hint = str(session.get("response_field") or "g-recaptcha-response")
-            challenge_msg = (
-                "Resolva a imagem de segurança exibida diretamente neste popup "
-                f"({resp_field_hint}) para concluir a consulta real no PROJUDI TJPR."
-                if session.get("provider") == "image"
-                else (
-                    "A Consulta Pública do PROJUDI TJPR requer verificação humana "
-                    f"({resp_field_hint}). Resolva o desafio diretamente neste popup para concluir a consulta real."
-                )
-            )
-            self._raise_captcha_challenge(
-                challenge_msg,
-                session=session,
-                operation=operation,
-                consulta_payload=consulta_payload,
-                resume_endpoint=resume_endpoint,
-                resume_method=resume_method,
-                raw_session_cookie=cookie_clean or None,
-            )
+        # A consulta real é sempre submetida primeiro. O widget reCAPTCHA presente
+        # no HTML do formulário inicial (``div.g-recaptcha[data-sitekey]``) não é, por
+        # si só, um sinal de que a consulta exige CAPTCHA: o portal público do TJPR
+        # permite a consulta direta sem solucionar o widget. O desafio só é exigido
+        # quando a resposta da pesquisa indica um erro/desafio real de CAPTCHA
+        # (detectado por ``parse_projudi_search_result`` ou pelo probe do formulário
+        # vazio abaixo), garantindo que não haja falso desafio nem modal travado.
 
         if token_clean and stored is not None and stored.connector == "projudi":
             token_clean = self._captcha_store.resolve_recaptcha_fallback_if_needed(

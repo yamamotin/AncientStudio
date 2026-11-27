@@ -182,12 +182,32 @@ def test_projudi_enforces_captcha_required_scrapes_real_html_and_never_mocks() -
     )
     assert bad_cpf.status_code == 422
 
+    # Consulta direta sem token: o portal TJPR não exige CAPTCHA e a submissão
+    # real deve ser aceita (200 + dados reais), sem falso desafio CAPTCHA_REQUIRED.
     no_cap = client.post(
         "/api/v1/projudi/processos/consulta",
         json={"cpf": "111.444.777-35", "tribunal": "TJPR"},
     )
-    assert no_cap.status_code == 422
-    problem = no_cap.json()
+    assert no_cap.status_code == 200
+    cdata = no_cap.json()["data"]
+    assert cdata["modo_execucao"] == "raspagem_real_projudi_tjpr"
+    assert cdata["compliance"]["dados_sinteticos_ou_mock"] is False
+    assert cdata["total_processos"] == 1
+    assert cdata["processos"][0]["numero_processo"] == VALID_CNJ
+    assert "111.444.777-35" not in no_cap.text
+
+    # Token inválido rejeitado pelo portal: somente nesse caso o desafio real
+    # HTTP 422 CAPTCHA_REQUIRED é disparado.
+    rejected = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={
+            "cpf": "111.444.777-35",
+            "tribunal": "TJPR",
+            "captcha_token": "BAD",
+        },
+    )
+    assert rejected.status_code == 422
+    problem = rejected.json()
     assert problem["code"] == "CAPTCHA_REQUIRED"
     assert problem["site_key"] == "6LcFastApiTestSiteKey00000000000000000099"
     assert "instructions" in problem
@@ -245,10 +265,19 @@ def test_projudi_upstream_unavailable_returns_503_without_fake_fallback() -> Non
 def test_fastapi_standardized_captcha_popup_roundtrip_for_projudi() -> None:
     client = _build_client()
 
-    # 1. Initial consulta returns standardized 422 CAPTCHA_REQUIRED contract
-    initial = client.post(
+    # Consulta direta sem token: portal TJPR não exige CAPTCHA — submissão real
+    # aceita (200) sem disparar falso desafio.
+    direct = client.post(
         "/api/v1/projudi/processos/consulta",
         json={"cpf": "111.444.777-35", "tribunal": "TJPR"},
+    )
+    assert direct.status_code == 200
+    assert direct.json()["data"]["total_processos"] == 1
+
+    # 1. Token rejeitado pelo portal dispara o contrato padronizado 422 CAPTCHA_REQUIRED
+    initial = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={"cpf": "111.444.777-35", "tribunal": "TJPR", "captcha_token": "BAD"},
     )
     assert initial.status_code == 422
     err = initial.json()
