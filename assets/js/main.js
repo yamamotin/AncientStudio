@@ -386,13 +386,17 @@ window.TP = window.TP || {};
           if (!status.ok) {
             backendOnline = false;
             var offline = document.getElementById('connection-status');
-            if (offline) offline.textContent = t('console.statusSim');
+            if (offline) {
+              offline.dataset.state = 'offline';
+              offline.textContent = t('console.statusSim');
+            }
             return null;
           }
           backendOnline = true;
           return client.health().then(function (result) {
             var label = document.getElementById('connection-status');
             if (label) {
+              label.dataset.state = 'api';
               label.textContent = t('console.statusApi');
               label.title = result.data.service + '@' + (result.data.version || '1.0');
             }
@@ -408,7 +412,10 @@ window.TP = window.TP || {};
         .catch(function () {
           backendOnline = false;
           var label = document.getElementById('connection-status');
-          if (label) label.textContent = t('console.statusSim');
+          if (label) {
+            label.dataset.state = 'offline';
+            label.textContent = t('console.statusSim');
+          }
         })
         .finally(function () {
           if (timer) window.clearTimeout(timer);
@@ -487,6 +494,7 @@ window.TP = window.TP || {};
 
     function onSceneMode(event) {
       var engineReady = event.detail.mode === 'engine';
+      if (stage) stage.setAttribute('data-mode', engineReady ? 'engine' : 'fallback');
       if (badge) badge.textContent = engineReady ? 'ENGINE' : 'FALLBACK';
       [toggle, cellSlider, cellReset].concat(modeButtons).forEach(function (control) {
         if (control) control.disabled = !engineReady;
@@ -612,19 +620,6 @@ window.TP = window.TP || {};
     try { saved = localStorage.getItem(storageKey); } catch (error) { saved = null; }
     apply(saved === null ? fallback : saved, false);
     input.addEventListener('input', function () { apply(input.value, true); });
-  }
-
-  function initGithubButton() {
-    var button = document.getElementById('github-button');
-    if (!button) return;
-    button.addEventListener('click', function () {
-      TP.console.print([
-        t('console.githubTodo'),
-        t('console.githubDetail')
-      ]);
-      var input = document.getElementById('console-input');
-      if (input) input.focus();
-    });
   }
 
   // The contact control stays a real <a>, so keyboard activation and its translated
@@ -780,20 +775,53 @@ window.TP = window.TP || {};
     sections: function () { return collapseSections.slice(); }
   };
 
+  /* Re-translate every label whose text is owned by JS state instead of a static
+     data-i18n key. Driven by attributes/datasets, never by comparing prose, so a
+     language switch can never leave a stale string behind. */
   function applyDynamicLabels() {
+    var stage = document.getElementById('ascii-scene');
+    var help = document.querySelector('.scene-help');
     var toggle = document.getElementById('scene-toggle');
     var audio = document.getElementById('audio-toggle');
     var status = document.getElementById('connection-status');
-    if (toggle && toggle.textContent.indexOf('resume') >= 0) toggle.textContent = t('scene.resume');
-    if (audio && audio.getAttribute('aria-pressed') === 'true') audio.textContent = t('console.audioOn');
-    if (status && status.textContent === t('console.statusSim')) status.textContent = t('console.statusSim');
+
+    if (help) {
+      var engineReady = stage && stage.getAttribute('data-mode') === 'engine';
+      help.textContent = engineReady ? t('scene.engineHelp') : t('scene.fallbackHelp');
+    }
+    if (toggle) {
+      var paused = toggle.getAttribute('aria-pressed') === 'true';
+      toggle.textContent = paused ? t('scene.resume') : t('scene.pause');
+    }
+    if (audio) {
+      var audioOn = audio.getAttribute('aria-pressed') === 'true';
+      audio.textContent = audioOn ? t('console.audioOn') : t('console.audioOff');
+    }
+    if (status) {
+      status.textContent = status.dataset.state === 'api' ? t('console.statusApi') : t('console.statusSim');
+    }
     if (sceneFullscreenState.syncLabels) sceneFullscreenState.syncLabels();
+  }
+
+  /* i18n is part of the deferred chain (i18n.js before main.js), so the toggle is
+     bound and the saved language restored at init — never behind a first click. */
+  function initI18n() {
+    if (!TP.i18n) return;
+    TP.i18n.bindToggle();
+    window.addEventListener('tp:languagechange', function () {
+      initTypewriter();
+      applyDynamicLabels();
+    });
+    TP.i18n.init().then(function () {
+      applyDynamicLabels();
+    });
   }
 
   function init() {
     var year = document.getElementById('year');
     if (year) year.textContent = String(new Date().getFullYear());
 
+    initI18n();
     initCollapsibles();
     TP.pipeline.init();
     TP.console.init();
@@ -825,19 +853,7 @@ window.TP = window.TP || {};
     }
 
     function wire() {
-      if (TP.i18n) {
-        TP.i18n.bindToggle();
-        TP.i18n.init().then(function () {
-          if (pendingLang) TP.i18n.setLanguage(pendingLang);
-          applyDynamicLabels();
-        });
-        window.addEventListener('tp:languagechange', function () {
-          initTypewriter();
-          applyDynamicLabels();
-        });
-      }
       initApiButtons();
-      initGithubButton();
       queuedClicks.forEach(function (id) {
         var button = document.getElementById(id);
         if (button) button.click();
@@ -850,19 +866,13 @@ window.TP = window.TP || {};
       started = true;
       load('i18n.js', function () { load('api-client.js', wire); });
     }
-    var pendingLang = null;
     var queuedClicks = [];
 
     document.addEventListener('pointerdown', function (event) {
       var target = event.target;
       if (!target || !target.closest) return;
-      if (target.closest('#lang-toggle')) {
-        event.preventDefault();
-        event.stopPropagation();
-        pendingLang = 'en';
-        start();
-        return;
-      }
+      // The language toggle is owned by i18n.js (bound at init). It must never be
+      // intercepted here: doing so swallowed the click and pinned the language.
       var action = target.closest(
         '#transparencia-button, #projudi-consulta-button, #projudi-detalhe-button, ' +
         '#bcb-indicadores-button, #bcb-instituicoes-button, #siscomex-ncm-button, ' +

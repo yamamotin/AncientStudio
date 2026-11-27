@@ -41,9 +41,9 @@
       <nav class="topnav" aria-label="Seções" data-i18n-attr="aria-label:nav.sections">
         <a href="#pipeline" data-i18n="nav.pipeline">01 pipeline</a>
         <a href="#gateway" data-i18n="nav.apis">02 gateway</a>
-        <a href="#scene" data-i18n="nav.scene">03 scene</a>
+        <a href="#scene" data-i18n="nav.scene">03 cena</a>
         <a href="#console" data-i18n="nav.console">04 console</a>
-        <button id="lang-toggle" class="cmd-button cmd-button--small" type="button" data-i18n="lang.switchToEn">[ en ]</button>
+        <button id="lang-toggle" class="cmd-button cmd-button--small" type="button" aria-label="Idioma" data-i18n-attr="aria-label:lang.label" data-i18n="lang.switchToEn">[ en ]</button>
       </nav>
     </div>
   </header>
@@ -71,7 +71,7 @@
         <!-- PDFs originais enviados pelo próprio Eron (autorizado em 2026-11-24). -->
         <a class="cmd-button cmd-button--primary" href="assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf" data-i18n="actions.cvPt">[ curriculo-pt-br ]</a>
         <a class="cmd-button cmd-button--quiet" href="assets/cv/Eron_Yamamoto_Resume_EN.pdf" data-i18n="actions.cvEn">[ curriculo-en ]</a>
-        <button id="github-button" class="cmd-button" type="button" data-i18n="actions.github">[ github ]</button>
+        <a id="github-button" class="cmd-button" href="https://github.com/yamamotin" target="_blank" rel="noopener noreferrer" aria-label="Abrir o perfil de Eron no GitHub (nova aba)" data-i18n-attr="aria-label:actions.githubAria" data-i18n="actions.github">[ github ]</a>
         <a class="cmd-button" href="https://www.linkedin.com/in/eron-yamamoto/" target="_blank" rel="noopener noreferrer" data-i18n="actions.linkedin">[ linkedin ]</a>
         <a id="contact-button" class="cmd-button" href="mailto:yamah1337@gmail.com" data-i18n="actions.contact">[ contato ]</a>
       </div>
@@ -134,8 +134,8 @@
             <ul>
               <li data-i18n="pipeline.doc.frontApi">Duas chamadas GET públicas: /actions/runs (até 6 execuções) e /actions/workflows (nomes e paths), sem autenticação.</li>
               <li data-i18n="pipeline.doc.frontCache">Cache de 5 minutos em localStorage (memória por fallback) e AbortController com timeout de 8 s por requisição.</li>
-              <li data-i18n="pipeline.doc.frontFallback">Em falha ou rate-limit o painel mantém os últimos dados e exibe aviso com horário de renovação.</li>
-              <li data-i18n="pipeline.doc.frontFilter">O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar o que importa ao cliente.</li>
+              <li data-i18n="pipeline.doc.frontFallback">Em falha ou rate-limit o painel mantém o último resumo carregado e informa quando a API volta a responder.</li>
+              <li data-i18n="pipeline.doc.frontFilter">O resumo ignora execuções internas irrelevantes (auto-merge e runs skipped) para destacar só o que importa ao cliente.</li>
             </ul>
             <h3 data-i18n="pipeline.doc.securityTitle">Controles de segurança no cliente</h3>
             <ul>
@@ -346,9 +346,9 @@
         <button class="cmd-button cmd-button--small scene-mode" type="button" data-scene-mode="rain" aria-pressed="false" data-i18n="scene.rain">[ Com chuva ]</button>
       </div>
       <div class="scene-controls">
-        <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
+        <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pausar ]</button>
         <button id="scene-fullscreen" class="cmd-button cmd-button--small" type="button" aria-pressed="false" aria-label="Ampliar a seção Cena 3D Interativa" data-i18n="scene.fullscreen" data-i18n-attr="aria-label:scene.fullscreenAria">[ tela cheia ]</button>
-        <span class="scene-help muted" data-i18n="scene.presetHelp">// WASD ou clique/toque move o personagem · E interage · scroll livre</span>
+        <span class="scene-help muted" data-i18n="scene.presetHelp">// WASD ou clique/toque move o personagem · E interage · scroll dá zoom</span>
       </div>
     </section>
 
@@ -397,7 +397,7 @@
       <div class="panel-head">
         <h2 id="console-title" data-i18n="console.title">[ INTERACTIVE CONSOLE ]</h2>
         <div class="console-meta">
-          <span id="connection-status" class="badge">API OFFLINE</span>
+          <span id="connection-status" class="badge" data-i18n="console.statusSim">API OFFLINE</span>
           <button id="audio-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false" data-i18n="console.audioOff">[ audio: off ]</button>
         </div>
       </div>

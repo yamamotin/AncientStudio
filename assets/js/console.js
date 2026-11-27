@@ -25,7 +25,7 @@ window.TP = window.TP || {};
         '| projects   | projetos selecionados       |',
         '| status     | healthcheck da API Python   |',
         '| logs       | últimos eventos do backend  |',
-        '| contact    | e-mail e LinkedIn           |',
+        '| contact    | e-mail, LinkedIn e GitHub   |',
         '| cv         | currículos disponíveis      |',
         '| clear      | limpar o console            |',
         '+------------------------------------------+'
@@ -70,8 +70,8 @@ window.TP = window.TP || {};
     contact: function () {
       print([
         'email:     yamah1337@gmail.com',
-        'linkedin:  www.linkedin.com/in/eron-yamamoto/',
-        'github:    TODO — username não informado'
+        'linkedin:  https://www.linkedin.com/in/eron-yamamoto/',
+        'github:    https://github.com/yamamotin'
       ]);
     },
 

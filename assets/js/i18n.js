@@ -75,10 +75,10 @@ window.TP = window.TP || {};
     "scene.hint": "Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.",
     "scene.aria": "Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.",
     "scene.presetLabel": "Modos do cenário",
-    "scene.presetHelp": "// WASD ou clique/toque move o personagem · E interage · scroll livre",
+    "scene.presetHelp": "// WASD ou clique/toque move o personagem · E interage · scroll dá zoom",
     "scene.fallbackHelp": "// controles ativam quando o motor estiver disponível",
-    "scene.pause": "[ pause ]",
-    "scene.resume": "[ resume ]",
+    "scene.pause": "[ pausar ]",
+    "scene.resume": "[ continuar ]",
     "specs.user": "User",
     "specs.os": "OS",
     "specs.languages": "Languages",
@@ -95,8 +95,6 @@ window.TP = window.TP || {};
     "console.ready": "terminal ready. Digite help para começar.",
     "console.prompt": "eron@production:~$",
     "console.enter": "[ enter ]",
-    "console.githubTodo": "[ TODO ] GitHub ainda não informado pelo Eron.",
-    "console.githubDetail": "Envie o username para adicionar o link real aqui.",
     "footer.note": "// no trackers · no analytics · self-hosted fonts",
     "scene.engineHelp": "// motor WebGL2 3D conectado · WASD move · E interage",
     "scene.fullscreen": "[ tela cheia ]",
@@ -227,7 +225,7 @@ window.TP = window.TP || {};
     "scene.hint": "ASCII 3D engine stage. If WebGL is unavailable, the static fallback remains.",
     "scene.aria": "Decorative ASCII scene with a terminal, a hill and a data bus.",
     "scene.presetLabel": "Scene modes",
-    "scene.presetHelp": "// WASD or click/tap moves the character · E interacts · scroll stays free",
+    "scene.presetHelp": "// WASD or click/tap moves the character · E interacts · scroll zooms",
     "scene.fallbackHelp": "// controls enable when the engine is available",
     "scene.pause": "[ pause ]",
     "scene.resume": "[ resume ]",
@@ -247,8 +245,6 @@ window.TP = window.TP || {};
     "console.ready": "terminal ready. Type help to begin.",
     "console.prompt": "eron@production:~$",
     "console.enter": "[ enter ]",
-    "console.githubTodo": "[ TODO ] GitHub username not provided by Eron yet.",
-    "console.githubDetail": "Send the username to add the real link here.",
     "footer.note": "// no trackers · no analytics · self-hosted fonts",
     "scene.engineHelp": "// WebGL2 3D engine online · WASD moves · E interacts",
     "scene.fullscreen": "[ fullscreen ]",
@@ -312,6 +308,8 @@ window.TP = window.TP || {};
   }
 };
 
+  var STORAGE_KEY = 'ancientstudio.lang';
+  var current = 'pt-br';
   var dictionary = BUNDLED['pt-br'];
   var ready = false;
 

@@ -26,7 +26,11 @@ function assertNoAbsoluteAssetPaths(source) {
   assert.deepEqual(remoteSources, [], 'no remote runtime assets');
 
   // Only the professional profile links may be absolute; runtime assets stay local.
-  const allowedHosts = ['https://www.linkedin.com/', 'https://github.com/yamamotin/AncientStudio/actions'];
+  const allowedHosts = [
+    'https://www.linkedin.com/',
+    'https://github.com/yamamotin',
+    'https://github.com/yamamotin/AncientStudio/actions'
+  ];
   const remoteLinks = source.match(/href="https?:\/\/[^"]+"/g) || [];
   remoteLinks.forEach((link) => {
     assert.ok(allowedHosts.some((host) => link.includes(host)), `unexpected remote link: ${link}`);
@@ -49,7 +53,8 @@ test('required sections and real identity are present', () => {
     'assets/img/eron-portrait-ascii.png',
     'id="penguin-stage"',
     'id="ascii-scene"',
-    '>[ github ]</button>',
+    '>[ github ]</a>',
+    'href="https://github.com/yamamotin"',
     '>[ curriculo-pt-br ]</a>',
     '>[ curriculo-en ]</a>',
     'id="contact-button"',
