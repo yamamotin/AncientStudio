@@ -599,6 +599,8 @@ window.TP = window.TP || {};
       section.classList.toggle('is-scene-fullscreen', next);
       section.setAttribute('data-fullscreen-view', next ? 'true' : 'false');
       document.body.classList.toggle('scene-fullscreen-active', next);
+      // Fullscreen means "show the whole scene": lift any collapsed clamp.
+      if (next && TP.collapse) TP.collapse.expand(section);
       syncLabels();
 
       if (!next && document.fullscreenElement === section && typeof document.exitFullscreen === 'function') {
@@ -631,6 +633,58 @@ window.TP = window.TP || {};
     syncLabels();
   }
 
+  /* Compact-by-default presentation sections. Collapsing only clamps the body
+     height (CSS) and marks its children inert: no engine instance is created,
+     destroyed or remeasured, so the 3D scene keeps its public contract. */
+  var collapseSections = [];
+
+  function collapseLabel(button, collapsed) {
+    button.textContent = t(collapsed ? 'common.expand' : 'common.collapse');
+    button.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  function setSectionCollapsed(section, collapsed) {
+    if (!section) return;
+    var toggle = section.querySelector('[data-collapse-toggle]');
+    var bodyId = toggle && toggle.getAttribute('aria-controls');
+    var body = bodyId ? document.getElementById(bodyId) : null;
+    var next = Boolean(collapsed);
+
+    section.setAttribute('data-collapsed', next ? 'true' : 'false');
+    if (body) {
+      body.inert = next;
+      body.classList.toggle('is-clamped', next);
+    }
+    if (toggle) collapseLabel(toggle, next);
+  }
+
+  function initCollapsibles() {
+    collapseSections = Array.prototype.slice.call(document.querySelectorAll('[data-collapsible]'));
+    collapseSections.forEach(function (section) {
+      var toggle = section.querySelector('[data-collapse-toggle]');
+      if (!toggle || toggle.dataset.bound === 'true') return;
+      toggle.dataset.bound = 'true';
+      toggle.addEventListener('click', function () {
+        setSectionCollapsed(section, section.getAttribute('data-collapsed') !== 'true');
+      });
+      setSectionCollapsed(section, section.getAttribute('data-collapsed') === 'true');
+    });
+
+    window.addEventListener('tp:languagechange', function () {
+      collapseSections.forEach(function (section) {
+        var toggle = section.querySelector('[data-collapse-toggle]');
+        if (toggle) collapseLabel(toggle, section.getAttribute('data-collapsed') === 'true');
+      });
+    });
+  }
+
+  TP.collapse = {
+    init: initCollapsibles,
+    set: setSectionCollapsed,
+    expand: function (section) { setSectionCollapsed(section, false); },
+    sections: function () { return collapseSections.slice(); }
+  };
+
   function applyDynamicLabels() {
     var toggle = document.getElementById('scene-toggle');
     var audio = document.getElementById('audio-toggle');
@@ -645,6 +699,7 @@ window.TP = window.TP || {};
     var year = document.getElementById('year');
     if (year) year.textContent = String(new Date().getFullYear());
 
+    initCollapsibles();
     TP.pipeline.init();
     TP.console.init();
     if (TP.neofetch) TP.neofetch.init();
