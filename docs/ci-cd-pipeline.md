@@ -253,7 +253,42 @@ Correção aplicada em duas partes:
    `COPY docs ./docs` (com `test -f ./docs/ci-cd-pipeline.html`), então o mesmo caminho
    relativo resolve nos três ambientes.
 
-## 7. Validação
+## 7. Validação do artefato `_site/` (deploy do Pages)
+
+O staging e a verificação do artefato saíram do YAML e viraram o script versionado
+`scripts/build-pages-site.sh`, chamado por um único passo (`Stage and verify static
+artifact`) do `pages.yml`:
+
+```bash
+./scripts/build-pages-site.sh                        # stage + verify em _site/
+SITE_DIR=/tmp/_site ./scripts/build-pages-site.sh    # artefato alternativo
+SKIP_STAGE=1 SITE_DIR=/tmp/_site ./scripts/build-pages-site.sh   # re-verifica o existente
+```
+
+O script copia apenas arquivos de navegador (`index.html robots.txt sitemap.xml
+api-status.json assets docs`), grava `_site/build.txt` com o `DEPLOY_SHA` **conferido depois**
+e valida cada exigência com tamanho mínimo por arquivo (`index.html`, CSS, JS, bundle,
+dicionários i18n, currículos, fonte WOFF2, os três arquivos de `assets/draco/`, o modelo
+3D e o doc HTML). Cada falha é anunciada como anotação `::error file=<caminho>::<motivo>`,
+seguida de `::error::Pages artifact incomplete`, então o run aponta o arquivo exato —
+nunca um `exit code 1` anônimo.
+
+O caminho do modelo 3D **não** é hardcoded: o script lê o `./assets/models/*.glb` de
+`assets/js/engine-adapter.js`, exige que ele exista, tenha entre 1 MiB e 20 MiB e seja o
+**único** `*.glb` em `_site/assets/models`. Foi essa checagem que faltava quando o commit
+`965e49b` renomeou o export para `cena_final.glb` (66 MiB, texturas PNG/JPEG): a página
+passou a pedir um arquivo inexistente, o passo antigo morria em `test -s
+_site/assets/models/cena_completa.glb` sem dizer qual arquivo era, e o deploy do Pages
+(`DEPLOY_SHA: 965e49b`) falhou com `exit code 1`. O modelo foi reencodado (Draco + WebP
+`1024px`, `15.19 MiB`) e voltou ao nome canônico `assets/models/cena_completa.glb`, com a
+textura nova da `FuturisticGirl` preservada (`FuturisticGirl_Mat`).
+
+Regressões cobertas por teste: `tests/ci.test.js` executa o script de verdade em um diretório
+temporário (artefato completo ⇒ exit 0) e, removendo o `.glb`, exige exit ≠ 0 com
+`::error file=assets/models/cena_completa.glb::missing from _site`; `tests/static.test.js`
+garante que o modelo citado no adapter existe, é binário e é o único da pasta.
+
+## 8. Validação geral
 
 ```bash
 node --check assets/js/*.js

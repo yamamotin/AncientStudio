@@ -7,7 +7,7 @@
  *   2. Measures critical site load (`index.html`, CSS, core JS, WOFF2 font, portrait, `/api/v1/health`).
  *   3. Measures deferred 3D engine bundle load (`engine-adapter.js` + `ascii-engine.bundle.js`).
  *   4. Measures self-hosted Draco WASM initialization (`./assets/draco/draco_wasm_wrapper.js` + `draco_decoder.wasm`).
- *   5. Measures `cena_completa.glb` (`11.52 MiB`) transfer + real C++/WASM Draco decompression
+ *   5. Measures `cena_completa.glb` (`15.19 MiB`, Draco + WebP) transfer + real C++/WASM Draco decompression
  *      across a 4-Worker parallel pool (matching Three.js `DRACOLoader`'s `workerLimit = 4`)
  *      and compares against 1-thread WASM + network bandwidth profiles (100 Mbps / 25 Mbps).
  *
@@ -498,7 +498,7 @@ async function runSingleIteration(baseUrl, workerLimit) {
     const glbAb = await glbRes.arrayBuffer();
     const glbDownloadMs = performance.now() - tGlbFetchStart;
 
-    // Stage 5: Parse GLB + Parallel 4-Worker WASM Draco Decompression of all 154 primitives
+    // Stage 5: Parse GLB + Parallel 4-Worker WASM Draco Decompression of every Draco primitive
     const tDecompressStart = performance.now();
     const parsed = parseGlbBuffer(glbAb);
     const decodedResults = await Promise.all(

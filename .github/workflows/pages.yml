@@ -34,41 +34,16 @@ jobs:
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
-      # Stage only browser-facing files. api/ and Dockerfile stay out of Pages,
-      # so the static asset set is identical on both hosts (relative paths only).
-      - name: Stage static site
+      # Stage only browser-facing files (api/ and Dockerfile stay out of Pages, so the
+      # static asset set is identical on both hosts, relative paths only) and verify the
+      # artifact. The check reports every missing/empty file as its own `::error file=`
+      # annotation, so a failure always names the artefact instead of an exit code.
+      # It also resolves the scene .glb from engine-adapter.js: a renamed model can no
+      # longer pass unnoticed (project Pages needs index.html at the artifact root).
+      - name: Stage and verify static artifact
         run: |
-          rm -rf _site
-          mkdir -p _site
-          # `docs/` ships with the site so the portfolio's documentation link
-          # (docs/ci-cd-pipeline.html) resolves on GitHub Pages, exactly as it
-          # does on Vercel and from the local filesystem.
-          cp -R index.html robots.txt sitemap.xml api-status.json assets docs _site/
-          printf '%s\n' "$DEPLOY_SHA" > _site/build.txt
-
-      # Fail early if the artifact root is wrong; project Pages needs index.html
-      # at the artifact root (URL /AncientStudio/), not inside an extra folder.
-      - name: Verify static artifact root
-        run: |
-          test -f _site/index.html
-          test -f _site/build.txt
-          test -f _site/assets/css/style.css
-          test -f _site/assets/i18n/pt-br.json
-          test -f _site/assets/i18n/en.json
-          test -f _site/docs/ci-cd-pipeline.html
-          test -f _site/assets/js/api-client.js
-          test -f _site/assets/js/engine-adapter.js
-          test -f _site/assets/js/ascii-engine.bundle.js
-          test -s _site/assets/js/ascii-engine.bundle.js
-          test -f _site/assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf
-          test -f _site/assets/cv/Eron_Yamamoto_Resume_EN.pdf
-          test -f _site/assets/fonts/jetbrains-mono-latin-400-normal.woff2
-          test -s _site/assets/models/cena_completa.glb
-          test -s _site/assets/draco/draco_decoder.js
-          test -s _site/assets/draco/draco_decoder.wasm
-          test -s _site/assets/draco/draco_wasm_wrapper.js
-          echo "Pages artifact root OK ($(find _site -type f | wc -l) files)"
-
+          chmod +x scripts/build-pages-site.sh
+          ./scripts/build-pages-site.sh
       # GITHUB_TOKEN cannot enable Pages by API: configure-pages `enablement`
       # requires a PAT/app token. Settings → Pages → Source must already be
       # "GitHub Actions". See docs/pages-recovery.md.

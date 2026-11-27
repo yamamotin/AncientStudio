@@ -154,6 +154,21 @@ test('cena_completa.glb is Draco+WebP compressed (<50 MB, non-LFS) with preserve
   }
 });
 
+test('the scene model referenced by engine-adapter.js exists, is non-empty and is the only .glb', () => {
+  const { existsSync, readdirSync, statSync } = require('node:fs');
+
+  const match = adapter.match(/\.\/assets\/models\/([A-Za-z0-9_.-]+\.glb)/);
+  assert.ok(match, 'engine-adapter.js references a ./assets/models/*.glb');
+  assert.equal(match[1], 'cena_completa.glb', 'canonical scene model name is stable');
+
+  const full = path.join(root, 'assets/models', match[1]);
+  assert.ok(existsSync(full), `missing ${match[1]} (renaming the export without updating the adapter breaks the 3D scene)`);
+  assert.ok(statSync(full).size > 1024 * 1024, 'scene model is a real Draco+WebP binary');
+
+  const models = readdirSync(path.join(root, 'assets/models')).filter((file) => /\.glb$/i.test(file));
+  assert.deepEqual(models, ['cena_completa.glb'], 'exactly one scene model ships (no orphan re-export)');
+});
+
 test('self-hosted Draco decoder lives in assets/draco/ and uses relative ./assets/draco/ path (zero CDN)', () => {
   const { existsSync, statSync } = require('node:fs');
   const { assert } = require('./helpers/assert');

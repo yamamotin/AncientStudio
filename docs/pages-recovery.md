@@ -72,6 +72,41 @@ https://ancientstudio.vercel.app/api/v1/build
 
 Não há problema de `basePath`: os caminhos são relativos e o bundle Vite escreve diretamente em `assets/js/ascii-engine.bundle.js`. A Vercel continua usando o `Dockerfile` da raiz; `ci-cd.yml` constrói somente `infra/docker/Dockerfile`.
 
+## Incidente do artefato `_site/` (commit `965e49b`)
+
+O run do Pages com `DEPLOY_SHA: 965e49ba7422ebe3fae819e2ccc960b13a6c7eeb` falhou no antigo
+passo `Verify static artifact root` com `exit code 1` — uma cadeia de `test -f` / `test -s`
+que não dizia **qual** arquivo faltou.
+
+Causa raiz: o commit `965e49b` ("Textura na futuristicgirl") re-exportou a cena como
+`assets/models/cena_final.glb` (66 MiB, texturas PNG/JPEG) e **removeu**
+`assets/models/cena_completa.glb`, sem atualizar `assets/js/engine-adapter.js` (que continua
+pedindo `./assets/models/cena_completa.glb`). O artefato ficou sem o modelo, a verificação
+morreu em `test -s _site/assets/models/cena_completa.glb` e o site passaria a exibir o
+fallback ASCII da cena se o deploy tivesse sido publicado.
+
+Correção:
+
+1. o modelo novo foi reencodado (`resize 1024` → `webp -q 82` → `draco`, via
+   `@gltf-transform/cli`) para `15.19 MiB`, mantendo Draco + WebP, os três root nodes e as
+   NLA `Idle`/`Walking`/`Casting`, e voltou ao nome canônico
+   `assets/models/cena_completa.glb` (a textura nova da `FuturisticGirl` foi preservada);
+2. o staging e a verificação viraram `scripts/build-pages-site.sh`, com um único passo no
+   workflow (`Stage and verify static artifact`). Cada exigência é checada com tamanho
+   mínimo e reportada como `::error file=<caminho>::<motivo>`, seguida de
+   `::error::Pages artifact incomplete`; o caminho do `.glb` é lido do adapter, então um
+   export renomeado nunca mais passa silenciosamente;
+3. testes: `tests/ci.test.js` roda o script (sucesso + falha nomeada) e
+   `tests/static.test.js` exige que o modelo citado no adapter exista e seja o único `.glb`.
+
+Para reproduzir localmente o que o CI faz:
+
+```bash
+./scripts/build-pages-site.sh
+# falha esperada, nomeando o arquivo:
+SKIP_STAGE=1 SITE_DIR=/tmp/_site ./scripts/build-pages-site.sh
+```
+
 ## Validação após o deploy
 
 ```bash

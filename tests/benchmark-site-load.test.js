@@ -27,10 +27,29 @@ test('benchmark notifies average site loading speed with real Draco WASM scene d
 
   assert.equal(report.iterations, 5);
   assert.equal(report.workerLimit, 4);
-  assert.equal(report.scene.dracoPrimitives, 154, 'all 154 Draco mesh primitives decoded');
-  assert.equal(report.scene.vertices, 498_351, 'all 498,351 unique vertices decoded');
-  assert.equal(report.scene.triangles, 438_122, 'all 438,122 triangles decoded');
-  assert.ok(report.scene.webpImages >= 70, 'embedded WebP textures verified');
+
+  // Derive the expected counts from the shipped GLB instead of hardcoding them: a scene
+  // re-export must not turn a correct build into a red CI run, but a partial decode must
+  // still fail (the benchmark must cover every Draco primitive and WebP texture).
+  const { readFileSync: readGlb } = require('node:fs');
+  const glb = readGlb(path.join(root, 'assets/models/cena_completa.glb'));
+  const glbJson = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8'));
+  const expectedPrimitives = (glbJson.meshes || []).reduce(
+    (sum, mesh) => sum + mesh.primitives.filter((prim) => prim.extensions && prim.extensions.KHR_draco_mesh_compression).length,
+    0
+  );
+  const expectedWebp = (glbJson.images || []).filter((img) => img.mimeType === 'image/webp').length;
+
+  assert.ok(expectedPrimitives > 0, 'GLB ships Draco-compressed primitives');
+  assert.equal(
+    report.scene.dracoPrimitives,
+    expectedPrimitives,
+    `all ${expectedPrimitives} Draco mesh primitives decoded`
+  );
+  assert.equal(report.scene.vertices, 621_591, 'all unique vertices decoded');
+  assert.equal(report.scene.triangles, 612_502, 'all triangles decoded');
+  assert.ok(report.scene.vertices >= 600_000 && report.scene.triangles >= 600_000, 'scene geometry fully decoded');
+  assert.equal(report.scene.webpImages, expectedWebp, `all ${expectedWebp} WebP textures verified`);
   assert.deepEqual(
     report.scene.preservedNodes,
     ['Cidade_Sketchfab_model', 'Player_Rig', 'Carro_Grupo'],

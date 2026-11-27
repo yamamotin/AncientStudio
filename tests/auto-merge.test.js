@@ -106,13 +106,16 @@ test('Pages workflow uses official actions with explicit permissions and environ
 });
 
 test('Pages artifact root includes parity SHA and browser assets', () => {
-  includesAll(pages, [
-    'test -f _site/index.html',
-    'test -f _site/build.txt',
-    'test -f _site/assets/css/style.css',
-    'test -f _site/assets/js/engine-adapter.js',
-    'test -f _site/assets/js/ascii-engine.bundle.js',
-    'test -f _site/assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf'
+  // The requirement list moved into the versioned staging/verification script.
+  includesAll(pages, ['scripts/build-pages-site.sh', 'Stage and verify static artifact']);
+  const script = readFileSync(path.join(root, 'scripts/build-pages-site.sh'), 'utf8');
+  includesAll(script, [
+    'require_file index.html',
+    'require_file build.txt',
+    'require_file assets/css/style.css',
+    'require_file assets/js/engine-adapter.js',
+    'require_file assets/js/ascii-engine.bundle.js',
+    'require_file assets/cv/Eron_Yamamoto_Curriculo_BR_Pleno.pdf'
   ]);
 });
 
