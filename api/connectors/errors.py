@@ -80,6 +80,7 @@ class ConnectorCaptchaRequiredError(ConnectorError):
         resolve_endpoint: str = "/api/v1/captcha/resolve",
         expires_at: str | None = None,
         ttl_seconds: int | None = None,
+        expires_in_seconds: int | None = None,
         instructions: str | list[str] | None = None,
         status_code: int = 422,
         extra: dict[str, Any] | None = None,
@@ -101,6 +102,9 @@ class ConnectorCaptchaRequiredError(ConnectorError):
         )
         expected_param = "captcha_token"
         accepted_params = ["captcha_token", "captcha_solution"]
+        resolved_expires_in = (
+            expires_in_seconds if expires_in_seconds is not None else ttl_seconds
+        )
         normalized_challenge_data = dict(challenge_data or {})
         normalized_challenge_data.setdefault("provider", provider)
         normalized_challenge_data.setdefault("site_key", site_key)
@@ -109,6 +113,19 @@ class ConnectorCaptchaRequiredError(ConnectorError):
         normalized_challenge_data.setdefault("accepted_params", list(accepted_params))
         normalized_challenge_data.setdefault("callback", resolved_callback)
         normalized_challenge_data.setdefault("challenge_url", resolved_challenge_url)
+
+        data_uri = normalized_challenge_data.get("image_data_uri") or normalized_challenge_data.get(
+            "image_data_url"
+        )
+        if data_uri:
+            normalized_challenge_data.setdefault("image_data_uri", data_uri)
+            normalized_challenge_data.setdefault("image_data_url", data_uri)
+        prompt_text = normalized_challenge_data.get("prompt_label") or (
+            "Digite os caracteres exibidos na imagem do desafio."
+            if data_uri or provider == "image"
+            else "Informe a resposta do desafio de segurança diretamente no popup."
+        )
+        normalized_challenge_data.setdefault("prompt_label", prompt_text)
 
         image_endpoint = (
             f"/api/v1/captcha/challenges/{challenge_id}/image"
@@ -119,7 +136,8 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "mode": provider,
             "challenge_id": challenge_id,
             "provider": provider,
-            "prompt_label": normalized_challenge_data.get("prompt_label"),
+            "prompt_label": prompt_text,
+            "challenge_text": prompt_text,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
             "challenge_param": "challenge_id",
@@ -128,12 +146,18 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "session_initialized": bool(
                 session_cookie or normalized_challenge_data.get("session_initialized")
             ),
-            "image_data_uri": normalized_challenge_data.get("image_data_uri"),
+            "captcha_image": data_uri,
+            "image_data_url": data_uri,
+            "image_data_uri": data_uri,
+            "image_base64": normalized_challenge_data.get("image_base64"),
             "image_mime_type": normalized_challenge_data.get("image_mime_type"),
+            "image_url": normalized_challenge_data.get("image_url"),
             "image_endpoint": image_endpoint,
             "site_key": site_key,
+            "form_url": resolved_form_url,
             "challenge_url": resolved_challenge_url,
             "expires_at": expires_at,
+            "expires_in_seconds": resolved_expires_in,
         }
 
         merged_extra: dict[str, Any] = {
@@ -153,6 +177,14 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "response_field": resolved_response_field,
             "expected_param": expected_param,
             "accepted_params": list(accepted_params),
+            "captcha_image": data_uri,
+            "image_data_url": data_uri,
+            "image_data_uri": data_uri,
+            "image_base64": normalized_challenge_data.get("image_base64"),
+            "image_mime_type": normalized_challenge_data.get("image_mime_type"),
+            "image_url": normalized_challenge_data.get("image_url"),
+            "image_endpoint": image_endpoint,
+            "challenge_text": prompt_text,
             "popup": popup_descriptor,
             "challenge_data": normalized_challenge_data,
             "consulta_payload": dict(consulta_payload or {}),
@@ -160,24 +192,15 @@ class ConnectorCaptchaRequiredError(ConnectorError):
             "resume_method": resume_method,
             "resolve_endpoint": resolve_endpoint,
             "expires_at": expires_at,
+            "expires_in_seconds": resolved_expires_in,
             "ttl_seconds": ttl_seconds,
             "instructions": instructions
-            or (
-                "Resolva o desafio CAPTCHA exibido pelo portal oficial e reenvie a "
-                "requisição informando 'challenge_id' e 'captcha_token' (ou 'captcha_solution'), "
-                "preservando 'session_cookie' quando aplicável."
-            ),
+            or [
+                "1. Visualize o desafio/imagem de segurança exibido diretamente neste popup.",
+                "2. Informe a resposta no campo 'captcha_token' (ou 'captcha_solution') sem sair do portfólio.",
+                "3. Confirme o envio para retomar a consulta real na sessão preservada ('challenge_id' / 'session_cookie').",
+            ],
         }
-        for img_key in ("image_url", "image_base64", "image_mime_type", "image_data_uri"):
-            if normalized_challenge_data.get(img_key) is not None:
-                merged_extra[img_key] = normalized_challenge_data[img_key]
-        if normalized_challenge_data.get("image_data_uri") is not None:
-            merged_extra["image_data_url"] = normalized_challenge_data["image_data_uri"]
-            merged_extra["captcha_image"] = normalized_challenge_data["image_data_uri"]
-        if normalized_challenge_data.get("prompt_label") is not None:
-            merged_extra["challenge_text"] = normalized_challenge_data["prompt_label"]
-        if image_endpoint is not None:
-            merged_extra["image_endpoint"] = image_endpoint
 
         if extra:
             merged_extra.update(extra)

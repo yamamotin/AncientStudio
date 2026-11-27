@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProjudiConsultaRequest(BaseModel):
@@ -12,13 +12,19 @@ class ProjudiConsultaRequest(BaseModel):
 
     cpf: str | None = Field(
         default=None,
-        min_length=3,
         max_length=24,
         description=(
             "CPF (11 dígitos) ou CNPJ (14 dígitos) para consulta pública no PROJUDI TJPR. "
             "Opcional na retomada quando 'challenge_id' ou 'consulta_payload.cpf' é enviado."
         ),
     )
+
+    @field_validator("cpf", mode="before")
+    @classmethod
+    def _empty_cpf_to_none(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
     tribunal: str | None = Field(default="TJPR", max_length=16)
     challenge_id: str | None = Field(
         default=None,

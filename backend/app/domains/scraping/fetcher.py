@@ -81,7 +81,10 @@ class HttpxPageFetcher:
         req_kwargs: dict[str, object] = {}
         if form_data and method.upper() == "POST":
             req_kwargs["data"] = form_data
-        async with client.stream(method.upper(), url, **req_kwargs) as response:  # type: ignore[arg-type]
+        stream_ctx = client.stream(
+            method.upper(), url, **req_kwargs  # type: ignore[arg-type]
+        )
+        async with stream_ctx as response:
             status = response.status_code
             headers = {k.lower(): v for k, v in response.headers.items()}
             resp_cookies = {str(k): str(v) for k, v in response.cookies.items()}

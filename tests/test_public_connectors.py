@@ -1202,6 +1202,255 @@ class InteractiveCaptchaRoundTripTestCase(unittest.TestCase):
         self.assertIsNone(pub.get("image_data_uri"))
         self.assertIsNone(pub.get("image_base64"))
 
+    def test_projudi_recaptcha_fallback_image_mirroring_and_in_popup_exchange(self) -> None:
+        from api.connectors import create_public_connectors
+
+        png_challenge_1 = b"\x89PNG\r\n\x1a\nFALLBACK_GRID_IMG_1"
+        png_challenge_2 = b"\x89PNG\r\n\x1a\nFALLBACK_GRID_IMG_2"
+        minted_token = "03AFcWeA_REAL_MINTED_RECAPTCHA_VERIFICATION_TOKEN_" + ("X" * 160)
+        fallback_posts: list[str] = []
+        projudi_posts: list[tuple[str, str]] = []
+
+        fallback_html_1 = """
+        <html><body>
+          <div class="rc-imageselect-desc-no-canonical">Selecione todos os quadros com semáforos</div>
+          <img class="fbc-imageselect-payload" src="/recaptcha/api2/payload?c=FB_C_1&amp;k=6LcTestKey1234567890" />
+          <form method="post">
+            <input type="hidden" name="c" value="FB_C_1" />
+            <input type="checkbox" name="response" value="0" />
+            <input type="checkbox" name="response" value="3" />
+            <input type="checkbox" name="response" value="6" />
+          </form>
+        </body></html>
+        """
+        fallback_html_2 = """
+        <html><body>
+          <div class="rc-imageselect-desc-no-canonical">Tente novamente: selecione faixas de pedestres</div>
+          <img class="fbc-imageselect-payload" src="/recaptcha/api2/payload?c=FB_C_2&amp;k=6LcTestKey1234567890" />
+          <form method="post">
+            <input type="hidden" name="c" value="FB_C_2" />
+            <input type="checkbox" name="response" value="1" />
+          </form>
+        </body></html>
+        """
+        fallback_verified_html = f"""
+        <html><body>
+          <textarea class="fbc-verification-token" readonly>{minted_token}</textarea>
+        </body></html>
+        """
+
+        def google_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = params, headers
+            if method == "GET" and "api/fallback" in url:
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    body=fallback_html_1.encode("utf-8"),
+                )
+            if method == "GET" and "api2/payload" in url:
+                payload_bytes = png_challenge_2 if "FB_C_2" in url else png_challenge_1
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    body=payload_bytes,
+                )
+            if method == "POST" and "api/fallback" in url:
+                raw_form = (data or b"").decode("utf-8", errors="replace")
+                fallback_posts.append(raw_form)
+                if "c=FB_C_2" in raw_form and "response=1" in raw_form:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=utf-8"},
+                        body=fallback_verified_html.encode("utf-8"),
+                    )
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    body=fallback_html_2.encode("utf-8"),
+                )
+            raise UpstreamConnectorError(f"Unexpected Google URL: {url}", status_code=503)
+
+        def tjpr_handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = params
+            if method == "GET":
+                html = (
+                    REALISTIC_TJPR_FRAMESET_HTML
+                    if "consultaPublica.do" not in url
+                    else REALISTIC_TJPR_FORM_HTML
+                )
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": "JSESSIONID=TJPR_FB_SID_1; Path=/projudi_consulta",
+                    },
+                    body=html.encode("iso-8859-1"),
+                )
+            if method == "POST" and "actionType=pesquisar" in url:
+                body_str = (data or b"").decode("ascii", errors="replace")
+                cookie_str = headers.get("Cookie", "")
+                projudi_posts.append((cookie_str, body_str))
+                if "JSESSIONID=TJPR_FB_SID_1" in cookie_str and minted_token in body_str:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
+            raise UpstreamConnectorError(f"Unexpected TJPR request {method} {url}", status_code=503)
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport(
+                {
+                    "consulta.tjpr.jus.br": tjpr_handler,
+                    "www.google.com": google_handler,
+                }
+            )
+        )
+
+        # 1. Initial call returns 422 with mirrored PNG Base64, expires_in_seconds, and in-popup guidance
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx1:
+            registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+
+        err1 = ctx1.exception
+        self.assertEqual(err1.status_code, 422)
+        self.assertEqual(err1.code, "CAPTCHA_REQUIRED")
+        self.assertTrue(err1.extra["captcha_image"].startswith("data:image/png;base64,"))
+        self.assertEqual(err1.extra["image_data_url"], err1.extra["captcha_image"])
+        self.assertIsNotNone(err1.extra["image_base64"])
+        self.assertEqual(err1.extra["session_cookie"], "JSESSIONID=TJPR_FB_SID_1")
+        self.assertIn("consultaPublica.do?actionType=iniciar", err1.extra["form_url"])
+        self.assertGreater(err1.extra["expires_in_seconds"], 0)
+        self.assertLessEqual(err1.extra["expires_in_seconds"], 300)
+        self.assertIn("semáforos", err1.extra["challenge_text"])
+        # Secret fallback 'c' token must never leak to client JSON
+        self.assertNotIn("FB_C_1", json.dumps(err1.extra))
+        # Instructions must NEVER ask the user to leave the portfolio or open external portal
+        joined_inst = " ".join(err1.extra["instructions"]).lower()
+        self.assertNotIn("acesse o formulário público", joined_inst)
+        self.assertIn("popup", joined_inst)
+
+        # 2. Wrong popup grid answer refreshes image without losing TJPR JSESSIONID
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx2:
+            registry.projudi.consulta_por_cpf(
+                challenge_id=err1.extra["challenge_id"],
+                captcha_token="9",
+            )
+        err2 = ctx2.exception
+        self.assertNotEqual(err2.extra["challenge_id"], err1.extra["challenge_id"])
+        self.assertNotEqual(err2.extra["image_base64"], err1.extra["image_base64"])
+        self.assertEqual(err2.extra["session_cookie"], "JSESSIONID=TJPR_FB_SID_1")
+        self.assertTrue(err2.extra["challenge_data"]["rejected_previous_attempt"])
+
+        # 3. Correct 1-based tile answer '2' (-> 0-based '1') mints g-recaptcha-response & completes scrape
+        completed = registry.projudi.consulta_por_cpf(
+            challenge_id=err2.extra["challenge_id"],
+            captcha_token="2",
+        )
+        self.assertEqual(completed["modo_execucao"], "raspagem_real_projudi_tjpr")
+        self.assertFalse(completed["compliance"]["dados_sinteticos_ou_mock"])
+        self.assertEqual(completed["total_processos"], 2)
+        self.assertIn("response=1", fallback_posts[-1])
+        self.assertEqual(len(projudi_posts), 1)
+        self.assertIn("JSESSIONID=TJPR_FB_SID_1", projudi_posts[0][0])
+
+    def test_script_assigned_captcha_servlet_and_stateless_cookie_resume(self) -> None:
+        from api.connectors import create_public_connectors
+
+        png_bytes = b"\x89PNG\r\n\x1a\nJS_SERVLET_PNG"
+        js_form_html = """
+        <html><body>
+          <form id="buscaProcessoForm" action="/projudi_consulta/processo/consultaPublica.do?actionType=pesquisar" method="post">
+            <input type="hidden" name="actionType" value="pesquisar" />
+            <input type="text" name="codCaptcha" placeholder="Digite o código exibido" />
+          </form>
+          <script>
+            var imgEl = document.getElementById('imgSeg');
+            imgEl.src = '/projudi_consulta/gerarCaptcha.do?seed=42';
+          </script>
+        </body></html>
+        """
+        seen_cookies: list[str] = []
+
+        def handler(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            _ = params
+            if method == "GET" and "gerarCaptcha.do" in url:
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    body=png_bytes,
+                )
+            if method == "POST" and "actionType=pesquisar" in url:
+                cookie_hdr = headers.get("Cookie", "")
+                body_str = (data or b"").decode("ascii", errors="replace")
+                seen_cookies.append(cookie_hdr)
+                if "JSESSIONID=STATELESS_SID_9" in cookie_hdr and "codCaptcha=K8M2P" in body_str:
+                    return HttpResponse(
+                        url=url,
+                        status_code=200,
+                        headers={"content-type": "text/html; charset=ISO-8859-1"},
+                        body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                    )
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={
+                    "content-type": "text/html; charset=ISO-8859-1",
+                    "set-cookie": "JSESSIONID=BOOT_OTHER; Path=/projudi_consulta",
+                },
+                body=js_form_html.encode("iso-8859-1"),
+            )
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": handler})
+        )
+
+        with self.assertRaises(ConnectorCaptchaRequiredError) as ctx:
+            registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+        err = ctx.exception
+        self.assertEqual(err.extra["provider"], "image")
+        self.assertEqual(err.extra["response_field"], "codCaptcha")
+        self.assertIn("gerarCaptcha.do", err.extra["image_url"])
+        self.assertTrue(err.extra["image_data_url"].startswith("data:image/png;base64,"))
+
+        # Stateless resumption passing cpf + session_cookie + captcha_token without challenge_id
+        res = registry.projudi.consulta_por_cpf(
+            "111.444.777-35",
+            tribunal="TJPR",
+            session_cookie="JSESSIONID=STATELESS_SID_9",
+            captcha_token="K8M2P",
+        )
+        self.assertEqual(res["total_processos"], 2)
+        self.assertFalse(res["compliance"]["dados_sinteticos_ou_mock"])
+        self.assertIn("JSESSIONID=STATELESS_SID_9", seen_cookies[-1])
+
 
 if __name__ == "__main__":
     unittest.main()
