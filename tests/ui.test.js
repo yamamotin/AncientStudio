@@ -19,7 +19,7 @@ const pt = JSON.parse(read('assets/i18n/pt-br.json'));
 const en = JSON.parse(read('assets/i18n/en.json'));
 const heroSection = html.slice(
   html.indexOf('<section id="top"'),
-  html.indexOf('<!-- 2. CI/CD PIPELINE SIMULATOR -->')
+  html.indexOf('<!-- 2. LIVE CI/CD & DOCKER PIPELINE')
 );
 const stackSection = html.slice(
   html.indexOf('<section id="stack"'),

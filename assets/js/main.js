@@ -374,7 +374,13 @@ window.TP = window.TP || {};
     }
 
     if (client) {
-      fetch('api-status.json', { cache: 'no-store' })
+      var Controller = window.AbortController;
+      var controller = typeof Controller === 'function' ? new Controller() : null;
+      var timer = null;
+      if (controller) {
+        timer = window.setTimeout(function () { controller.abort(); }, 5000);
+      }
+      fetch('api-status.json', { cache: 'no-store', signal: controller ? controller.signal : undefined })
         .then(function (response) { return response.ok ? response.json() : { ok: false }; })
         .then(function (status) {
           if (!status.ok) {
@@ -403,6 +409,9 @@ window.TP = window.TP || {};
           backendOnline = false;
           var label = document.getElementById('connection-status');
           if (label) label.textContent = t('console.statusSim');
+        })
+        .finally(function () {
+          if (timer) window.clearTimeout(timer);
         });
     }
   }
@@ -539,6 +548,30 @@ window.TP = window.TP || {};
     }
   }
 
+  // Secrets typed in the UI are masked, never persisted and wiped when the tab
+  // stops being visible: no localStorage/sessionStorage write exists for them.
+  function initSensitiveInputs() {
+    var fields = Array.prototype.slice.call(document.querySelectorAll('input[data-sensitive]'));
+
+    function wipe() {
+      Array.prototype.forEach.call(document.querySelectorAll('input[data-sensitive]'), function (field) {
+        field.value = '';
+      });
+    }
+
+    fields.forEach(function (field) {
+      field.setAttribute('autocomplete', 'new-password');
+      field.setAttribute('spellcheck', 'false');
+      field.setAttribute('data-lpignore', 'true');
+    });
+
+    if (!fields.length) return;
+    window.addEventListener('pagehide', wipe);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') wipe();
+    });
+  }
+
   /* Fullscreen is a viewport/layout change only: no scene instance is created,
      destroyed or remounted. The existing adapter ResizeObserver handles the new
      container size, so the rest of the portfolio keeps running. */
@@ -617,6 +650,7 @@ window.TP = window.TP || {};
     if (TP.neofetch) TP.neofetch.init();
     initBrightness();
     initContactButton();
+    initSensitiveInputs();
     initTypewriter();
     initTabs();
     initScene();
@@ -691,7 +725,7 @@ window.TP = window.TP || {};
         start();
         return;
       }
-      if (target.closest('#playground') && !started) {
+      if (target.closest('#gateway') && !started) {
         start();
       }
     }, { capture: true, passive: false });

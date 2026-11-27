@@ -54,9 +54,9 @@ convenience wrappers for all created controllers. Controller instances emit
 `tp:scene-mode` with `{ mode: 'engine' | 'fallback' }` so the UI enables controls
 only when ready.
 
-## Playground systems
+## Interactive scene systems
 
-`[ ASCII REALMS // SCENE ]` runs `AsciiSceneEngine` in `mode: 'playground'`
+`[ CENA 3D INTERATIVA ]` / `[ INTERACTIVE SCENE 3D ]` runs `AsciiSceneEngine` in `mode: 'playground'`
 loading `./assets/models/cena_completa.glb` via `GlbSceneLoader` (`GLTFLoader` +
 self-hosted `DRACOLoader` at `./assets/draco/`, zero external CDN) and mapping
 its three embedded root nodes into ECS entities (`UrbanGlbSceneBuilder`):

@@ -769,6 +769,13 @@ window.TP = window.TP || {};
       options.headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(payload || {});
     }
+    var Controller = window.AbortController;
+    var controller = typeof Controller === 'function' ? new Controller() : null;
+    var timer = null;
+    if (controller) {
+      options.signal = controller.signal;
+      timer = window.setTimeout(function () { controller.abort(); }, 10000);
+    }
     try {
       var response = await fetch(path, options);
       var data = await response.json();
@@ -777,6 +784,8 @@ window.TP = window.TP || {};
       return { data: data, status: response.status, ms: Math.round(ended - started), source: 'api' };
     } catch (error) {
       return null;
+    } finally {
+      if (timer) window.clearTimeout(timer);
     }
   }
 
@@ -814,16 +823,16 @@ window.TP = window.TP || {};
         event_id: 'evt-demo-3522'
       });
     },
+    // Public data connectors keep the same honest fallback contract as the rest
+    // of this legacy offline client: real HTTP first, simulation only when static.
     bcbIndicadores: simulatedBcbIndicadores,
     bcbInstituicoes: simulatedBcbInstituicoes,
     siscomexNcm: simulatedSiscomexNcm,
     transparenciaMunicipio: simulatedTransparenciaMunicipio,
     projudiConsulta: simulatedProjudiConsulta,
     projudiProcesso: simulatedProjudiProcesso,
-    projudiResumo: simulatedProjudiResumo,
-    runPipeline: function (forceFailure) {
-      if (mode !== 'api') return Promise.resolve(null);
-      return request('/api/v1/pipeline/run', 'POST', { force_failure: Boolean(forceFailure) });
-    }
+    projudiResumo: simulatedProjudiResumo
+    // No pipeline runner here: the CI/CD panel reads public GitHub Actions
+    // metadata only (assets/js/pipeline.js) and never triggers builds.
   };
 })(window.TP);

@@ -336,15 +336,8 @@ h2 {
 .section > .muted,
 .panel > .muted { margin-top: var(--space-3); font-size: var(--fs-small); }
 
-/* Pipeline simulator */
+/* Live CI/CD panel: real GitHub Actions metadata */
 .pipeline-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
-
-.progress-line {
-  margin-top: var(--space-4);
-  color: var(--green);
-  font-size: var(--fs-small);
-  white-space: nowrap;
-}
 
 .terminal-log {
   margin-top: var(--space-4);
@@ -363,16 +356,109 @@ h2 {
 .terminal-log .ok { color: var(--green); }
 .terminal-log .info { color: var(--cyan); }
 
-.rca-box {
+.run-list {
   margin-top: var(--space-4);
-  padding: var(--space-4);
-  border: 1px solid var(--red);
-  border-radius: var(--radius);
-  background: rgba(255, 92, 92, 0.04);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
 }
 
-.rca-box .cmd-button { margin-top: var(--space-3); }
-.rca-box .terminal-log { border-color: rgba(255, 92, 92, 0.35); }
+.run-item {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--terminal-bg);
+}
+
+.run-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.run-name {
+  color: var(--text);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+
+.status-pill {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: var(--fs-tiny);
+  letter-spacing: var(--tracking);
+  white-space: nowrap;
+}
+
+.status-pill.is-success { color: var(--green); border-color: var(--border); }
+.status-pill.is-failure { color: var(--red); border-color: var(--red); }
+.status-pill.is-running { color: var(--cyan); border-color: var(--border-soft); }
+
+.run-meta {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-tiny);
+  overflow-wrap: anywhere;
+}
+
+.run-link { display: inline-block; margin-top: var(--space-2); font-size: var(--fs-tiny); }
+
+.run-empty {
+  margin-top: var(--space-3);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+.tech-doc {
+  margin-top: var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.tech-doc > summary {
+  padding: var(--space-3) var(--space-4);
+  color: var(--cyan);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.tech-doc > summary:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
+}
+
+.tech-doc-body { padding: 0 var(--space-4) var(--space-4); }
+.tech-doc-body h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--text);
+  font-size: var(--fs-small);
+}
+.tech-doc-body ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.tech-doc-body li { margin-bottom: var(--space-2); overflow-wrap: anywhere; }
+
+/* Sensitive inputs (X-API-Key, CPF): never persisted, wiped when the tab hides,
+   and visually masked when unfocused in engines that support text-security. */
+input[data-sensitive]:not(:focus) {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+
+.gateway-note {
+  margin-top: var(--space-2);
+  font-size: var(--fs-tiny);
+}
 
 /* Tabs */
 .ascii-tab-frame { margin-top: var(--space-5); }
@@ -407,13 +493,13 @@ h2 {
 .tabpanel { padding-top: var(--space-4); }
 .tabpanel > .muted { font-size: var(--fs-small); }
 
-.playground-grid {
+.gateway-grid {
   display: grid;
   gap: var(--space-4);
   margin-top: var(--space-4);
 }
 
-.playground-card {
+.gateway-card {
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4);
@@ -422,13 +508,13 @@ h2 {
   background: var(--panel);
 }
 
-.playground-card-title {
+.gateway-card-title {
   color: var(--cyan);
   font-size: var(--fs-small);
   font-weight: 700;
 }
 
-.playground-fields {
+.gateway-fields {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
@@ -461,7 +547,7 @@ h2 {
 
 .select-control::placeholder { color: var(--muted); }
 
-.playground-actions {
+.gateway-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);

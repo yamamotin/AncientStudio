@@ -70,5 +70,9 @@ test('api-client performs real /api/v1 requests only', () => {
 test('no phone numbers or invented GitHub URL in i18n strings', () => {
   const joined = JSON.stringify({ pt, en });
   assert.doesNotMatch(joined, /\+\d{2}\s?\(?\d{2}/);
-  assert.doesNotMatch(joined, /github\.com\//i);
+  // The only GitHub URL allowed in copy is the canonical Actions/repository path.
+  const githubUrls = joined.match(/https:\/\/github\.com\/[^"]+/gi) || [];
+  githubUrls.forEach((url) => {
+    assert.match(url, /^https:\/\/github\.com\/yamamotin\/AncientStudio\//, `invented GitHub URL: ${url}`);
+  });
 });

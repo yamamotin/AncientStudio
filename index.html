@@ -3,18 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Strict client-side policy: same-origin assets only, GitHub's public read-only
+       API as the single cross-origin endpoint, no inline script/style, no frames. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com; form-action 'self'; frame-src 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Eron Yamamoto D. Justina // Backend &amp; Data Engineer</title>
-  <meta name="description" content="Portfólio técnico interativo de Eron Yamamoto D. Justina. Python, Linux, APIs REST, automação, CI/CD e pipelines de dados. Disponível remoto.">
+  <meta name="description" content="Portfólio técnico de Eron Yamamoto D. Justina. Python, Linux, APIs REST, automação, CI/CD e pipelines de dados. Disponível remoto.">
   <meta name="color-scheme" content="dark">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Eron Yamamoto D. Justina // Backend, Data & Automation Engineer">
-  <meta property="og:description" content="Portfólio terminal interativo: simule CI/CD, teste APIs e explore a stack de Python, Linux, dados e automação.">
+  <meta property="og:description" content="Portfólio terminal: painel de CI/CD com dados reais do GitHub Actions, gateway de APIs e stack de Python, Linux, dados e automação.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Eron Yamamoto D. Justina // Backend, Data & Automation Engineer">
-  <meta name="twitter:description" content="Portfólio terminal interativo: simule CI/CD, teste APIs e explore a stack de Python, Linux, dados e automação.">
+  <meta name="twitter:description" content="Portfólio terminal: painel de CI/CD com dados reais do GitHub Actions, gateway de APIs e stack de Python, Linux, dados e automação.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0%200%2064%2064'%3E%3Crect width='64' height='64' rx='8' fill='%230D1117'/%3E%3Ctext x='8' y='44' font-family='monospace' font-size='34' font-weight='bold' fill='%2300FF41'%3E%3E_%3C/text%3E%3C/svg%3E">
   <link rel="preload" href="assets/fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/css/style.css">
+  <!-- i18n ships with the embedded pt-br dictionary, so it must be ready
+       before the UI modules that render dynamic labels (pipeline panel, scene,
+       console) run their first pass. Keeping it as a deferred same-origin script
+       costs no extra request for pt-br and avoids painting raw i18n keys. -->
+  <script src="assets/js/i18n.js" defer data-i18n-js></script>
   <script src="assets/js/core.js" defer></script>
   <script src="assets/js/api.js" defer></script>
   <script src="assets/js/pipeline.js" defer></script>
@@ -31,7 +40,7 @@
       <a class="brand" href="#top">ERON@PRODUCTION:~$</a>
       <nav class="topnav" aria-label="Seções" data-i18n-attr="aria-label:nav.sections">
         <a href="#pipeline" data-i18n="nav.pipeline">01 pipeline</a>
-        <a href="#playground" data-i18n="nav.apis">02 APIs</a>
+        <a href="#gateway" data-i18n="nav.apis">02 gateway</a>
         <a href="#scene" data-i18n="nav.scene">03 scene</a>
         <a href="#console" data-i18n="nav.console">04 console</a>
         <button id="lang-toggle" class="cmd-button cmd-button--small" type="button" data-i18n="lang.switchToEn">[ en ]</button>
@@ -56,7 +65,7 @@
       <p class="prompt-line">eron@production:~$ <span>whoami</span></p>
       <p class="typewriter-frame" data-i18n-attr="data-text:hero.role" data-text="Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente"><span id="typewriter" class="typewriter" aria-hidden="true">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</span></p>
       <p class="sr-only" data-i18n="hero.role">Engenheiro de Software Backend, Dados &amp; Automação | Python • Linux • APIs REST • CI/CD | Inglês Fluente</p>
-      <p class="hero-location" data-i18n="hero.location">Paranavaí, Brazil · Remote / LATAM · yamah1337@gmail.com</p>
+      <p class="hero-location" data-i18n="hero.location">Paranavaí, PR · Remoto / LATAM · yamah1337@gmail.com</p>
 
       <div class="hero-actions" role="group" aria-label="Ações" data-i18n-attr="aria-label:actions.aria">
         <!-- PDFs originais enviados pelo próprio Eron (autorizado em 2026-11-24). -->
@@ -68,34 +77,57 @@
       </div>
     </section>
 
-    <!-- 2. CI/CD PIPELINE SIMULATOR -->
+    <!-- 2. LIVE CI/CD & DOCKER PIPELINE (public GitHub Actions metadata, read-only) -->
     <section id="pipeline" class="panel" aria-labelledby="pipeline-title">
       <div class="panel-head">
-        <h2 id="pipeline-title" data-i18n="pipeline.title">[ LIVE CI/CD &amp; DOCKER PIPELINE SIMULATOR ]</h2>
-        <span class="badge" data-i18n="pipeline.badge">SANDBOX</span>
+        <h2 id="pipeline-title" data-i18n="pipeline.title">[ LIVE CI/CD &amp; DOCKER PIPELINE ]</h2>
+        <span id="pipeline-source" class="badge" data-i18n="pipeline.badge">GITHUB ACTIONS</span>
       </div>
-      <p class="muted" data-i18n="pipeline.hint">Clique para ver os quatro estágios. O modo "--force" falha de propósito no Step 1 e abre a análise de causa raiz.</p>
+      <p class="muted" data-i18n="pipeline.hint">Execuções reais de yamamotin/AncientStudio lidas da API pública do GitHub Actions: somente leitura, sem token e com cache de 5 minutos.</p>
       <div class="pipeline-actions">
-        <button id="pipeline-success" class="cmd-button cmd-button--primary" type="button" data-i18n="pipeline.success">&gt; git push origin main</button>
-        <button id="pipeline-failure" class="cmd-button cmd-button--danger" type="button" data-i18n="pipeline.failure">&gt; git push --force (simulate bug)</button>
+        <button id="pipeline-refresh" class="cmd-button cmd-button--primary" type="button" data-i18n="pipeline.refresh">[ atualizar ]</button>
+        <a id="pipeline-actions-link" class="cmd-button" href="https://github.com/yamamotin/AncientStudio/actions" target="_blank" rel="noopener noreferrer" data-i18n="pipeline.openActions">[ abrir actions ]</a>
       </div>
-      <div id="pipeline-progress" class="progress-line" aria-hidden="true">[..........]   0%</div>
-      <div id="pipeline-log" class="terminal-log" role="log" aria-live="polite" aria-relevant="additions">
-        <p><span class="muted">$</span> <span data-i18n="pipeline.waiting">waiting for git push...</span></p>
-      </div>
-      <div id="rca-box" class="rca-box" hidden>
-        <p class="error">[ERROR: AssertionError in test_payment_webhook.py]</p>
-        <button id="rca-button" class="cmd-button cmd-button--danger" type="button" data-i18n="pipeline.rca">[ &gt; run N3 Root Cause Analysis (RCA) ]</button>
-        <div id="rca-output" class="terminal-log" role="log" aria-live="polite"></div>
-      </div>
+      <p id="pipeline-status" class="response-meta" role="status" aria-live="polite">// carregando execuções públicas do GitHub Actions…</p>
+      <ul id="pipeline-runs" class="run-list" aria-labelledby="pipeline-title"></ul>
+      <noscript>
+        <p class="muted">// JavaScript desativado: abra as execuções reais em https://github.com/yamamotin/AncientStudio/actions</p>
+      </noscript>
+      <details class="tech-doc">
+        <summary data-i18n="pipeline.docsSummary">[ documentação técnica ]</summary>
+        <div class="tech-doc-body">
+          <h3 data-i18n="pipeline.doc.archTitle">Arquitetura real dos workflows</h3>
+          <ul>
+            <li data-i18n="pipeline.doc.archCi">ci.yml — CI — Backend, ASCII 3D Engine &amp; Portfolio Integrity: typecheck, build do bundle ASCII, contrato do engine, node --test e unittest do backend.</li>
+            <li data-i18n="pipeline.doc.archCicd">ci-cd.yml — Ruff + pytest no backend, build da imagem Docker e deploy de produção na Vercel.</li>
+            <li data-i18n="pipeline.doc.archPages">pages.yml — publicação estática no GitHub Pages com verificação de paridade (não bloqueante) entre Pages e Vercel.</li>
+            <li data-i18n="pipeline.doc.archVcr">vcr-cleanup.yml — retenção das 3 imagens mais recentes dockerfile no Vercel Container Registry, com modo dry_run.</li>
+          </ul>
+          <h3 data-i18n="pipeline.doc.frontTitle">Como o frontend consome os dados</h3>
+          <ul>
+            <li data-i18n="pipeline.doc.frontApi">Duas chamadas GET públicas: /actions/runs (até 6 execuções) e /actions/workflows (nomes e paths), sem autenticação.</li>
+            <li data-i18n="pipeline.doc.frontCache">Cache de 5 minutos em localStorage (memória por fallback) e AbortController com timeout de 8 s por requisição.</li>
+            <li data-i18n="pipeline.doc.frontFallback">Em falha ou rate-limit o painel mantém os últimos dados e exibe aviso com link direto para o Actions.</li>
+          </ul>
+          <h3 data-i18n="pipeline.doc.securityTitle">Controles de segurança no cliente</h3>
+          <ul>
+            <li data-i18n="pipeline.doc.securityDom">Somente createElement + textContent; nenhum innerHTML com dado externo, com limite de tamanho e remoção de caracteres de controle.</li>
+            <li data-i18n="pipeline.doc.securityUrl">href aceito apenas para https://github.com/yamamotin/AncientStudio/actions/runs/&lt;id&gt;; links externos com rel="noopener noreferrer".</li>
+            <li data-i18n="pipeline.doc.securitySecrets">Zero segredos: nenhum token em JS, credentials: 'omit' e nenhum header Authorization.</li>
+            <li data-i18n="pipeline.doc.securityCsp">CSP restritiva via meta http-equiv, com connect-src limitado a 'self' e https://api.github.com.</li>
+            <li data-i18n="pipeline.doc.securityFlood">Botão de atualizar bloqueado durante a requisição e cooldown de 4 s contra clique duplo ou flood.</li>
+          </ul>
+          <p class="muted"><a href="docs/ci-cd-pipeline.md" target="_blank" rel="noopener noreferrer" data-i18n="pipeline.doc.reference">Referência completa: docs/ci-cd-pipeline.md</a></p>
+        </div>
+      </details>
     </section>
 
-    <!-- 3. API PLAYGROUND / TABS -->
-    <section id="playground" class="section" aria-labelledby="playground-title">
-      <h2 id="playground-title">[ API PLAYGROUND // PROJECTS ]</h2>
+    <!-- 3. API GATEWAY / INTEGRATIONS -->
+    <section id="gateway" class="section" aria-labelledby="gateway-title">
+      <h2 id="gateway-title" data-i18n="gateway.title">[ API GATEWAY // INTEGRAÇÕES ]</h2>
       <div class="ascii-tab-frame">
         <div class="ascii-rule" aria-hidden="true">+------------------+------------------+-------------------+</div>
-        <div class="tablist" role="tablist" aria-label="Projetos" data-i18n-attr="aria-label:tabs.aria">
+        <div class="tablist" role="tablist" aria-label="Integrações" data-i18n-attr="aria-label:tabs.aria">
           <button id="tab-etl" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-etl" tabindex="0" data-i18n="tabs.etl">ETL &amp; Web Scraping</button>
           <button id="tab-fintech" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-fintech" tabindex="-1" data-i18n="tabs.fintech">Fintech &amp; Tax API</button>
           <button id="tab-workflow" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-workflow" tabindex="-1" data-i18n="tabs.workflow">n8n &amp; AI Workflows</button>
@@ -105,10 +137,10 @@
 
       <div id="panel-etl" class="tabpanel" role="tabpanel" aria-labelledby="tab-etl" tabindex="0">
         <p class="muted" data-i18n="etl.hint">Conectores públicos de dados e ETL: consulta municipal IBGE/TSE, triagem pública PROJUDI (LGPD) e normalização contábil, com fallback automático em hospedagem estática.</p>
-        <div class="playground-grid">
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="etl.municipioTitle">IBGE + TSE // Governança Pública Municipal</h3>
-            <div class="playground-fields">
+        <div class="gateway-grid">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="etl.municipioTitle">IBGE + TSE // Governança Pública Municipal</h3>
+            <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="etl.cidadeLabel">Município</span>
                 <input id="etl-cidade" class="select-control" type="text" value="Paranavaí" autocomplete="off">
@@ -118,18 +150,18 @@
                 <input id="etl-uf" class="select-control" type="text" maxlength="2" value="PR" autocomplete="off">
               </label>
             </div>
-            <div class="playground-actions">
+            <div class="gateway-actions">
               <button id="transparencia-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.municipioButton">GET /api/v1/transparencia/municipio</button>
               <button id="extract-button" class="cmd-button" type="button" data-i18n="etl.button">GET /api/v1/etl/datasets/ledger/summary</button>
             </div>
           </div>
 
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="etl.projudiTitle">PROJUDI // Consulta Processual Pública (LGPD)</h3>
-            <div class="playground-fields">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="etl.projudiTitle">PROJUDI // Consulta Processual Pública (LGPD)</h3>
+            <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="etl.cpfLabel">CPF (validação mod-11)</span>
-                <input id="projudi-cpf" class="select-control" type="text" value="111.444.777-35" autocomplete="off">
+                <input id="projudi-cpf" class="select-control" type="text" value="111.444.777-35" inputmode="numeric" autocomplete="off" spellcheck="false" data-sensitive="true" aria-describedby="projudi-cpf-note">
               </label>
               <label class="field-group field-group--compact">
                 <span data-i18n="etl.tribunalLabel">Tribunal</span>
@@ -143,10 +175,11 @@
               </label>
               <label class="field-group field-group--wide">
                 <span>reCAPTCHA Token (TJPR)</span>
-                <input id="projudi-captcha" class="select-control" type="text" placeholder="g-recaptcha-response (consulta.tjpr.jus.br)" autocomplete="off">
+                <input id="projudi-captcha" class="select-control" type="text" placeholder="g-recaptcha-response (consulta.tjpr.jus.br)" autocomplete="off" data-sensitive>
               </label>
             </div>
-            <div class="playground-actions">
+            <p id="projudi-cpf-note" class="muted gateway-note" data-i18n="etl.cpfNote">// CPF validado no servidor (mod-11) e mascarado: não é salvo no navegador nem ecoado na resposta.</p>
+            <div class="gateway-actions">
               <button id="projudi-consulta-button" class="cmd-button cmd-button--primary" type="button" data-i18n="etl.projudiConsultaBtn">POST /api/v1/projudi/processos/consulta</button>
               <button id="projudi-detalhe-button" class="cmd-button" type="button" data-i18n="etl.projudiDetalheBtn">GET /api/v1/projudi/processos/{numero}</button>
             </div>
@@ -158,10 +191,10 @@
 
       <div id="panel-fintech" class="tabpanel" role="tabpanel" aria-labelledby="tab-fintech" tabindex="0" hidden>
         <p class="muted" data-i18n="gateway.hint">APIs Financeiras e Tributárias: séries oficiais BCB SGS (Selic, IPCA, PTAX), instituições PIX/ISPB, tabela NCM do Portal Único Siscomex sem acentos e gateway fiscal idempotente.</p>
-        <div class="playground-grid">
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="fintech.bcbTitle">Banco Central // Séries SGS &amp; Instituições PIX</h3>
-            <div class="playground-fields">
+        <div class="gateway-grid">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="fintech.bcbTitle">Banco Central // Séries SGS &amp; Instituições PIX</h3>
+            <div class="gateway-fields">
               <label class="field-group field-group--compact">
                 <span data-i18n="fintech.ultimosLabel">Períodos SGS</span>
                 <input id="bcb-ultimos" class="select-control" type="number" min="1" max="30" value="5">
@@ -171,21 +204,21 @@
                 <input id="bcb-busca" class="select-control" type="text" value="Nubank" autocomplete="off">
               </label>
             </div>
-            <div class="playground-actions">
+            <div class="gateway-actions">
               <button id="bcb-indicadores-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.bcbIndicadoresBtn">GET /api/v1/bcb/indicadores</button>
               <button id="bcb-instituicoes-button" class="cmd-button" type="button" data-i18n="fintech.bcbInstituicoesBtn">GET /api/v1/bcb/instituicoes</button>
             </div>
           </div>
 
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="fintech.siscomexTitle">Portal Único Siscomex // Classificação NCM &amp; Fiscal</h3>
-            <div class="playground-fields">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="fintech.siscomexTitle">Portal Único Siscomex // Classificação NCM &amp; Fiscal</h3>
+            <div class="gateway-fields">
               <label class="field-group field-group--wide">
                 <span data-i18n="fintech.ncmLabel">Descrição do produto ou código NCM</span>
                 <input id="siscomex-query" class="select-control" type="text" value="GPU" placeholder="GPU, computadores portateis, 8471.80.00" autocomplete="off">
               </label>
             </div>
-            <div class="playground-actions">
+            <div class="gateway-actions">
               <button id="siscomex-ncm-button" class="cmd-button cmd-button--primary" type="button" data-i18n="fintech.siscomexBtn">GET /api/v1/siscomex/ncm</button>
               <button id="invoice-button" class="cmd-button" type="button" data-i18n="gateway.button">POST /api/v1/gateway/invoices/submit</button>
             </div>
@@ -203,10 +236,10 @@
 +---------+     +---------------+     +--------+     +--------------+
      ^                   |                   |
      +-------------------+-------------------+   n8n orchestration</pre>
-        <div class="playground-grid">
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="workflow.resumoTitle">PROJUDI + IA // Triagem Determinística &amp; Resumo LLM</h3>
-            <div class="playground-fields">
+        <div class="gateway-grid">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="workflow.resumoTitle">PROJUDI + IA // Triagem Determinística &amp; Resumo LLM</h3>
+            <div class="gateway-fields">
               <label class="field-group">
                 <span data-i18n="workflow.resumoProcessoLabel">Processo CNJ</span>
                 <input id="resumo-numero" class="select-control" type="text" value="0001234-57.2024.8.16.0130" autocomplete="off">
@@ -216,20 +249,20 @@
                 <input id="resumo-texto" class="select-control" type="text" value="Deferida tutela de urgência; autos conclusos para sentença." autocomplete="off">
               </label>
             </div>
-            <div class="playground-actions">
+            <div class="gateway-actions">
               <button id="projudi-resumo-button" class="cmd-button cmd-button--primary" type="button" data-i18n="workflow.resumoBtn">POST /api/v1/projudi/processos/{numero}/resumo</button>
             </div>
           </div>
 
-          <div class="playground-card">
-            <h3 class="playground-card-title" data-i18n="workflow.n8nTitle">n8n // Orquestração Autenticada (X-API-Key)</h3>
-            <div class="playground-fields">
-              <label class="field-group field-group--wide" for="workflow-token">
+          <div class="gateway-card">
+            <h3 class="gateway-card-title" data-i18n="workflow.n8nTitle">n8n // Orquestração Autenticada (X-API-Key)</h3>
+            <div class="gateway-fields">
+              <label class="field-group field-group--wide">
                 <span data-i18n="workflow.token">X-API-Key (token do backend)</span>
-                <input id="workflow-token" class="select-control" type="password" autocomplete="off" placeholder="X-API-Key" aria-describedby="workflow-meta">
+                <input id="workflow-token" class="select-control" type="password" autocomplete="new-password" spellcheck="false" data-sensitive="true" placeholder="X-API-Key" aria-describedby="workflow-meta">
               </label>
             </div>
-            <div class="playground-actions">
+            <div class="gateway-actions">
               <button id="workflow-run" class="cmd-button" type="button" data-i18n="workflow.run">POST /run</button>
               <button id="workflow-status" class="cmd-button" type="button" data-i18n="workflow.status">GET /status</button>
             </div>
@@ -238,16 +271,17 @@
         <p id="workflow-meta" class="response-meta" data-i18n="api.waiting">// aguardando requisição</p>
         <pre id="workflow-output" class="code-block" aria-live="polite" data-i18n="api.placeholder">// resposta aparecerá aqui</pre>
         <p class="muted" data-i18n="workflow.note">Webhooks disparam o worker; o resultado validado é gravado no banco.</p>
+        <p class="muted" data-i18n="workflow.tokenHygiene">// a chave fica apenas na memória desta aba e é apagada ao sair</p>
       </div>
     </section>
 
-    <!-- 4. CENA ASCII 3D (adapter + fallback) -->
+    <!-- 4. INTERACTIVE SCENE 3D (engine adapter + static fallback) -->
     <section id="scene" class="section" aria-labelledby="scene-title">
       <div class="panel-head">
-        <h2 id="scene-title">[ ASCII REALMS // SCENE ]</h2>
+        <h2 id="scene-title" data-i18n="scene.title">[ CENA 3D INTERATIVA ]</h2>
         <span id="scene-mode" class="badge">FALLBACK</span>
       </div>
-      <p class="muted" data-i18n="scene.hint">Palco reservado para o motor 3D. Enquanto ele não é carregado, um quadro estático substitui a cena.</p>
+      <p class="muted" data-i18n="scene.hint">Palco do motor ASCII 3D. Se WebGL não estiver disponível, o fallback estático permanece.</p>
       <p class="sr-only" data-i18n="scene.aria">Cena decorativa em ASCII com um terminal, uma colina e um barramento de dados.</p>
       <div id="ascii-scene" class="scene-stage" data-mode="fallback">
         <pre class="scene-fallback" aria-hidden="true">   /\
@@ -264,7 +298,7 @@
       </div>
       <div class="scene-controls">
         <button id="scene-toggle" class="cmd-button cmd-button--small" type="button" aria-pressed="false">[ pause ]</button>
-        <button id="scene-fullscreen" class="cmd-button cmd-button--small" type="button" aria-pressed="false" aria-label="Ampliar a seção ASCII REALMS" data-i18n="scene.fullscreen" data-i18n-attr="aria-label:scene.fullscreenAria">[ tela cheia ]</button>
+        <button id="scene-fullscreen" class="cmd-button cmd-button--small" type="button" aria-pressed="false" aria-label="Ampliar a seção Cena 3D Interativa" data-i18n="scene.fullscreen" data-i18n-attr="aria-label:scene.fullscreenAria">[ tela cheia ]</button>
         <span class="scene-help muted" data-i18n="scene.presetHelp">// WASD ou clique/toque move o personagem · E interage · scroll livre</span>
       </div>
     </section>
@@ -329,7 +363,7 @@
     <span>© <span id="year">2026</span> Eron Yamamoto D. Justina</span>
     <span data-i18n="footer.note">// no trackers · no analytics · self-hosted fonts</span>
     <div class="brightness-control" role="group" aria-label="Brilho da página" data-i18n-attr="aria-label:brightness.label">
-      <label for="brightness-control" data-i18n="brightness.label">Brilho</label>
+      <label for="brightness-control" data-i18n="brightness.label">Brilho da página</label>
       <input id="brightness-control" type="range" min="100" max="150" step="5" value="130" data-i18n-attr="aria-label:brightness.label">
       <output id="brightness-value" for="brightness-control">130%</output>
     </div>
