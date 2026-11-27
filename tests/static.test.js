@@ -3,12 +3,38 @@
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { includesAll } = require('./helpers/assert');
+const { assert, includesAll } = require('./helpers/assert');
 
 const root = path.resolve(__dirname, '..');
+const agents = readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
 const html = readFileSync(path.join(root, 'index.html'), 'utf8');
 const adapter = readFileSync(path.join(root, 'assets/js/engine-adapter.js'), 'utf8');
 const main = readFileSync(path.join(root, 'assets/js/main.js'), 'utf8');
+
+test('AGENTS.md keeps the mandatory end-of-task workflow (merge into main, resolve, delete branch)', () => {
+  includesAll(agents, [
+    'git status',
+    'git fetch --all --prune',
+    'node --test tests/*.test.js',
+    'python3 -m unittest discover -s tests -p "test_*.py" -v',
+    'git push -u origin HEAD',
+    'git merge origin/main',
+    'git push origin HEAD:main',
+    'git push origin --delete',
+    'resolver os\n     conflitos'
+  ]);
+  // The directive is spelled out, in order, so an agent cannot miss it.
+  assert.match(agents, /AO TERMINAR TODA TAREFA \(obrigatório\)/);
+  assert.match(agents, /merge na `main`/i);
+  assert.match(agents, /[Aa]pagar a working branch/);
+  // Hard prohibitions stay explicit.
+  includesAll(agents, ['--force', 'Nunca', 'main']);
+  // `--force` only ever shows up as a prohibition.
+  assert.match(agents, /Nunca `git push --force`/, 'force pushes are explicitly forbidden');
+  // The README points agents to the directive.
+  assert.match(readme, /\[`AGENTS\.md`\]\(AGENTS\.md\)/);
+});
 
 test('index.html keeps relative, file://-safe asset paths', () => {
   includesAll(html, [
