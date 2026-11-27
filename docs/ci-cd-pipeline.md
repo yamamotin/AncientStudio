@@ -212,12 +212,19 @@ estáticos (`api/server.py` na Vercel e o Pages) entregam `.md` como
 sem tabelas. Não havia router JS nem renderer de Markdown no cliente — interceptar o link
 não resolveria nada.
 
-Correção aplicada: `docs/ci-cd-pipeline.html` é uma renderização estática, autocontida
-(css inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com
-o Markdown. O link do painel (`#pipeline-doc-link`) aponta para
-`docs/ci-cd-pipeline.html`, um caminho relativo que funciona em `file://`, no GitHub Pages
-(`/AncientStudio/docs/...`) e na Vercel. A página inclui um link de volta para o Markdown
-fonte no GitHub.
+Correção aplicada em duas partes:
+
+1. **Formato:** `docs/ci-cd-pipeline.html` é uma renderização estática, autocontida (css
+   inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com o
+   Markdown. O link do painel (`#pipeline-doc-link`) aponta para `docs/ci-cd-pipeline.html`,
+   um caminho relativo que funciona em `file://`, no GitHub Pages (`/AncientStudio/docs/...`)
+   e na Vercel. A página inclui um link de volta para o Markdown fonte no GitHub.
+2. **Empacotamento:** `docs/` não era publicado em nenhum dos dois hosts — o staging do
+   Pages copiava só `index.html robots.txt sitemap.xml api-status.json assets` e o
+   `Dockerfile` usado pela Vercel copiava apenas `assets` e `api`. Agora `pages.yml` copia
+   `docs` para `_site` (com `test -f _site/docs/ci-cd-pipeline.html`) e o `Dockerfile` faz
+   `COPY docs ./docs` (com `test -f ./docs/ci-cd-pipeline.html`), então o mesmo caminho
+   relativo resolve nos três ambientes.
 
 ## 7. Validação
 

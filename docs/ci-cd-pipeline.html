@@ -138,7 +138,11 @@ connect-src &#x27;self&#x27; https://api.github.com; form-action &#x27;self&#x27
 </ul>
 <h2>6. Documentação: por que existe um HTML</h2>
 <p>O link <code>[ documentação técnica ]</code> apontava para <code>docs/ci-cd-pipeline.md</code>. Servidores estáticos (<code>api/server.py</code> na Vercel e o Pages) entregam <code>.md</code> como <code>text/markdown</code>/<code>text/plain</code>: o navegador baixa o arquivo ou mostra texto cru, sem índice, sem tabelas. Não havia router JS nem renderer de Markdown no cliente — interceptar o link não resolveria nada.</p>
-<p>Correção aplicada: <code>docs/ci-cd-pipeline.html</code> é uma renderização estática, autocontida (css inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com o Markdown. O link do painel (<code>#pipeline-doc-link</code>) aponta para <code>docs/ci-cd-pipeline.html</code>, um caminho relativo que funciona em <code>file://</code>, no GitHub Pages (<code>/AncientStudio/docs/...</code>) e na Vercel. A página inclui um link de volta para o Markdown fonte no GitHub.</p>
+<p>Correção aplicada em duas partes:</p>
+<ol>
+<li><strong>Formato:</strong> <code>docs/ci-cd-pipeline.html</code> é uma renderização estática, autocontida (css inline, sem script, sem dependência externa) do mesmo conteúdo, versionada junto com o Markdown. O link do painel (<code>#pipeline-doc-link</code>) aponta para <code>docs/ci-cd-pipeline.html</code>, um caminho relativo que funciona em <code>file://</code>, no GitHub Pages (<code>/AncientStudio/docs/...</code>) e na Vercel. A página inclui um link de volta para o Markdown fonte no GitHub.</li>
+<li><strong>Empacotamento:</strong> <code>docs/</code> não era publicado em nenhum dos dois hosts — o staging do Pages copiava só <code>index.html robots.txt sitemap.xml api-status.json assets</code> e o <code>Dockerfile</code> usado pela Vercel copiava apenas <code>assets</code> e <code>api</code>. Agora <code>pages.yml</code> copia <code>docs</code> para <code>_site</code> (com <code>test -f _site/docs/ci-cd-pipeline.html</code>) e o <code>Dockerfile</code> faz <code>COPY docs ./docs</code> (com <code>test -f ./docs/ci-cd-pipeline.html</code>), então o mesmo caminho relativo resolve nos três ambientes.</li>
+</ol>
 <h2>7. Validação</h2>
 <pre class="code"><code>node --check assets/js/*.js
 node --test tests/*.test.js

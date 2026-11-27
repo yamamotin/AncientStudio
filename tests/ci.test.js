@@ -38,8 +38,11 @@ test('Pages artifact root is verified before deploy', () => {
     'test -s _site/assets/models/cena_completa.glb',
     'test -s _site/assets/draco/draco_decoder.js',
     'test -s _site/assets/draco/draco_decoder.wasm',
-    'test -s _site/assets/draco/draco_wasm_wrapper.js'
+    'test -s _site/assets/draco/draco_wasm_wrapper.js',
+    'test -f _site/docs/ci-cd-pipeline.html'
   ]);
+  // The documentation link must resolve on Pages, so docs/ is staged too.
+  assert.match(pages, /cp -R index\.html robots\.txt sitemap\.xml api-status\.json assets docs _site\//);
 });
 
 test('backend CI workflow keeps the root Dockerfile and Vercel flow intact', () => {
@@ -49,6 +52,8 @@ test('backend CI workflow keeps the root Dockerfile and Vercel flow intact', () 
   assert.match(dockerfile, /api\/server\.py/);
   includesAll(dockerfile, [
     'COPY assets ./assets',
+    'COPY docs ./docs',
+    './docs/ci-cd-pipeline.html',
     './assets/models/cena_completa.glb',
     './assets/draco/draco_decoder.wasm'
   ]);
