@@ -347,18 +347,18 @@ test('neofetch fallback is static ASCII art and Tux 3D mascot stage stays intact
     'data-pointer-locked',
     'data-auto-spin',
     'getScene',
-    "background: '#D6EAF6'",
-    "coolAmbient: '#F2FAFF'",
+    "background: '#25465B'",
+    "coolAmbient: '#4E819A'",
     'blockBlendWeight: 0.0',
     'enableShadows: true'
   ]);
-  includesAll(cssSrc, ['#D6EAF6', '#F2FAFF', 'pointer-events: none']);
+  includesAll(cssSrc, ['#25465B', '#4E819A', 'pointer-events: none']);
   includesAll(mascotBuilderSrc, ['sampleSoftKeyShadow', 'reflect(', 'uSubjectYaw', 'uReflectBellyColor', 'uReflectAmberColor']);
 
   const sandbox = createBundleSandbox();
   const pkg = sandbox.ASCIIRealms;
-  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#D6EAF6');
-  assert.equal(pkg.MASCOT_FLOOR_HEX, '#F2FAFF');
+  assert.equal(pkg.MASCOT_BACKDROP_HEX, '#25465B');
+  assert.equal(pkg.MASCOT_FLOOR_HEX, '#4E819A');
 
   const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
     mode: 'mascot',
@@ -391,34 +391,93 @@ test('neofetch fallback is static ASCII art and Tux 3D mascot stage stays intact
   assert.equal(stage.scene.children.length, 0);
 });
 
-test('[ STACK // NEOFETCH ] scenario is Antarctic ice: pale wall, snow shelf and legible ink', () => {
+test('frost outline attaches to the Tux rig and leaves the ice stage planes untouched', () => {
+  const sandbox = createBundleSandbox();
+  const pkg = sandbox.ASCIIRealms;
+
+  const mascotConfig = Object.assign({}, pkg.DEFAULT_ENGINE_CONFIG, {
+    mode: 'mascot',
+    fov: 38,
+    enableShadows: true
+  });
+  const stage = pkg.MascotStageBuilder.build(mascotConfig);
+  const ecs = new pkg.World();
+  const { rootGroup: tuxRoot } = pkg.TuxEntityFactory.spawn(ecs, stage.scene, {
+    position: [0, 0.04, 0],
+    scale: 1.02,
+    includeShowcaseRig: false,
+    bobAmplitude: 0.018
+  });
+
+  const handle = pkg.applyObjectOutline(tuxRoot, {
+    highlightColor: pkg.MASCOT_OUTLINE_HEX,
+    thickness: 3.0,
+    intensity: 1.0,
+    opacity: 1
+  });
+  const state = handle.getState();
+  assert.equal(state.enabled, true);
+  assert.equal(state.thickness, 3.0);
+  assert.equal(state.intensity, 1.0);
+  assert.equal(state.highlightColor, '#BFE4F6');
+  assert.ok(state.outlinedMeshCount >= 5, `outline covers the rig (${state.outlinedMeshCount} meshes)`);
+
+  const shells = [];
+  tuxRoot.traverse((obj) => {
+    if (obj.userData && obj.userData.__isAsciiOutlineShell) shells.push(obj);
+  });
+  assert.equal(shells.length, state.outlinedMeshCount, 'one inverted-hull shell per rig mesh');
+  for (const shell of shells) {
+    assert.equal(shell.name, pkg.OUTLINE_SHELL_NAME);
+    assert.equal(shell.material.side, pkg.THREE.BackSide, 'shell renders the back faces (inverted hull)');
+    assert.equal(shell.material.uniforms.uOutlineThickness.value, 3.0);
+    assert.equal(shell.userData.skipNormalPass, true, 'shells never pollute the normal pass');
+    assert.ok('aOutlineNormal' in shell.geometry.attributes, 'welded miter normals are present');
+  }
+
+  // Stage planes opt out, so the ice itself is never outlined.
+  for (const plane of [stage.backdropMesh, stage.floorMesh]) {
+    assert.equal(pkg.getObjectOutlineState(plane), null);
+    assert.equal(plane.children.filter((c) => c.name === pkg.OUTLINE_SHELL_NAME).length, 0);
+  }
+
+  assert.equal(pkg.clearObjectOutline(tuxRoot), state.outlinedMeshCount);
+  assert.equal(pkg.getObjectOutlineState(tuxRoot), null);
+
+  ecs.clear(true);
+  pkg.LifecycleManager.disposeObject3D(stage.scene);
+});
+
+test('[ STACK // NEOFETCH ] scenario is contained Antarctic ice with a crisp penguin silhouette', () => {
   const cssSrc = readFileSync(path.join(root, 'assets/css/style.css'), 'utf8');
   const mascotBuilderSrc = readFileSync(
     path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
     'utf8'
   );
 
-  // 1. Engine palette: pale polar sky above, brighter snow shelf below, ice-tinted horizon.
+  // 1. Engine palette: deep polar-ice wall above a glacier shelf, both deliberately dark.
   includesAll(mascotBuilderSrc, [
-    "export const MASCOT_BACKDROP_HEX = '#D6EAF6'",
-    "export const MASCOT_FLOOR_HEX = '#F2FAFF'",
+    "export const MASCOT_BACKDROP_HEX = '#25465B'",
+    "export const MASCOT_FLOOR_HEX = '#4E819A'",
     'Antarctic ice',
-    'clamp(verticalFalloff * 0.585 + studioPool * 0.075, 0.505, 0.685)',
-    'clamp(0.79 + depthGrade * 0.07 + exp(-radialDist * radialDist * 1.1) * 0.06, 0.78, 0.93)',
-    'backdropBase * 0.60'
+    'clamp(verticalFalloff * 0.500 + studioPool * 0.060, 0.460, 0.560)',
+    'clamp(0.50 + depthGrade * 0.05 + exp(-radialDist * radialDist * 1.1) * 0.04, 0.49, 0.60)',
+    'backdropBase * 0.50'
   ]);
-  assert.doesNotMatch(mascotBuilderSrc, /#13222E|#1D2B36/, 'the old dark slate stage is gone');
+  // Regression guard for the washed-out look: pale substrates must never come back.
+  assert.doesNotMatch(mascotBuilderSrc, /#D6EAF6|#F2FAFF|#13222E|#1D2B36/, 'no pale/dark-slate substrate regressions');
 
   // 2. CSS substrate for the fallback and for the stage before/behind the canvas.
   includesAll(cssSrc, [
-    'background-color: #D6EAF6',
-    'linear-gradient(180deg, #D6EAF6 0%, #E4F3FB 62%, #F2FAFF 68.5%, #F2FAFF 100%)',
-    'rgba(94, 146, 178, 0.16)',
-    'color: #0E2A3C'
+    'background-color: #25465B',
+    'linear-gradient(180deg, #25465B 0%, #2B5165 62%, #3B6C82 68.5%, #4E819A 100%)',
+    'rgba(178, 224, 244, 0.10)',
+    'color: #EAF7FF'
   ]);
 
-  // 3. Contrast math: the ASCII composite must land in an icy mid-to-light band while the
-  //    snow floor stays brighter than the wall, so dark Tux keeps a readable silhouette.
+  // 3. The ASCII composite lifts every geometry cell to ~0.145 and remaps it into 0.13→0.84.
+  //    Reproduce that here: the ice must stay contained (near-void wall, contained shelf)
+  //    while Tux's belly and coat keep a wide separation.
   const srgbToLinear = (channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
   const hexToLinear = (hex) => {
     const value = hex.replace('#', '');
@@ -426,19 +485,81 @@ test('[ STACK // NEOFETCH ] scenario is Antarctic ice: pale wall, snow shelf and
   };
   const gamma = (linear) => linear.map((channel) => channel ** (1 / 2.2));
   const luma = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const geometryLuma = (raw) => 0.145 + (0.84 - 0.145) * Math.max(0, Math.min(1, (raw - 0.10) / 0.88));
 
-  const wallBase = gamma(hexToLinear('#D6EAF6'));
-  const floorBase = gamma(hexToLinear('#F2FAFF'));
-  const wallMean = luma(wallBase.map((channel) => channel * 0.505));
-  const wallBright = luma(wallBase.map((channel) => channel * 0.685));
-  const floorMean = luma(floorBase.map((channel) => channel * 0.79));
+  const wallBase = luma(gamma(hexToLinear('#25465B')));
+  const floorBase = luma(gamma(hexToLinear('#4E819A')));
+  const wallRaw = [wallBase * 0.46, wallBase * 0.56];
+  const floorRaw = [floorBase * 0.49, floorBase * 0.60];
+  const wallShaped = wallRaw.map(geometryLuma);
+  const floorShaped = floorRaw.map(geometryLuma);
+  const bellyShaped = geometryLuma(luma(gamma(hexToLinear('#DCEBF5'))));
+  const coatShaped = geometryLuma(luma(gamma(hexToLinear('#080D14'))));
 
-  assert.ok(wallMean > 0.42, `ice wall must read as light, not slate (${wallMean.toFixed(3)})`);
-  assert.ok(wallBright < 0.68, `ice wall must stay below a white-out (${wallBright.toFixed(3)})`);
-  assert.ok(floorMean > wallBright, 'the snow shelf stays brighter than the wall');
-  assert.ok(floorMean - 0.075 > 0.5, 'snow shelf keeps a visible separation from the dark Tux coat');
-  const tuxCoat = luma(hexToLinear('#080D14'));
-  assert.ok(wallMean > tuxCoat * 3, 'pale ice wall keeps a strong silhouette against the dark coat');
+  // Contained ice: dark-mid values, never a white-out that floods the glyph field.
+  assert.ok(wallShaped[1] <= 0.22, `ice wall must stay near-void (${wallShaped[1].toFixed(3)})`);
+  assert.ok(wallShaped[0] >= 0.13, 'ice wall keeps the composite geometry floor');
+  assert.ok(floorShaped[1] <= 0.36, `glacier shelf must stay contained (${floorShaped[1].toFixed(3)})`);
+  assert.ok(floorShaped[0] >= 0.22, 'glacier shelf still reads as ground');
+
+  // Silhouette: bright belly/rims well above the shelf, dark coat below the wall.
+  assert.ok(bellyShaped >= 0.72, `Tux belly stays bright (${bellyShaped.toFixed(3)})`);
+  assert.ok(bellyShaped / floorShaped[1] >= 2.2, 'belly keeps a clear separation from the shelf');
+  assert.ok(coatShaped <= wallShaped[0], 'dark coat stays at/below the wall value');
+  assert.ok(floorShaped[1] / wallShaped[1] >= 1.5, 'wall/shelf value separation stays visible');
+});
+
+test('[ STACK // NEOFETCH ] gives Tux a frost silhouette outline so the penguin never washes out', () => {
+  const mascotBuilderSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/world/MascotStageBuilder.ts'),
+    'utf8'
+  );
+  const engineCoreSrc = readFileSync(
+    path.join(root, 'ascii-engine-module/src/core/AsciiEngineCore.ts'),
+    'utf8'
+  );
+
+  // 1. A dedicated, ice-lit outline tint lives next to the stage palette.
+  includesAll(mascotBuilderSrc, [
+    "export const MASCOT_OUTLINE_HEX = '#BFE4F6'",
+    'objectOutline.ts',
+    'MASCOT_OUTLINE_HEX'
+  ]);
+
+  // 2. The mascot branch actually applies the inverted-hull outline to the Tux root, at ~1 ASCII cell.
+  includesAll(engineCoreSrc, [
+    'MASCOT_OUTLINE_HEX,',
+    'this.setObjectOutline(rootGroup, {',
+    'highlightColor: MASCOT_OUTLINE_HEX',
+    'thickness: 3.0',
+    'intensity: 1.0',
+    'opacity: 1'
+  ]);
+
+  // 3. Composite math: the outline must sit clearly above the ice wall and under the belly so the
+  //    silhouette reads as a rim and never clips to a blown-out white halo.
+  const srgbToLinear = (channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  const hexToLinear = (hex) => {
+    const value = hex.replace('#', '');
+    return [0, 2, 4].map((offset) => srgbToLinear(parseInt(value.slice(offset, offset + 2), 16) / 255));
+  };
+  const gamma = (linear) => linear.map((channel) => channel ** (1 / 2.2));
+  const luma = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const geometryLuma = (raw) => 0.145 + (0.84 - 0.145) * Math.max(0, Math.min(1, (raw - 0.10) / 0.88));
+
+  const outlineRgb = gamma(hexToLinear('#BFE4F6'));
+  const outlineBase = luma(outlineRgb);
+  assert.ok(outlineRgb[2] > outlineRgb[0], 'outline tint stays cold (blue above red)');
+  assert.ok(outlineBase >= 0.80, `outline tint stays ice-lit (${outlineBase.toFixed(3)})`);
+
+  const rawOutline = outlineBase * 1.0; // uOutlineIntensity
+  const shapedOutline = geometryLuma(Math.min(rawOutline, 1));
+  const wallShaped = geometryLuma(luma(gamma(hexToLinear('#25465B'))) * 0.56);
+  const bellyShaped = geometryLuma(luma(gamma(hexToLinear('#DCEBF5'))));
+
+  assert.ok(shapedOutline >= 0.66, `outline keeps a bright ASCII rim (${shapedOutline.toFixed(3)})`);
+  assert.ok(shapedOutline / wallShaped >= 3.5, 'outline separates the coat from the ice wall');
+  assert.ok(shapedOutline < bellyShaped, 'outline stays under the belly so it never blows out');
 });
 
 test('cena_completa.glb loads end-to-end into ECS: Cidade_Sketchfab_model, Player_Rig (WASD + NLA Idle/Walking/Casting + clamp), CameraFollow, Carro_Grupo 30s light cycle, and presets', async () => {

@@ -854,28 +854,32 @@ body.scene-fullscreen-active { overflow: hidden; }
 #penguin-stage * { pointer-events: none; }
 
 /* Cold halo for the live mascot: a CSS drop-shadow keeps the render untouched (same
-   cells, same colors, same rotation) while separating the dark Tux silhouette from the
-   bright Antarctic ice stage behind it. */
+   cells, same colors, same rotation) while separating Tux's bright belly/rims from the
+   deep-ice stage behind it. Kept restrained because the engine already draws the
+   frost-mint silhouette rim (`MASCOT_OUTLINE_HEX`), so a strong CSS glow would double it. */
 #penguin-stage canvas {
-  filter: drop-shadow(0 1px 1px rgba(12, 32, 46, 0.42)) drop-shadow(0 0 6px rgba(255, 255, 255, 0.75));
+  filter: drop-shadow(0 1px 2px rgba(6, 18, 28, 0.55)) drop-shadow(0 0 7px rgba(196, 232, 248, 0.28));
 }
 
-/* `[ STACK // NEOFETCH ]` scenario: Antarctic ice. Pale polar-sky wall (#D6EAF6) over a
-   brighter snow shelf (#F2FAFF), with soft blue crevasse lines instead of a dark CRT grid.
-   Same structure as before (no markup change), only the substrate colors. */
+/* `[ STACK // NEOFETCH ]` scenario: Antarctic ice, contained. Deep polar-ice wall
+   (#25465B) with a frost glow, then a glacier shelf (#4E819A) below the horizon and faint
+   crevasse lines. Deliberately NOT pale: the ASCII composite remaps geometry into
+   0.13→0.84, so a near-white substrate floods the frame with dense glyphs and washes the
+   penguin out. These tones keep the wall near-void and the shelf clearly above it, so the
+   white belly, the dark coat and the outline all read. Same structure/markup as before. */
 #penguin-stage {
-  background-color: #D6EAF6;
+  background-color: #25465B;
   background-image:
-    radial-gradient(120% 90% at 50% 8%, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 62%),
+    radial-gradient(120% 92% at 50% 6%, rgba(146, 208, 234, 0.20) 0%, rgba(146, 208, 234, 0) 58%),
     repeating-linear-gradient(
       0deg,
-      rgba(94, 146, 178, 0.16) 0px,
-      rgba(94, 146, 178, 0.16) 1px,
+      rgba(178, 224, 244, 0.10) 0px,
+      rgba(178, 224, 244, 0.10) 1px,
       transparent 1px,
       transparent 9px
     ),
-    linear-gradient(180deg, #D6EAF6 0%, #E4F3FB 62%, #F2FAFF 68.5%, #F2FAFF 100%);
-  box-shadow: inset 0 -18px 26px -18px rgba(78, 128, 160, 0.55);
+    linear-gradient(180deg, #25465B 0%, #2B5165 62%, #3B6C82 68.5%, #4E819A 100%);
+  box-shadow: inset 0 -16px 24px -16px rgba(4, 16, 26, 0.6);
 }
 
 .penguin-fallback {
@@ -883,17 +887,17 @@ body.scene-fullscreen-active { overflow: hidden; }
   place-items: center;
   min-height: inherit;
   padding: var(--space-2);
-  /* Fixed size (no slider anymore): 4px of dark polar ink over the ice stage, with a
-     white halo so the ASCII art stays readable on the bright snow. */
-  color: #0E2A3C;
+  /* Fixed size (no slider anymore): 4px of frost-white ink over the deep-ice stage, with
+     a dark seat shadow so the ASCII art stays crisp instead of dissolving into the ice. */
+  color: #EAF7FF;
   font-size: var(--penguin-font-px, 4px);
   line-height: 1.06;
   text-align: left;
   white-space: pre;
   text-shadow:
-    0 0 1px rgba(255, 255, 255, 0.95),
-    0 0 4px rgba(232, 246, 255, 0.85),
-    0 1px 2px rgba(255, 255, 255, 0.9);
+    0 0 1px rgba(237, 250, 255, 0.95),
+    0 0 4px rgba(150, 214, 240, 0.45),
+    0 1px 2px rgba(4, 16, 26, 0.85);
   user-select: none;
 }
 

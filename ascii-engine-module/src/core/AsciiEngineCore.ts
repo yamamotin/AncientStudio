@@ -44,6 +44,7 @@ import { GlbSceneLoader } from '../world/GlbSceneLoader';
 import {
   type BuiltMascotStage,
   MASCOT_BACKDROP_HEX,
+  MASCOT_OUTLINE_HEX,
   MascotStageBuilder,
 } from '../world/MascotStageBuilder';
 import {
@@ -401,6 +402,20 @@ export class AsciiEngineCore {
     });
     this.primaryEntityId = entityId;
     this.mascotRootObj = rootGroup;
+
+    // Crisp silhouette on the contained Antarctic ice: the ice wall is deliberately dark (see
+    // `MascotStageBuilder`), so Tux's obsidian coat needs the engine's inverted-hull outline —
+    // a single frost-mint ASCII cell tracing body, flippers, beak, legs and feet. `thickness: 3`
+    // lands at ~1 cell for the 4px mascot cell size; intensity 1.0 keeps the rim (~0.75 shaped
+    // luma) just under Tux's belly (~0.78), so it reads as an ice-lit edge instead of a clipped
+    // white halo that would eat the outline it is supposed to draw.
+    this.setObjectOutline(rootGroup, {
+      highlightColor: MASCOT_OUTLINE_HEX,
+      thickness: 3.0,
+      intensity: 1.0,
+      opacity: 1,
+    });
+
     this.vfx = null;
 
     systemRunner
