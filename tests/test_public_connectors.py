@@ -603,6 +603,114 @@ class ProjudiRealScraperTestCase(unittest.TestCase):
         self.assertTrue(summary["metricas"]["possui_tutela_urgencia"])
         self.assertNotIn("111.444.777-35", summary["llm_placeholder"]["prompt_context"])
 
+    def test_session_token_field_tj_extracted_and_posted(self) -> None:
+        # The real TJPR search form embeds a dynamic session token field (``_tj``).
+        # It must be extracted during bootstrap and included in the POST payload.
+        from api.connectors import create_public_connectors
+
+        posted_bodies: list[str] = []
+
+        def handle_projudi_tj(
+            *,
+            url: str,
+            method: str,
+            params: dict[str, Any] | None,
+            headers: dict[str, str],
+            data: bytes | None,
+        ) -> HttpResponse:
+            if "actionType=iniciar" in url:
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={
+                        "content-type": "text/html; charset=ISO-8859-1",
+                        "set-cookie": "JSESSIONID=TJPR_TJ_SID; Path=/projudi_consulta",
+                    },
+                    body=(
+                        REALISTIC_TJPR_FORM_HTML.replace(
+                            '<textarea id="g-recaptcha-response"',
+                            '<input type="hidden" name="_tj" value="TJ_SESSION_TOKEN_123" />\n'
+                            '      <textarea id="g-recaptcha-response"',
+                        )
+                    ).encode("iso-8859-1"),
+                )
+            if "actionType=pesquisar" in url and method == "POST":
+                posted_bodies.append((data or b"").decode("ascii", errors="replace"))
+                return HttpResponse(
+                    url=url,
+                    status_code=200,
+                    headers={"content-type": "text/html; charset=ISO-8859-1"},
+                    body=REALISTIC_TJPR_RESULTS_HTML.encode("iso-8859-1"),
+                )
+            return HttpResponse(
+                url=url,
+                status_code=200,
+                headers={"content-type": "text/html; charset=ISO-8859-1"},
+                body=REALISTIC_TJPR_FRAMESET_HTML.encode("iso-8859-1"),
+            )
+
+        registry = create_public_connectors(
+            transport=FakeRouteTransport({"consulta.tjpr.jus.br": handle_projudi_tj})
+        )
+        res = registry.projudi.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+        self.assertEqual(res["total_processos"], 2)
+        # The dynamic _tj token must be present in the submitted POST body.
+        self.assertTrue(posted_bodies, "expected a POST to consultaPublica.do")
+        self.assertIn("_tj=TJ_SESSION_TOKEN_123", posted_bodies[0])
+
+    def test_search_without_result_table_returns_zero_not_mock(self) -> None:
+        # A response without <table class="resultTable"> (e.g. a plain landing
+        # page) must yield 0 processes — never fabricated records.
+        from api.connectors.projudi import parse_projudi_search_result
+
+        bare_html = """<!DOCTYPE html><html><body>
+        <div id="navigator"></div>
+        <form id="buscaProcessoForm" action="/projudi_consulta/processo/consultaPublica.do" method="post">
+          <input type="text" name="cpfCnpj" value="" />
+        </form>
+        </body></html>"""
+        parsed = parse_projudi_search_result(bare_html)
+        self.assertEqual(parsed["processos"], [])
+        self.assertEqual(parsed["total_navigator"], 0)
+
+    def test_no_records_message_returns_zero(self) -> None:
+        from api.connectors.projudi import parse_projudi_search_result
+
+        html = """<!DOCTYPE html><html><body>
+        <div id="navigator">0 registros encontrados</div>
+        <div class="mensagem">Nenhum registro encontrado para os parâmetros informados.</div>
+        </body></html>"""
+        parsed = parse_projudi_search_result(html)
+        self.assertEqual(parsed["processos"], [])
+
+    def test_diagnostic_logs_are_lgpd_safe(self) -> None:
+        # Diagnostic logging must never leak the full CPF or tokens.
+        import logging as _logging
+
+        records: list[str] = []
+
+        class _CaptureHandler(_logging.Handler):
+            def emit(self, record: _logging.LogRecord) -> None:
+                records.append(record.getMessage())
+
+        handler = _CaptureHandler()
+        _logging.getLogger("projudi_connector").addHandler(handler)
+        _logging.getLogger("projudi_connector").setLevel(_logging.INFO)
+        try:
+            svc = ProjudiConnectorService(
+                transport=self._make_tjpr_transport(),
+                cache=ConnectorTTLCache(),
+            )
+            with self.assertRaises(ConnectorCaptchaRequiredError):
+                svc.consulta_por_cpf("111.444.777-35", tribunal="TJPR")
+        finally:
+            _logging.getLogger("projudi_connector").removeHandler(handler)
+            _logging.getLogger("projudi_connector").setLevel(_logging.NOTSET)
+
+        joined = "\n".join(records)
+        self.assertNotIn("111.444.777-35", joined)
+        self.assertNotIn("valid-recaptcha", joined)
+
 
 class MunicipalTransparencyMonetaryTestCase(unittest.TestCase):
     def test_offline_paranavai_contingency_has_real_brl_monetary_and_tse_77496(self) -> None:

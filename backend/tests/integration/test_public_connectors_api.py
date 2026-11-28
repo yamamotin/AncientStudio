@@ -26,6 +26,7 @@ TJPR_FORM_FIXTURE = """<!DOCTYPE html>
     <form id="buscaProcessoForm"
           action="/projudi_consulta/processo/consultaPublica.do?actionType=pesquisar"
           method="post">
+      <input type="hidden" name="_tj" value="TJ_SESSION_TOKEN_ABC" />
       <div class="g-recaptcha"
            data-sitekey="6LcFastApiTestSiteKey00000000000000000099"
            data-callback="executaRecaptchaPBC_actre_consulta_publica"></div>
@@ -291,6 +292,52 @@ def test_projudi_consulta_extracts_nested_result_table() -> None:
     assert proc["url_detalhe"].endswith(f"visualizar.do?processo={VALID_CNJ}")
     # No raw CPF leak in the response body
     assert "111.444.777-35" not in resp.text
+
+
+def test_projudi_session_flow_extracts_and_posts_tj_token() -> None:
+    # Diagnostic of the real session flow: GET root -> form with dynamic _tj ->
+    # POST must include the _tj session token (absent/expired _tj is a common
+    # cause of the portal silently returning no resultTable -> total_processos=0).
+    captured: dict[str, str] = {}
+
+    class _TjStubTransport(StubIntegrationTransport):
+        def request(
+            self,
+            url: str,
+            *,
+            method: str = "GET",
+            params: dict[str, Any] | None = None,
+            headers: dict[str, str] | None = None,
+            data: bytes | None = None,
+            timeout_seconds: float | None = None,
+        ):
+            if "actionType=pesquisar" in url and method == "POST":
+                captured["body"] = (data or b"").decode("ascii", errors="replace")
+            return super().request(
+                url,
+                method=method,
+                params=params,
+                headers=headers,
+                data=data,
+                timeout_seconds=timeout_seconds,
+            )
+
+    app = create_app()
+    registry: PublicConnectorsRegistry = create_public_connectors(
+        transport=_TjStubTransport(),
+        cache=ConnectorTTLCache(default_ttl_seconds=300.0),
+    )
+    app.dependency_overrides[get_public_connectors] = lambda: registry
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={"cpf": "111.444.777-35", "tribunal": "TJPR"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["total_processos"] == 1
+    # The dynamic _tj token extracted from the form must be sent in the POST.
+    assert "_tj=TJ_SESSION_TOKEN_ABC" in captured["body"]
 
 
 def test_projudi_upstream_unavailable_returns_503_without_fake_fallback() -> None:

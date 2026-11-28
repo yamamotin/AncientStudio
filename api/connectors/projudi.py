@@ -19,10 +19,20 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 import hashlib
 from html.parser import HTMLParser
+import logging
 import os
 import re
 from typing import Any
 from urllib.parse import urlencode, urljoin
+
+logger = logging.getLogger("projudi_connector")
+# Diagnostic logging is opt-in: enabled via PROJUDI_DIAGNOSTIC_LOGS=1 or by
+# configuring the ``projudi_connector`` logger level to DEBUG. It never logs
+# full CPFs, tokens, or personal data — only masked/structural facts.
+_DIAGNOSTIC_LOGS_ENABLED = (
+    os.environ.get("PROJUDI_DIAGNOSTIC_LOGS", "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 from api.connectors.cache import ConnectorTTLCache
 from api.connectors.captcha import (
@@ -1083,6 +1093,34 @@ class ProjudiConnectorService:
       ``session_cookie`` is supplied.
     """
 
+    # Field names that carry dynamic session tokens required by the real TJPR
+    # portal form. ``_tj`` is a session token the portal embeds in the search
+    # form; when it is absent/expired the POST is rejected and no resultTable is
+    # returned (which previously surfaced as ``total_processos: 0``).
+    _SESSION_TOKEN_FIELDS = ("_tj", "tj", "_t", "jstoken", "token")
+
+    def _log_diagnostics(self, event: str, **fields: Any) -> None:
+        """Emit a structured, LGPD-safe diagnostic log line (opt-in).
+
+        Never logs raw CPFs, captcha tokens, or full personal data. ``fields``
+        must be pre-masked/structural only.
+        """
+        if not (_DIAGNOSTIC_LOGS_ENABLED or logger.isEnabledFor(logging.DEBUG)):
+            return
+        payload = {"event": event}
+        payload.update(fields)
+        logger.info("projudi_diagnostic %s", payload)
+
+    def _html_diagnostics(self, html: str) -> dict[str, Any]:
+        """Build a LGPD-safe structural snapshot of a TJPR HTML response.
+
+        Reports only structural facts (sizes, counts, booleans) — never raw
+        CPFs, tokens, or personal data.
+        """
+        return _html_diagnostics_helper(
+            html, session_token_fields=self._SESSION_TOKEN_FIELDS
+        )
+
     def __init__(
         self,
         *,
@@ -1165,6 +1203,14 @@ class ProjudiConnectorService:
 
         cookie_jar.update(root_resp.cookies())
         root_html = root_resp.text()
+        self._log_diagnostics(
+            "bootstrap_root_response",
+            status_code=root_resp.status_code,
+            final_url=root_resp.url,
+            session_cookies=bool(cookie_jar),
+            cookie_names=sorted(cookie_jar.keys()),
+            **self._html_diagnostics(root_html),
+        )
         boot = ProjudiBootstrapHtmlParser()
         boot.feed(root_html)
         boot.finalize(root_html)
@@ -1217,6 +1263,14 @@ class ProjudiConnectorService:
             boot = ProjudiBootstrapHtmlParser()
             boot.feed(form_html)
             boot.finalize(form_html)
+            self._log_diagnostics(
+                "bootstrap_frame_response",
+                status_code=frame_resp.status_code,
+                final_url=frame_resp.url,
+                session_cookies=bool(cookie_jar),
+                cookie_names=sorted(cookie_jar.keys()),
+                **self._html_diagnostics(form_html),
+            )
 
         detected_cap = detect_captcha_in_html(
             form_html,
@@ -1259,6 +1313,24 @@ class ProjudiConnectorService:
             _normalize_portal_image_url(urljoin(form_url, boot.captcha_image_src), form_url)
             if boot.captcha_image_src and not boot.captcha_image_src.lower().startswith("data:")
             else None
+        )
+
+        self._log_diagnostics(
+            "bootstrap_resolved",
+            form_url=form_url,
+            action_url=action_url,
+            provider=provider,
+            response_field=response_field,
+            site_key_present=bool(site_key),
+            site_key_len=len(site_key or ""),
+            recaptcha_callback_present=bool(callback_name),
+            requires_captcha=bool(boot.requires_captcha or detected_cap.detected),
+            session_token_fields=sorted(
+                name
+                for name in merged_fields
+                if name in self._SESSION_TOKEN_FIELDS and merged_fields[name]
+            ),
+            form_field_count=len(merged_fields),
         )
 
         return {
@@ -1556,6 +1628,15 @@ class ProjudiConnectorService:
 
         session["cookie_jar"].update(search_resp.cookies())
         html = search_resp.text()
+        self._log_diagnostics(
+            "search_response",
+            status_code=search_resp.status_code,
+            final_url=search_resp.url,
+            action_url=session["action_url"],
+            payload_keys=sorted(form_payload.keys()),
+            has_captcha_token=bool(token_clean),
+            **self._html_diagnostics(html),
+        )
         try:
             parsed = parse_projudi_search_result(html, tribunal, base_url=search_resp.url)
         except ConnectorCaptchaRequiredError as exc:
@@ -1576,6 +1657,13 @@ class ProjudiConnectorService:
                 override_url=search_resp.url,
             )
 
+        self._log_diagnostics(
+            "search_parsed",
+            total_processos=len(parsed["processos"]),
+            total_navigator=parsed["total_navigator"],
+            navigator_texto_present=bool(parsed["navigator_texto"]),
+        )
+
         # Guard against Struts silently re-rendering the empty search form without resultTable
         probe = ProjudiPublicHtmlParser()
         probe.feed(html)
@@ -1585,6 +1673,16 @@ class ProjudiConnectorService:
             and probe.has_search_form
             and not _NO_RECORDS_RE.search(normalize_search_text(html))
         ):
+            self._log_diagnostics(
+                "search_zero_results_probe",
+                has_search_form=probe.has_search_form,
+                has_result_table="resultTable" in html or "resulttable" in html.lower(),
+                tr_count=len(re.findall(r"<tr\b", html, re.IGNORECASE)),
+                no_records_message=bool(
+                    _NO_RECORDS_RE.search(normalize_search_text(html))
+                ),
+                session_cookie_present=bool(session.get("cookie_jar")),
+            )
             if stored is not None:
                 self._captcha_store.consume_challenge(stored.challenge_id)
             resp_field_hint = str(session.get("response_field") or "g-recaptcha-response")
@@ -2144,3 +2242,27 @@ class ProjudiConnectorService:
                 "prompt_context": canonical_context,
             },
         }
+
+
+def _html_diagnostics_helper(
+    html: str,
+    *,
+    session_token_fields: tuple[str, ...] = ("_tj", "tj", "_t", "jstoken", "token"),
+) -> dict[str, Any]:
+    """Module-level LGPD-safe structural snapshot of a TJPR HTML response.
+
+    Reports only structural facts (sizes, counts, booleans) - never raw
+    CPFs, tokens, or personal data.
+    """
+    result_table_present = "resultTable" in html or "resulttable" in html.lower()
+    tr_count = len(re.findall(r"<tr\b", html, re.IGNORECASE))
+    tj_present = any(
+        re.search(rf"name=[\"']{re.escape(f)}[\"']", html, re.IGNORECASE)
+        for f in session_token_fields
+    )
+    return {
+        "html_bytes": len(html.encode("utf-8", errors="replace")),
+        "result_table_present": result_table_present,
+        "tr_count": tr_count,
+        "session_token_field_present": tj_present,
+    }
