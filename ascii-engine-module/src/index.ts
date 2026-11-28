@@ -111,6 +111,7 @@ export {
   type BuiltMascotStage,
   MASCOT_BACKDROP_HEX,
   MASCOT_FLOOR_HEX,
+  MASCOT_OUTLINE_HEX,
   MascotStageBuilder,
 } from './world/MascotStageBuilder';
 export {

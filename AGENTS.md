@@ -67,9 +67,14 @@ o que ficou pendente e por quê.
   `maxlength="14"`, `autocomplete="off"`): nunca `type="password"` nem máscara visual. O
   mascaramento (`[data-mask]` + `text-security`) fica só para segredos reais (X-API-Key e
   tokens de CAPTCHA); o CPF segue sem persistência e é apagado ao esconder a aba.
-- `[ STACK // NEOFETCH ]` usa o cenário de **gelo da Antártida**: parede `#D6EAF6`, piso de
-  neve `#F2FAFF` (`MascotStageBuilder` + `#penguin-stage`) e tinta polar escura `#0E2A3C`
-  no fallback ASCII, sempre com contraste alto para o Tux.
+- `[ STACK // NEOFETCH ]` usa o cenário de **gelo da Antártida contido**: parede polar
+  profunda `#25465B`, piso de geleira `#4E819A` (`MascotStageBuilder` + `#penguin-stage`) e
+  tinta frost-white `#EAF7FF` no fallback ASCII. **Nunca** voltar a substratos claros
+  (`#D6EAF6`/`#F2FAFF`): o composto ASCII remapeia geometria para 0.13→0.84, e um fundo
+  quase branco inunda a cena de glifos e “lava” o pinguim. Como o gelo contido deixa a
+  parede escura, o Tux recebe o contorno invertido por objeto do motor
+  (`MASCOT_OUTLINE_HEX` `#BFE4F6`, `thickness: 3.0`, `intensity: 1.0`), aplicado no
+  core do `mascot` logo após o spawn — silhueta nítida sem estourar em branco.
 - Popup de CAPTCHA compacto, com a **imagem do desafio** acima do campo
   (`captcha_image`/`image_data_uri`/`image_base64`/`image_endpoint`/`image_url`), sem
   redirecionar para o portal oficial; nada de tokens/CPF persistidos ou ecoados.

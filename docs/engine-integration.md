@@ -161,8 +161,8 @@ solid volumetric readability.
 engine-side tools added on that date.
 
 `[ STACK // NEOFETCH ]` mounts `#penguin-stage` in `mode: 'mascot'` (`fov: 38°`)
-using `MascotStageBuilder` (Antarctic ice scenario: `#D6EAF6` backdrop + `#F2FAFF` snow
-floor with soft PCF/contact shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
+using `MascotStageBuilder` (contained Antarctic ice scenario: `#25465B` polar-ice backdrop +
+`#4E819A` glacier floor with soft PCF/contact shadow and yaw-synced diffused reflection) and `TuxEntityFactory`
 (`includeShowcaseRig: false`, unified smooth vertex-colored torso quantized
 strictly through pure ASCII glyphs with `blockBlendWeight: 0.0`). While the engine
 is still loading, or if it fails, `assets/js/neofetch.js` shows a cute **static**
@@ -171,8 +171,30 @@ soon as `data-mode="engine"` / `tp:scene-mode` reports the live scene, the
 placeholder is hidden by CSS and no fallback loop touches the 3D mascot. The
 active penguin spins only on the horizontal axis (`yaw`), continuously, with no
 pitch and no pointer, mouse or touch response; the stage is `pointer-events: none`.
-Text content is limited to the seven specified stack rows. The page does **not**
-yet call the engine outline API on the penguin.
+Text content is limited to the seven specified stack rows. The engine itself (not
+the page) applies the per-object outline API to the mascot root right after spawning
+Tux: `setObjectOutline(rootGroup, { highlightColor: '#BFE4F6', thickness: 3.0,
+intensity: 1.0, opacity: 1 })`, i.e. a frost-mint inverted hull about one 4px ASCII
+cell wide. That rim (≈0.75 shaped luma) is what keeps body, flippers, beak, legs and
+feet readable against the dark ice wall, and it deliberately stays just below the
+white belly (≈0.78) so it never clips into a blown-out halo.
+
+### Why the ice stage is dark, not white
+
+The ASCII composite treats geometry specially: every geometric cell is remapped
+`shapedLuma = mix(geomMinLuma≈0.13, 0.84, clamp((rawLuma - 0.10) / 0.88))`, and
+the glyph ink brightness follows `smoothstep(0.08, 0.86, shapedLuma)`. A pale ice
+substrate (`#D6EAF6` wall / `#F2FAFF` floor) lands at raw ≈0.55–0.75, i.e. shaped
+≈0.43–0.61 for the wall and ≈0.67–0.78 for the floor — the wall fills with dense
+mid-bright glyphs and the floor reaches the same value as Tux's white belly
+(≈0.78), so the penguin has *no* value separation against the stage: it reads as
+washed out. The contained palette (`#25465B` wall ≈0.16–0.18 shaped, `#4E819A`
+floor ≈0.25–0.29 shaped) leaves the wall nearly empty, keeps the shelf clearly a
+floor, and gives the belly ≈2.7× the floor value while the coat sits *below* the
+wall. The same values drive the CSS fallback: frost-white ink `#EAF7FF` scores
+9.1:1 on the wall and 3.9:1 on the shelf, whereas the old pale stage could never
+exceed 1.5:1. The invariants are asserted in `tests/engine.test.js` and
+`tests/ui-layout.test.js`; do not reintroduce pale substrate hexes.
 
 Mandatory architectural, stylistic (full-scene ASCII coherence, sober/desaturated
 base palettes and value hierarchy), interaction and lifecycle (`deltaTime`,

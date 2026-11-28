@@ -448,13 +448,14 @@ window.TP = window.TP || {};
               mode: 'mascot',
               atmosphere: 'night',
               palette: {
-                // Antarctic ice scenario for `[ STACK // NEOFETCH ]`: pale polar-sky wall
-                // (#D6EAF6) over a brighter snow shelf (#F2FAFF), matching
-                // MascotStageBuilder's MASCOT_BACKDROP_HEX / MASCOT_FLOOR_HEX.
-                background: '#D6EAF6',
+                // Antarctic ice scenario for `[ STACK // NEOFETCH ]`: deep polar-ice wall
+                // (#25465B) over a glacier shelf (#4E819A), matching
+                // MascotStageBuilder's MASCOT_BACKDROP_HEX / MASCOT_FLOOR_HEX. Kept dark
+                // enough that the ASCII composite never floods the frame and washes Tux out.
+                background: '#25465B',
                 warmLight: '#9AD0F0',
                 warmCore: '#FF9F1C',
-                coolAmbient: '#F2FAFF',
+                coolAmbient: '#4E819A',
                 foliageAccent: '#2B4254',
                 cursorLight: '#9AD0F0'
               },

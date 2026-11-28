@@ -125,24 +125,28 @@ test('the temporary penguin font slider is gone and the penguin is fixed at 4px'
   assert.doesNotMatch(neofetch, /fontPx = 9\.5|fontPx = 8\.5|fontPx = 8\.0|fontPx = 8\.8/, 'no adaptive font sizes remain');
 });
 
-test('the penguin fallback ink is readable on the Antarctic ice stage', () => {
+test('the penguin fallback ink is crisp on the contained Antarctic ice stage', () => {
   const fallback = css.slice(css.indexOf('.penguin-fallback {'), css.indexOf('}', css.indexOf('.penguin-fallback {')));
-  // Dark polar ink over the pale snow shelf, lifted by a white halo (no flat green glow).
-  assert.match(fallback, /color:\s*#0E2A3C/, 'the art is drawn in dark polar ink');
+  // Frost-white ink with a dark seat shadow over the deep-ice stage (no flat green glow).
+  assert.match(fallback, /color:\s*#EAF7FF/, 'the art is drawn in frost-white ink');
   includesAll(fallback, [
     'text-shadow:',
-    'rgba(255, 255, 255, 0.95)',
-    'rgba(232, 246, 255, 0.85)'
+    'rgba(237, 250, 255, 0.95)',
+    'rgba(150, 214, 240, 0.45)',
+    'rgba(4, 16, 26, 0.85)'
   ]);
   assert.doesNotMatch(fallback, /color:\s*var\(--green\)/, 'the flat dark green ink stays gone');
+  assert.doesNotMatch(fallback, /color:\s*#0E2A3C/, 'the washed-out dark-on-pale ink is gone');
 
   // The live mascot keeps a cold CSS-only halo (engine shaders untouched).
   const halo = css.slice(css.indexOf('#penguin-stage canvas {'), css.indexOf('}', css.indexOf('#penguin-stage canvas {')));
-  includesAll(halo, ['filter: drop-shadow(', 'rgba(12, 32, 46, 0.42)', 'rgba(255, 255, 255, 0.75)']);
+  includesAll(halo, ['filter: drop-shadow(', 'rgba(6, 18, 28, 0.55)', 'rgba(196, 232, 248, 0.28)']);
 
-  // Stage substrate is ice, and the dark ink keeps real contrast against it.
+  // Stage substrate is contained deep ice: wall near-void, glacier shelf clearly above it.
   const stage = css.slice(css.indexOf('#penguin-stage {'), css.indexOf('}', css.indexOf('#penguin-stage {')));
-  includesAll(stage, ['#D6EAF6', '#F2FAFF', 'E4F3FB']);
+  includesAll(stage, ['#25465B', '#2B5165', '#3B6C82', '#4E819A']);
+  assert.doesNotMatch(stage, /#D6EAF6|#F2FAFF|#E4F3FB/, 'no pale ice regression that washed the penguin out');
+
   const relativeLuminance = (hex) => {
     const value = hex.replace('#', '');
     const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
@@ -153,8 +157,10 @@ test('the penguin fallback ink is readable on the Antarctic ice stage', () => {
     const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   };
-  assert.ok(contrast('#0E2A3C', '#D6EAF6') >= 7, 'fallback ink keeps at least AAA contrast on the ice wall');
-  assert.ok(contrast('#0E2A3C', '#F2FAFF') >= 7, 'fallback ink keeps at least AAA contrast on the snow shelf');
+  assert.ok(contrast('#EAF7FF', '#25465B') >= 7, 'fallback ink keeps AAA contrast on the ice wall');
+  assert.ok(contrast('#EAF7FF', '#4E819A') >= 3.5, 'fallback ink keeps >= AA-large contrast on the glacier shelf');
+  // The pale variant failed exactly this: white ink on near-white ice.
+  assert.ok(contrast('#EAF7FF', '#F2FAFF') < 1.5, 'the old pale stage could never support white ink');
 
   // Rotation and lifecycle stay owned by the engine adapter.
   includesAll(adapter, ["getObjectByName('TuxMascotRoot')", 'startMascotSpin']);

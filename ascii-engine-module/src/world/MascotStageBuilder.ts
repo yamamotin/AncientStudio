@@ -2,17 +2,29 @@ import * as THREE from 'three';
 import type { EngineConfig } from '../types';
 
 /**
- * Color-theory reference palette for `[ STACK // NEOFETCH ]` — Antarctic ice (`gelo polar`):
- * - Backdrop (`#D6EAF6` / `rgb(214, 234, 246)`): pale polar-sky ice blue, cool and light so Tux's
- *   charcoal-black coat (`#080D14`) reads as a crisp silhouette and his amber beak stays the only
- *   warm accent. The shader scales it down into a legible ASCII stipple band (0.50 – 0.74), never a
- *   flat white wall.
- * - Floor (`#F2FAFF` / `rgb(242, 250, 255)`): brighter snow/ice shelf that separates from the
- *   backdrop wall, keeps the contact shadow readable and lets the yaw-synced reflection quantize
- *   through the same ASCII pipeline.
+ * Color-theory reference palette for `[ STACK // NEOFETCH ]` — Antarctic ice (`gelo polar`),
+ * tuned so the ASCII composite never blows out. The single canonical pass lifts every geometry
+ * cell to `geomMinLuma` (~0.13–0.17) and then remaps it into 0.13→0.84, so a *pale* substrate
+ * saturates the whole frame with dense glyphs and Tux (white belly ≈ 0.78) disappears into it:
+ * that was the "washed out" look. The ice therefore stays cold but contained:
+ * - Backdrop (`#25465B` / `rgb(37, 70, 91)`): deep polar-ice blue. After the shader's
+ *   0.46–0.56 radiance band it lands at ≈0.12–0.15 raw (≈0.16–0.18 shaped): sparse stipple,
+ *   so Tux's silhouette keeps a calm, near-void wall behind it.
+ * - Floor (`#4E819A` / `rgb(78, 129, 154)`): glacier shelf, brighter than the wall but still
+ *   contained (≈0.23–0.28 raw, ≈0.25–0.29 shaped) so the contact shadow, the yaw-synced
+ *   reflection and the white belly (≈0.78) all keep their separation.
  */
-export const MASCOT_BACKDROP_HEX = '#D6EAF6';
-export const MASCOT_FLOOR_HEX = '#F2FAFF';
+export const MASCOT_BACKDROP_HEX = '#25465B';
+export const MASCOT_FLOOR_HEX = '#4E819A';
+
+/**
+ * Frost-mint silhouette tint for Tux's per-object outline shell. The contained ice keeps the
+ * frame calm, so value contrast alone would leave the obsidian coat (`#080D14`) sitting within
+ * ~0.03 shaped luma of the wall — one ASCII ramp step at best. The inverted-hull outline
+ * (`objectOutline.ts`) draws a cool, ice-lit edge around the mascot instead, which is what keeps
+ * body, outline, beak, feet and legs legible without brightening the stage back into a white-out.
+ */
+export const MASCOT_OUTLINE_HEX = '#BFE4F6';
 
 export interface BuiltMascotStage {
   scene: THREE.Scene;
@@ -48,13 +60,15 @@ const MASCOT_BACKDROP_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     // Calibrated directly for the single canonical ASCII composite pass:
-    // maps the pale Antarctic ice backdrop (#D6EAF6) into a calm, cold ASCII stipple
-    // (',' ':' ';') that stays below the snow floor value and above Tux's dark coat.
+    // maps the deep polar-ice backdrop (#25465B) into a calm, cold ASCII stipple
+    // (',' ':' ';'). Kept dark on purpose: the composite remaps geometry into
+    // 0.13→0.84, so a bright wall would flood the frame with dense glyphs and wash
+    // Tux out instead of framing his silhouette.
     vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
     vec2 focus = vec2(vWorldPos.x * 0.24, (vWorldPos.y - 1.05) * 0.34);
     float studioPool = exp(-dot(focus, focus) * 1.45);
     float verticalFalloff = clamp(1.04 - max(vWorldPos.y, 0.0) * 0.055, 0.88, 1.04);
-    float radianceScale = clamp(verticalFalloff * 0.585 + studioPool * 0.075, 0.505, 0.685);
+    float radianceScale = clamp(verticalFalloff * 0.500 + studioPool * 0.060, 0.460, 0.560);
 
     gl_FragColor = vec4(backdropBase * radianceScale, 1.0);
   }
@@ -133,10 +147,10 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
     vec3 floorBase = pow(max(uFloorColor, vec3(0.0001)), vec3(1.0 / 2.2));
     vec3 backdropBase = pow(max(uBackdropColor, vec3(0.0001)), vec3(1.0 / 2.2));
 
-    // 1. Calibrated #F2FAFF ice-shelf radiance so the canonical ASCII ramp selects horizontal weave ('~' '+' '_' '-')
+    // 1. Calibrated #4E819A glacier-shelf radiance so the canonical ASCII ramp selects horizontal weave ('~' '+' '_' '-')
     float radialDist = length(relXz * vec2(0.38, 0.46));
     float depthGrade = clamp((vWorldPos.z - uHorizonZ) / 6.2, 0.0, 1.0);
-    float floorLight = clamp(0.79 + depthGrade * 0.07 + exp(-radialDist * radialDist * 1.1) * 0.06, 0.78, 0.93);
+    float floorLight = clamp(0.50 + depthGrade * 0.05 + exp(-radialDist * radialDist * 1.1) * 0.04, 0.49, 0.60);
     vec3 color = floorBase * floorLight;
 
     // 2. Soft grounding shadow under Tux (5-tap PCF directional shadow + smooth elliptical contact AO)
@@ -206,7 +220,7 @@ const MASCOT_FLOOR_FRAGMENT_SHADER = /* glsl */ `
     color += uReflectRimColor * (fresnel * 0.018);
 
     float horizonSeam = smoothstep(uHorizonZ + 0.045, uHorizonZ - 0.005, vWorldPos.z);
-    color = mix(color, backdropBase * 0.60, horizonSeam);
+    color = mix(color, backdropBase * 0.50, horizonSeam);
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -229,8 +243,8 @@ function getMascotShadowPlaceholder(): THREE.DataTexture {
 /**
  * MascotStageBuilder: Builds the minimalist, pure-ASCII-calibrated 3D showcase stage
  * around Tux for `[ STACK // NEOFETCH ]`:
- * 1. Continuous backdrop plane (`#D6EAF6` / `rgb(214, 234, 246)`, Antarctic ice)
- * 2. Horizontal ground floor plane (`#F2FAFF` / `rgb(242, 250, 255)`, polar snow)
+ * 1. Continuous backdrop plane (`#25465B` / `rgb(37, 70, 91)`, deep Antarctic ice)
+ * 2. Horizontal ground floor plane (`#4E819A` / `rgb(78, 129, 154)`, glacier shelf)
  * 3. Balanced studio lighting (soft main key + front-right fill + cool hemi + discreet rim lights)
  * 4. Soft PCF + contact shadow & diffused yaw-synced floor reflection quantized through the single ASCII pipeline
  */
@@ -244,7 +258,7 @@ export class MascotStageBuilder {
 
     const horizonZ = -3.35;
 
-    // 1. Minimalist Continuous Backdrop Plane (#D6EAF6, Antarctic ice)
+    // 1. Minimalist Continuous Backdrop Plane (#25465B, deep Antarctic ice)
     const backdropMaterial = new THREE.ShaderMaterial({
       vertexShader: MASCOT_BACKDROP_VERTEX_SHADER,
       fragmentShader: MASCOT_BACKDROP_FRAGMENT_SHADER,
@@ -260,7 +274,7 @@ export class MascotStageBuilder {
     backdropMesh.userData.skipObjectOutline = true;
     scene.add(backdropMesh);
 
-    // 2. Minimalist Horizontal Floor Plane (#F2FAFF, polar snow) with Soft Shadow & Controlled Reflection
+    // 2. Minimalist Horizontal Floor Plane (#4E819A, glacier shelf) with Soft Shadow & Controlled Reflection
     const dummyShadowTex = getMascotShadowPlaceholder();
     const floorMaterial = new THREE.ShaderMaterial({
       vertexShader: MASCOT_FLOOR_VERTEX_SHADER,
