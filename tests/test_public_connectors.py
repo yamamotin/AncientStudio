@@ -163,6 +163,58 @@ REALISTIC_TJPR_RESULTS_HTML = f"""<!DOCTYPE html>
 </html>
 """
 
+REALISTIC_TJPR_NESTED_RESULTS_HTML = """<!DOCTYPE html>
+<html>
+  <body>
+    <div id="navigator">2 registros encontrados, mostrando de 1 até 2</div>
+    <script type="text/javascript">var noise = 'ignore me'; Opentip('#x','tooltip');</script>
+    <table class="resultTable" border="1">
+      <thead>
+        <tr>
+          <th>Processo</th>
+          <th>Partes</th>
+          <th>Distribuição</th>
+          <th>Classe Processual (Assunto Principal)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="even">
+          <td>
+            <a href="/projudi_consulta/processo/visualizar.do?processo=0000834-14.2022.8.16.0130">
+              <em class="normal">0000834-14.2022.8.16.0130</em>
+            </a>
+            <a href="javascript:copyToClipboard('0000834-14.2022.8.16.0130')">[copiar]</a>
+          </td>
+          <td>
+            <table class="form">
+              <tr><td>Exequente:</td><td>BANCO EXEMPLO S.A.</td></tr>
+              <tr><td>Executado:</td><td>JOAO DA SILVA</td></tr>
+            </table>
+          </td>
+          <td>04/02/2022</td>
+          <td>Cumprimento de sentença<br>(Honorários Advocatícios)</td>
+        </tr>
+        <tr class="odd">
+          <td>
+            <a href="/projudi_consulta/processo/visualizar.do?processo=0001234-57.2024.8.16.0130">
+              <em class="attention">0001234-57.2024.8.16.0130</em>
+            </a>
+          </td>
+          <td>
+            <table class="form">
+              <tr><td>Autor:</td><td>MARIA APARECIDA</td></tr>
+              <tr><td>Réu:</td><td>BANCO OUTRO</td></tr>
+            </table>
+          </td>
+          <td>18/03/2024</td>
+          <td>Procedimento Comum Cível<br>(Revisão Contratual)</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
+"""
+
 REALISTIC_TJPR_DETAIL_HTML = """<!DOCTYPE html>
 <html>
   <body>
@@ -387,6 +439,89 @@ class ProjudiRealScraperTestCase(unittest.TestCase):
         self.assertEqual(err.extra["site_key"], "6LcProjudiRealSiteKeyTJPR00000000000001")
         self.assertIn("consultaPublica.do?actionType=iniciar", err.extra["form_url"])
         self.assertTrue(len(err.extra["instructions"]) >= 3)
+
+    def test_parse_result_table_with_nested_form_table(self) -> None:
+        # The real PROJUDI resultTable has a nested <table class="form"> inside
+        # the Partes cell. The parser must not treat its tr/td as result rows.
+        from api.connectors.projudi import parse_projudi_search_result
+
+        parsed = parse_projudi_search_result(REALISTIC_TJPR_NESTED_RESULTS_HTML)
+        processos = parsed["processos"]
+        self.assertEqual(len(processos), 2)
+        self.assertEqual(parsed["total_navigator"], 2)
+
+        first = processos[0]
+        self.assertEqual(first["numero_processo"], "0000834-14.2022.8.16.0130")
+        self.assertEqual(first["classe_processual"], "Cumprimento de sentença")
+        self.assertEqual(first["assunto_principal"], "Honorários Advocatícios")
+        self.assertEqual(first["data_distribuicao"], "2022-02-04")
+        self.assertEqual(
+            first["url_detalhe"],
+            "https://consulta.tjpr.jus.br/projudi_consulta/processo/visualizar.do"
+            "?processo=0000834-14.2022.8.16.0130",
+        )
+        self.assertEqual(
+            first["partes_por_polo"],
+            {"Exequente": ["BANCO EXEMPLO S.A."], "Executado": ["JOAO DA SILVA"]},
+        )
+        self.assertEqual(first["partes"][0]["polo"], "ATIVO")
+        self.assertEqual(first["partes"][1]["polo"], "PASSIVO")
+
+        second = processos[1]
+        self.assertEqual(second["numero_processo"], "0001234-57.2024.8.16.0130")
+        self.assertEqual(second["classe_processual"], "Procedimento Comum Cível")
+        self.assertEqual(second["assunto_principal"], "Revisão Contratual")
+        self.assertEqual(second["data_distribuicao"], "2024-03-18")
+        self.assertEqual(
+            second["partes_por_polo"],
+            {"Autor": ["MARIA APARECIDA"], "Réu": ["BANCO OUTRO"]},
+        )
+
+    def test_parse_result_table_multiple_parties_per_role_and_noise(self) -> None:
+        # Multiple names per role via <ul><li>, <em class="attention">, scripts
+        # and Opentip tooltips must not corrupt the extraction.
+        from api.connectors.projudi import parse_projudi_search_result
+
+        html = """<!DOCTYPE html><html><body>
+        <div id="navigator">3 registros encontrados</div>
+        <script type="text/javascript">var noise = 'ignore me'; Opentip('#x','tooltip');</script>
+        <table class="resultTable" border="1">
+         <thead><tr><th>Processo</th><th>Partes</th><th>Distribuição</th><th>Classe Processual (Assunto Principal)</th></tr></thead>
+         <tbody>
+          <tr class="even">
+           <td><a href="/projudi_consulta/processo/visualizar.do?processo=0070000-01.2021.8.16.0001"><em class="attention">0070000-01.2021.8.16.0001</em></a></td>
+           <td>
+            <table class="form">
+             <tr><td>Exequente:</td><td><ul><li>BANCO ALFA S.A.</li><li>BANCO BETA S.A.</li></ul></td></tr>
+             <tr><td>Executado:</td><td><ul><li>PEDRO</li><li>PAULO</li></ul></td></tr>
+             <tr><td>Terceiro:</td><td><ul><li>TERCEIRO INTERESSADO</li></ul></td></tr>
+            </table>
+           </td>
+           <td>01/01/2021</td>
+           <td>Apelação<br>(Direito Privado)</td>
+          </tr>
+         </tbody>
+        </table>
+        </body></html>"""
+
+        parsed = parse_projudi_search_result(html)
+        self.assertEqual(len(parsed["processos"]), 1)
+        proc = parsed["processos"][0]
+        self.assertEqual(proc["numero_processo"], "0070000-01.2021.8.16.0001")
+        self.assertEqual(proc["classe_processual"], "Apelação")
+        self.assertEqual(proc["assunto_principal"], "Direito Privado")
+        self.assertEqual(proc["data_distribuicao"], "2021-01-01")
+        self.assertEqual(
+            proc["partes_por_polo"],
+            {
+                "Exequente": ["BANCO ALFA S.A.", "BANCO BETA S.A."],
+                "Executado": ["PEDRO", "PAULO"],
+                "Terceiro": ["TERCEIRO INTERESSADO"],
+            },
+        )
+        # Noise text must not leak into the structured output
+        serialized = json.dumps(parsed, ensure_ascii=False)
+        self.assertNotIn("ignore me", serialized)
 
     def test_upstream_failure_raises_503_and_never_returns_fake_cases(self) -> None:
         svc = ProjudiConnectorService(

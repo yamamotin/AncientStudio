@@ -498,7 +498,19 @@ class ProjudiBootstrapHtmlParser(HTMLParser):
 
 
 class ProjudiPublicHtmlParser(HTMLParser):
-    """Stdlib HTML parser for PROJUDI TJPR ``table.resultTable`` and ``#navigator``."""
+    """Stdlib HTML parser for PROJUDI TJPR ``table.resultTable`` and ``#navigator``.
+
+    Handles the real PROJUDI TJPR result markup:
+    - ``<table class="resultTable">`` with ``<thead>`` header row and ``<tbody>``
+      result rows (``<tr class="even">`` / ``<tr class="odd">`` or any result ``<tr>``).
+    - The ``Partes`` cell contains a **nested** ``<table class="form">`` with one
+      row per role (``Exequente:``, ``Executado:``, ...) and ``<ul><li>`` name lists.
+      The parser captures the nested table's text as part of the cell instead of
+      treating its ``<tr>``/``<td>`` as result-table rows (which previously dropped
+      the process-number cell and yielded 0 processes).
+    - Ignores auxiliary noise: ``<script>`` blocks, ``Opentip`` tooltips and
+      ``javascript:copyToClipboard(...)`` links.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -516,6 +528,11 @@ class ProjudiPublicHtmlParser(HTMLParser):
         self._current_row_links: list[list[str]] = []
         self._current_row_is_header = False
         self._current_row_class = ""
+        # Depth of nested tables found *inside* the current cell (e.g. the
+        # ``<table class="form">`` in the Partes cell). While > 0, ``tr``/``td``
+        # tags belong to the nested table and are captured as cell text only.
+        self._nested_table_depth = 0
+        self._in_script = False
 
         self.headers: list[str] = []
         self.rows: list[list[str]] = []
@@ -529,6 +546,9 @@ class ProjudiPublicHtmlParser(HTMLParser):
         self.contains_captcha_challenge = False
         self.site_key: str | None = None
         self.has_search_form = False
+
+    def _is_result_table_depth(self) -> bool:
+        return self._in_result_table and self._table_depth == self._result_table_depth
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = {k.lower(): (v or "") for k, v in attrs}
@@ -560,13 +580,38 @@ class ProjudiPublicHtmlParser(HTMLParser):
             elif self._in_navigator and tag_l in {"div", "span"}:
                 self._navigator_depth += 1
 
+        if self._in_script:
+            return
+        if tag_l == "script":
+            self._in_script = True
+            return
+
+        # Inside a cell, a nested <table> (the Partes "form" table) is captured
+        # as cell text; its tr/td must not start new result rows/cells.
+        if self._in_cell and tag_l == "table":
+            self._nested_table_depth += 1
+            self._cell_buf.append("\n")
+            return
+
         if tag_l == "table":
             self._table_depth += 1
             cls_tokens = attr_dict.get("class", "").split()
             if "resultTable" in cls_tokens or "resulttable" in attr_dict.get("class", "").lower():
                 self._in_result_table = True
                 self._result_table_depth = self._table_depth
-        elif tag_l == "tr" and self._table_depth > 0:
+            return
+
+        if self._in_cell and self._nested_table_depth > 0:
+            # Nested-table structural tags inside the cell: treat as text separators.
+            if tag_l in {"tr", "td", "th", "br", "li", "p", "div"}:
+                self._cell_buf.append("\n")
+            elif tag_l == "a":
+                href = attr_dict.get("href", "").strip()
+                if href and not href.lower().startswith("javascript:"):
+                    self._cell_links.append(href)
+            return
+
+        if tag_l == "tr" and self._table_depth > 0:
             self._current_row = []
             self._current_row_links = []
             self._current_row_is_header = False
@@ -586,6 +631,8 @@ class ProjudiPublicHtmlParser(HTMLParser):
                 self._cell_links.append(href)
 
     def handle_data(self, data: str) -> None:
+        if self._in_script:
+            return
         if data.strip():
             self.page_text_chunks.append(data)
         if "digite os caracteres da imagem" in data.lower():
@@ -597,6 +644,10 @@ class ProjudiPublicHtmlParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag_l = tag.lower()
+        if tag_l == "script":
+            self._in_script = False
+            return
+
         if self._in_navigator and tag_l in {"div", "span"}:
             self._navigator_depth -= 1
             if self._navigator_depth <= 0:
@@ -605,6 +656,19 @@ class ProjudiPublicHtmlParser(HTMLParser):
                 if nav:
                     self.navigator_text = nav
                 self._navigator_buf = []
+
+        # Inside a cell with a nested table open, structural end tags belong to
+        # the nested table: capture them as text separators instead of closing
+        # the outer cell/row.
+        if self._in_cell and self._nested_table_depth > 0 and tag_l in {"td", "th", "tr"}:
+            self._cell_buf.append("\n")
+            return
+
+        # Closing a nested table inside the current cell: stop capturing as text.
+        if self._in_cell and self._nested_table_depth > 0 and tag_l == "table":
+            self._nested_table_depth -= 1
+            self._cell_buf.append("\n")
+            return
 
         if tag_l in {"td", "th"} and self._in_cell:
             self._in_cell = False
@@ -615,7 +679,7 @@ class ProjudiPublicHtmlParser(HTMLParser):
             self._current_row_links.append(list(self._cell_links))
         elif tag_l == "tr" and self._current_row:
             if any(cell for cell in self._current_row):
-                if self._in_result_table:
+                if self._is_result_table_depth():
                     if self._current_row_is_header and not self.headers:
                         self.headers = [c.replace("\n", " ") for c in self._current_row]
                     elif not self._current_row_is_header:
@@ -631,7 +695,7 @@ class ProjudiPublicHtmlParser(HTMLParser):
             self._current_row = []
             self._current_row_links = []
         elif tag_l == "table" and self._table_depth > 0:
-            if self._in_result_table and self._table_depth == self._result_table_depth:
+            if self._is_result_table_depth():
                 self._in_result_table = False
                 self._result_table_depth = 0
             self._table_depth -= 1

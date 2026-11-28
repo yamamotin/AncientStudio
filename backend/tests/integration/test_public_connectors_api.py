@@ -38,19 +38,32 @@ TJPR_RESULTS_FIXTURE = f"""<!DOCTYPE html>
 <html>
   <body>
     <div id="navigator">1 registro encontrado, mostrando de 1 até 1</div>
-    <table class="resultTable">
-      <tr>
-        <th>Processo</th>
-        <th>Partes</th>
-        <th>Distribuição</th>
-        <th>Classe Processual (Assunto Principal)</th>
-      </tr>
-      <tr>
-        <td>{VALID_CNJ}</td>
-        <td>Autor: MARIA APARECIDA (CPF 111.444.777-35)<br/>Réu: BANCO EXEMPLO S.A.</td>
-        <td>18/03/2024</td>
-        <td>Procedimento Comum Cível (Revisão Contratual)</td>
-      </tr>
+    <table class="resultTable" border="1">
+      <thead>
+        <tr>
+          <th>Processo</th>
+          <th>Partes</th>
+          <th>Distribuição</th>
+          <th>Classe Processual (Assunto Principal)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="odd">
+          <td>
+            <a href="/projudi_consulta/processo/visualizar.do?processo={VALID_CNJ}">
+              <em class="normal">{VALID_CNJ}</em>
+            </a>
+          </td>
+          <td>
+            <table class="form">
+              <tr><td>Autor:</td><td>MARIA APARECIDA</td></tr>
+              <tr><td>Réu:</td><td>BANCO EXEMPLO S.A.</td></tr>
+            </table>
+          </td>
+          <td>18/03/2024</td>
+          <td>Procedimento Comum Cível<br>(Revisão Contratual)</td>
+        </tr>
+      </tbody>
     </table>
   </body>
 </html>
@@ -246,6 +259,38 @@ def test_projudi_enforces_captcha_required_scrapes_real_html_and_never_mocks() -
     rdata = ok_resumo.json()["data"]
     assert rdata["status"] == "ready_for_llm"
     assert rdata["metricas"]["possui_tutela_urgencia"] is True
+
+
+def test_projudi_consulta_extracts_nested_result_table() -> None:
+    # Real PROJUDI markup: resultTable with a nested <table class="form"> in the
+    # Partes cell. The direct consultation must extract the process record with
+    # parties grouped by role, distribution date and classe/assunto split.
+    client = _build_client()
+
+    resp = client.post(
+        "/api/v1/projudi/processos/consulta",
+        json={"cpf": "111.444.777-35", "tribunal": "TJPR"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["modo_execucao"] == "raspagem_real_projudi_tjpr"
+    assert data["compliance"]["dados_sinteticos_ou_mock"] is False
+    assert data["total_processos"] == 1
+
+    proc = data["processos"][0]
+    assert proc["numero_processo"] == VALID_CNJ
+    assert proc["classe_processual"] == "Procedimento Comum Cível"
+    assert proc["assunto_principal"] == "Revisão Contratual"
+    assert proc["data_distribuicao"] == "2024-03-18"
+    assert proc["partes_por_polo"] == {
+        "Autor": ["MARIA APARECIDA"],
+        "Réu": ["BANCO EXEMPLO S.A."],
+    }
+    assert proc["partes"][0]["polo"] == "ATIVO"
+    assert proc["partes"][1]["polo"] == "PASSIVO"
+    assert proc["url_detalhe"].endswith(f"visualizar.do?processo={VALID_CNJ}")
+    # No raw CPF leak in the response body
+    assert "111.444.777-35" not in resp.text
 
 
 def test_projudi_upstream_unavailable_returns_503_without_fake_fallback() -> None:
